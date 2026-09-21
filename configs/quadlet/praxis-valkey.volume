@@ -1,0 +1,5 @@
+[Unit]
+Description=Persistent data for the Praxis Valkey backend
+
+[Volume]
+VolumeName=praxis-valkey-data

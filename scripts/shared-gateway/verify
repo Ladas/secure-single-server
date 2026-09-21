@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+REPO_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+readonly REPO_DIR
+
+mode="${1:-}"
+case "${mode}" in
+  --local)
+    "${REPO_DIR}/tests/shared-gateway-static.sh"
+    "${REPO_DIR}/tests/shared-gateway-image.sh"
+    ;;
+  --host)
+    [[ "${EUID}" -eq 0 ]] || { printf 'error: --host requires root\n' >&2; exit 1; }
+    "${REPO_DIR}/tests/shared-gateway-host.sh"
+    ;;
+  --help|-h)
+    printf 'usage: scripts/shared-gateway/verify --local | --host\n'
+    ;;
+  '')
+    if [[ "$(uname -s)" == "Linux" && "${EUID}" -eq 0 && -f /etc/praxis/shared-gateway.profile ]]; then
+      "${REPO_DIR}/tests/shared-gateway-host.sh"
+    else
+      "${REPO_DIR}/tests/shared-gateway-static.sh"
+      "${REPO_DIR}/tests/shared-gateway-image.sh"
+    fi
+    ;;
+  *) printf 'error: unknown option: %s\n' "${mode}" >&2; exit 2 ;;
+esac

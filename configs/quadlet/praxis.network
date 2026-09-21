@@ -1,0 +1,6 @@
+[Unit]
+Description=Private network for secure single-server Praxis services
+
+[Network]
+NetworkName=praxis-private
+Driver=bridge

@@ -1,0 +1,11 @@
+# Merge the applicable fields into ~/.codex/config.toml on the RHEL server.
+# Keep the placeholder non-secret: Praxis replaces it with the provider key.
+
+[model_providers.praxis]
+name = "Praxis"
+base_url = "http://127.0.0.1:8080/v1"
+env_key = "PRAXIS_PLACEHOLDER_KEY"
+wire_api = "responses"
+
+# Example shell environment:
+#   export PRAXIS_PLACEHOLDER_KEY=local-placeholder

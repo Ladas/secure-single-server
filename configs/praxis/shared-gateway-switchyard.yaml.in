@@ -1,0 +1,106 @@
+# Switchyard profile. Port 8080 keeps the ordinary OpenAI-compatible chain
+# for Responses and direct Chat requests. Port 8082 is Chat-Completions-only
+# Switchyard because fail-closed Switchyard rejects unsupported request shapes.
+
+admin:
+  address: "127.0.0.1:9901"
+
+telemetry:
+  sampling_rate: 1.0
+
+listeners:
+  - name: openai
+    address: "0.0.0.0:8080"
+    filter_chains: [openai]
+  - name: anthropic
+    address: "0.0.0.0:8081"
+    filter_chains: [anthropic]
+  - name: switchyard-chat
+    address: "0.0.0.0:8082"
+    filter_chains: [switchyard-chat]
+
+filter_chains:
+  # The ordinary chains are imported by the installer from shared-gateway.yaml.
+  # @@BASELINE_FILTER_CHAINS@@
+
+  - name: switchyard-chat
+    filters:
+      - filter: request_id
+      - filter: access_log
+      - filter: headers
+        request_remove:
+          - Authorization
+          - Proxy-Authorization
+          - Forwarded
+          - X-Forwarded-For
+          - X-Forwarded-Host
+          - X-Forwarded-Proto
+          - X-Real-IP
+          - Via
+          - X-App-Id
+          - X-Cluster
+          - X-Model
+          - X-Route
+          - X-Selected-Model
+          - X-Switchyard-Session-Id
+          - X-Tier
+      - filter: rate_limit
+        mode: global
+        rate: 2
+        burst: 10
+      - filter: token_rate_limit
+        backend:
+          kind: memory
+        rules:
+          - name: switchyard-rolling-day
+            algorithm: sliding_window
+            window: "24h"
+            capacity: 1000000
+            reserved_tokens: 10000
+            reservation_timeout: "300s"
+      # Reserve before the judge call. A local token 429 therefore consumes
+      # neither judge nor target capacity.
+      - filter: switchyard_route
+        judge:
+          endpoint: "https://api.openai.com/v1/chat/completions"
+          model: "@@JUDGE_MODEL@@"
+          auth:
+            value_env: SWITCHYARD_JUDGE_API_KEY
+          timeout_ms: 10000
+          verify_tls: true
+        threshold: 0.8
+        targets:
+          weak:
+            cluster: weak
+            model: "@@WEAK_MODEL@@"
+          strong:
+            cluster: strong
+            model: "@@STRONG_MODEL@@"
+        session_floor: disabled
+        on_failure: closed
+      - filter: token_count
+        provider: openai
+      - filter: credential_injection
+        clusters:
+          - name: weak
+            header: Authorization
+            header_prefix: "Bearer "
+            env_var: OPENAI_API_KEY
+          - name: strong
+            header: Authorization
+            header_prefix: "Bearer "
+            env_var: OPENAI_API_KEY
+      - filter: load_balancer
+        clusters:
+          - name: weak
+            endpoints: ["api.openai.com:443"]
+            http:
+              authority: "api.openai.com"
+            tls:
+              sni: "api.openai.com"
+          - name: strong
+            endpoints: ["api.openai.com:443"]
+            http:
+              authority: "api.openai.com"
+            tls:
+              sni: "api.openai.com"

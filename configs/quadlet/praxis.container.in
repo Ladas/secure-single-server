@@ -1,0 +1,32 @@
+[Unit]
+Description=Secure single-server Praxis gateway
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=@@PRAXIS_IMAGE@@
+ContainerName=praxis-shared-gateway
+Pull=never
+User=1001
+Group=1001
+UserNS=keep-id:uid=1001,gid=1001
+Network=praxis.network
+PublishPort=127.0.0.1:8080:8080
+PublishPort=127.0.0.1:8081:8081
+Volume=/etc/praxis/shared-gateway.yaml:/etc/praxis/shared-gateway.yaml:ro
+Secret=@@OPENAI_SECRET@@,type=env,target=OPENAI_API_KEY
+Secret=@@ANTHROPIC_SECRET@@,type=env,target=ANTHROPIC_API_KEY
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+HealthOnFailure=kill
+Exec=-c /etc/praxis/shared-gateway.yaml
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=900
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

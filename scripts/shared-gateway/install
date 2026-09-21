@@ -1,0 +1,368 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+REPO_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+readonly REPO_DIR
+# shellcheck source=scripts/shared-gateway/lib.sh
+source "${SCRIPT_DIR}/lib.sh"
+
+profile="memory"
+praxis_image="${DEFAULT_PRAXIS_IMAGE}"
+valkey_image=""
+openai_secret=""
+anthropic_secret=""
+judge_secret=""
+valkey_url_secret=""
+valkey_acl_secret=""
+judge_model=""
+weak_model=""
+strong_model=""
+prepare_only=0
+replace=0
+
+usage() {
+  cat <<'EOF'
+Usage:
+  sudo scripts/shared-gateway/install --prepare
+  sudo scripts/shared-gateway/install --profile memory \
+    --openai-secret NAME --anthropic-secret NAME [OPTIONS]
+  sudo scripts/shared-gateway/install --profile switchyard \
+    --openai-secret NAME --anthropic-secret NAME --judge-secret NAME \
+    --judge-model MODEL --weak-model MODEL --strong-model MODEL [OPTIONS]
+  sudo scripts/shared-gateway/install --profile valkey \
+    --openai-secret NAME --anthropic-secret NAME \
+    --valkey-image IMAGE@sha256:DIGEST \
+    --valkey-url-secret NAME --valkey-acl-secret NAME [OPTIONS]
+
+Options:
+  --praxis-image IMAGE@sha256:DIGEST  Override the reviewed Praxis digest.
+  --replace                          Replace a same-profile managed install.
+EOF
+}
+
+while (( "$#" )); do
+  case "$1" in
+    --profile) profile="${2:-}"; shift 2 ;;
+    --praxis-image) praxis_image="${2:-}"; shift 2 ;;
+    --valkey-image) valkey_image="${2:-}"; shift 2 ;;
+    --openai-secret) openai_secret="${2:-}"; shift 2 ;;
+    --anthropic-secret) anthropic_secret="${2:-}"; shift 2 ;;
+    --judge-secret) judge_secret="${2:-}"; shift 2 ;;
+    --valkey-url-secret) valkey_url_secret="${2:-}"; shift 2 ;;
+    --valkey-acl-secret) valkey_acl_secret="${2:-}"; shift 2 ;;
+    --judge-model) judge_model="${2:-}"; shift 2 ;;
+    --weak-model) weak_model="${2:-}"; shift 2 ;;
+    --strong-model) strong_model="${2:-}"; shift 2 ;;
+    --prepare) prepare_only=1; shift ;;
+    --replace) replace=1; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; die "unknown argument: $1" ;;
+  esac
+done
+
+require_root
+for command in awk chmod chown cmp getenforce getent grep head install loginctl podman restorecon runuser sed semanage sha256sum sleep sort ss stat systemctl useradd usermod; do
+  require_command "${command}"
+done
+
+validate_platform() {
+  [[ "$(uname -s)" == "Linux" ]] || die "shared-gateway installation requires Linux"
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  [[ "${ID:-}" == "rhel" && "${VERSION_ID:-}" == 9* ]] ||
+    die "supported host is RHEL 9; found ${PRETTY_NAME:-unknown}"
+  case "$(uname -m)" in
+    x86_64|aarch64) ;;
+    *) die "unsupported host architecture: $(uname -m)" ;;
+  esac
+  [[ -f /sys/fs/cgroup/cgroup.controllers ]] || die "cgroups v2 is required"
+  [[ "$(getenforce)" == "Enforcing" ]] || die "SELinux must be enforcing"
+  local podman_version
+  podman_version="$(podman version --format '{{.Client.Version}}')"
+  [[ "$(printf '4.6\n%s\n' "${podman_version}" | sort -V | head -n 1)" == "4.6" ]] ||
+    die "Podman 4.6 or newer is required; found ${podman_version}"
+}
+
+next_subid_start() {
+  awk -F: '
+    BEGIN { maximum = 99999 }
+    NF >= 3 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {
+      endpoint = $2 + $3 - 1
+      if (endpoint > maximum) maximum = endpoint
+    }
+    END { print maximum + 1 }
+  ' /etc/subuid /etc/subgid
+}
+
+ensure_service_account() {
+  local created_account=0
+  if getent passwd "${SERVICE_USER}" >/dev/null; then
+    local shell
+    shell="$(getent passwd "${SERVICE_USER}" | awk -F: '{print $7}')"
+    [[ "${shell}" == "/usr/sbin/nologin" || "${shell}" == "/sbin/nologin" ]] ||
+      die "existing ${SERVICE_USER} account has a login shell: ${shell}"
+  else
+    useradd --system --create-home --home-dir "/var/lib/${SERVICE_USER}" \
+      --shell /usr/sbin/nologin "${SERVICE_USER}"
+    created_account=1
+  fi
+
+  if ! grep -q "^${SERVICE_USER}:" /etc/subuid || ! grep -q "^${SERVICE_USER}:" /etc/subgid; then
+    local start end
+    start="$(next_subid_start)"
+    end="$(( start + 65535 ))"
+    grep -q "^${SERVICE_USER}:" /etc/subuid || usermod --add-subuids "${start}-${end}" "${SERVICE_USER}"
+    grep -q "^${SERVICE_USER}:" /etc/subgid || usermod --add-subgids "${start}-${end}" "${SERVICE_USER}"
+  fi
+
+  local uid gid
+  uid="$(service_uid)"
+  gid="$(service_gid)"
+  local home home_uid home_gid home_mode other_primary group_entry members member
+  local -a group_members
+  home="$(service_home)"
+  [[ -d "${home}" ]] || die "service account home is not a directory: ${home}"
+  if (( created_account == 1 )); then
+    chown "${uid}:${gid}" "${home}"
+    chmod 0700 "${home}"
+  fi
+  home_uid="$(stat -c '%u' "${home}")"
+  home_gid="$(stat -c '%g' "${home}")"
+  home_mode="$(stat -c '%a' "${home}")"
+  [[ "${home_uid}" == "${uid}" && "${home_gid}" == "${gid}" ]] ||
+    die "service account home must be owned by ${uid}:${gid}: ${home}"
+  [[ "${home_mode}" == "700" ]] || die "service account home must have mode 0700: ${home}"
+
+  other_primary="$(getent passwd | awk -F: -v uid="${uid}" -v gid="${gid}" '$3 != uid && $4 == gid { print $1 }')"
+  [[ -z "${other_primary}" ]] ||
+    die "another account has the ${SERVICE_USER} primary group: ${other_primary}"
+  group_entry="$(getent group "${gid}")" || die "service account primary group ${gid} does not exist"
+  members="$(awk -F: '{print $4}' <<<"${group_entry}")"
+  IFS=',' read -r -a group_members <<<"${members}"
+  for member in "${group_members[@]}"; do
+    [[ -z "${member}" || "${member}" == "${SERVICE_USER}" ]] ||
+      die "another account belongs to the ${SERVICE_USER} group: ${member}"
+  done
+
+  loginctl enable-linger "${SERVICE_USER}"
+  systemctl start "user@${uid}.service"
+  install -d -o root -g "${gid}" -m 0750 "${CONFIG_DIR}"
+  install -d -o root -g "${gid}" -m 0750 "/etc/containers/systemd/users/${uid}"
+}
+
+validate_platform
+ensure_service_account
+
+if (( prepare_only == 1 )); then
+  note "prepared ${SERVICE_USER}; create versioned secrets with scripts/shared-gateway/secret-set"
+  exit 0
+fi
+
+case "${profile}" in
+  memory|switchyard|valkey) ;;
+  *) die "profile must be memory, switchyard, or valkey" ;;
+esac
+
+validate_digest_image "${praxis_image}"
+[[ -n "${openai_secret}" ]] || die "--openai-secret is required"
+[[ -n "${anthropic_secret}" ]] || die "--anthropic-secret is required"
+require_secret "${openai_secret}"
+require_secret "${anthropic_secret}"
+
+if [[ -f "${PROFILE_FILE}" ]]; then
+  installed_profile="$(<"${PROFILE_FILE}")"
+  [[ "${installed_profile}" == "${profile}" ]] ||
+    die "profile ${installed_profile} is installed; uninstall it before selecting ${profile}"
+  verify_managed_manifest
+fi
+
+case "${profile}" in
+  switchyard)
+    [[ -n "${judge_secret}" && -n "${judge_model}" && -n "${weak_model}" && -n "${strong_model}" ]] ||
+      die "switchyard requires judge secret/model and weak/strong models"
+    require_secret "${judge_secret}"
+    validate_model_name "${judge_model}"
+    validate_model_name "${weak_model}"
+    validate_model_name "${strong_model}"
+    ;;
+  valkey)
+    [[ -n "${valkey_image}" && -n "${valkey_url_secret}" && -n "${valkey_acl_secret}" ]] ||
+      die "valkey requires its image, URL secret, and ACL secret"
+    validate_digest_image "${valkey_image}"
+    require_secret "${valkey_url_secret}"
+    require_secret "${valkey_acl_secret}"
+    ;;
+esac
+
+if [[ -f "${PROFILE_FILE}" && "${replace}" -ne 1 ]]; then
+  note "profile ${profile} is already installed; use --replace for a reviewed update"
+  exit 0
+fi
+
+for port in 8080 8081; do
+  if [[ ! -f "${PROFILE_FILE}" ]] && ss -H -ltn | awk '{print $4}' | grep -Eq ":${port}$"; then
+    die "host TCP port ${port} is already in use"
+  fi
+done
+if [[ "${profile}" == "switchyard" && ! -f "${PROFILE_FILE}" ]] &&
+   ss -H -ltn | awk '{print $4}' | grep -Eq ':8082$'; then
+  die "host TCP port 8082 is already in use"
+fi
+
+as_service podman pull "${praxis_image}" >/dev/null
+as_service podman image inspect "${praxis_image}" >/dev/null
+
+expected_arch="$(oci_architecture "$(uname -m)")"
+praxis_arch="$(as_service podman image inspect "${praxis_image}" --format '{{.Architecture}}')"
+praxis_os="$(as_service podman image inspect "${praxis_image}" --format '{{.Os}}')"
+require_linux_image_platform Praxis "${praxis_os}" "${praxis_arch}" "${expected_arch}"
+[[ "$(as_service podman image inspect "${praxis_image}" --format '{{.Config.User}}')" == "1001" ]] ||
+  die "Praxis image must declare runtime user 1001"
+[[ "$(as_service podman image inspect "${praxis_image}" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" == \
+   "https://github.com/praxis-proxy/experimental" ]] ||
+  die "Praxis image source label is not praxis-proxy/experimental"
+if [[ "${profile}" == "valkey" ]]; then
+  as_service podman pull "${valkey_image}" >/dev/null
+  as_service podman image inspect "${valkey_image}" >/dev/null
+  valkey_arch="$(as_service podman image inspect "${valkey_image}" --format '{{.Architecture}}')"
+  valkey_os="$(as_service podman image inspect "${valkey_image}" --format '{{.Os}}')"
+  require_linux_image_platform Valkey "${valkey_os}" "${valkey_arch}" "${expected_arch}"
+  [[ "$(as_service podman image inspect "${valkey_image}" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" == \
+     "https://github.com/valkey-io/valkey" ]] ||
+    die "Valkey image source label is not valkey-io/valkey"
+  [[ "$(as_service podman run --rm --entrypoint id "${valkey_image}" -u valkey)" == "999" ]] ||
+    die "Valkey image must provide the valkey account as UID 999"
+  [[ "$(as_service podman run --rm --entrypoint id "${valkey_image}" -g valkey)" == "999" ]] ||
+    die "Valkey image must provide the valkey group as GID 999"
+fi
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "${tmp_dir}"' EXIT
+
+case "${profile}" in
+  memory)
+    cp "${REPO_DIR}/configs/praxis/shared-gateway.yaml" "${tmp_dir}/shared-gateway.yaml"
+    render_template "${REPO_DIR}/configs/quadlet/praxis.container.in" "${tmp_dir}/praxis.container" \
+      PRAXIS_IMAGE "${praxis_image}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}"
+    ;;
+  valkey)
+    cp "${REPO_DIR}/configs/praxis/shared-gateway-valkey.yaml" "${tmp_dir}/shared-gateway.yaml"
+    cp "${REPO_DIR}/configs/valkey/valkey.conf" "${tmp_dir}/valkey.conf"
+    render_template "${REPO_DIR}/configs/quadlet/praxis-valkey-backend.container.in" "${tmp_dir}/praxis.container" \
+      PRAXIS_IMAGE "${praxis_image}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}" \
+      VALKEY_URL_SECRET "${valkey_url_secret}"
+    render_template "${REPO_DIR}/configs/quadlet/praxis-valkey.container.in" "${tmp_dir}/praxis-valkey.container" \
+      VALKEY_IMAGE "${valkey_image}" VALKEY_ACL_SECRET "${valkey_acl_secret}"
+    cp "${REPO_DIR}/configs/quadlet/praxis-valkey.volume" "${tmp_dir}/praxis-valkey.volume"
+    ;;
+  switchyard)
+    awk '
+      FNR == NR {
+        if ($0 == "filter_chains:") { capture = 1; next }
+        if (capture) baseline = baseline $0 ORS
+        next
+      }
+      /# @@BASELINE_FILTER_CHAINS@@/ { printf "%s", baseline; next }
+      { print }
+    ' "${REPO_DIR}/configs/praxis/shared-gateway.yaml" \
+      "${REPO_DIR}/configs/praxis/shared-gateway-switchyard.yaml.in" >"${tmp_dir}/switchyard.yaml.in"
+    render_template "${tmp_dir}/switchyard.yaml.in" "${tmp_dir}/shared-gateway.yaml" \
+      JUDGE_MODEL "${judge_model}" WEAK_MODEL "${weak_model}" STRONG_MODEL "${strong_model}"
+    render_template "${REPO_DIR}/configs/quadlet/praxis-switchyard.container.in" "${tmp_dir}/praxis.container" \
+      PRAXIS_IMAGE "${praxis_image}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}" \
+      JUDGE_SECRET "${judge_secret}"
+    ;;
+esac
+
+cp "${REPO_DIR}/configs/quadlet/praxis.network" "${tmp_dir}/praxis.network"
+
+install_managed() {
+  local source="$1" destination="$2" mode="$3" owner="$4" group="$5"
+  if [[ -e "${destination}" && "${replace}" -ne 1 ]] && ! cmp -s "${source}" "${destination}"; then
+    die "refusing to overwrite drifted file without --replace: ${destination}"
+  fi
+  install -o "${owner}" -g "${group}" -m "${mode}" "${source}" "${destination}.new"
+  mv -f "${destination}.new" "${destination}"
+}
+
+uid="$(service_uid)"
+gid="$(service_gid)"
+quadlet_dir="/etc/containers/systemd/users/${uid}"
+install_managed "${tmp_dir}/shared-gateway.yaml" "${CONFIG_DIR}/shared-gateway.yaml" 0640 root "${gid}"
+install_managed "${tmp_dir}/praxis.network" "${quadlet_dir}/praxis.network" 0640 root "${gid}"
+install_managed "${tmp_dir}/praxis.container" "${quadlet_dir}/praxis.container" 0640 root "${gid}"
+
+install_container_file_label() {
+  local path="$1" regex
+  regex="$(selinux_path_regex "${path}")"
+  if ! semanage fcontext -a -t container_file_t "${regex}" 2>/dev/null; then
+    if [[ -f "${PROFILE_FILE}" && "${replace}" -eq 1 ]]; then
+      semanage fcontext -m -t container_file_t "${regex}"
+    else
+      die "an SELinux file-context rule already exists for ${path}; refusing to replace an unowned rule"
+    fi
+  fi
+  restorecon -F "${path}"
+  stat -c '%C' "${path}" | grep -q ':container_file_t:' ||
+    die "SELinux did not apply container_file_t to ${path}"
+}
+
+install_container_file_label "${CONFIG_DIR}/shared-gateway.yaml"
+
+if [[ "${profile}" == "valkey" ]]; then
+  install_managed "${tmp_dir}/valkey.conf" "${CONFIG_DIR}/valkey.conf" 0640 root "${gid}"
+  install_managed "${tmp_dir}/praxis-valkey.container" "${quadlet_dir}/praxis-valkey.container" 0640 root "${gid}"
+  install_managed "${tmp_dir}/praxis-valkey.volume" "${quadlet_dir}/praxis-valkey.volume" 0640 root "${gid}"
+  install_container_file_label "${CONFIG_DIR}/valkey.conf"
+fi
+
+printf '%s\n' "${profile}" >"${PROFILE_FILE}.new"
+chown root:"${gid}" "${PROFILE_FILE}.new"
+chmod 0640 "${PROFILE_FILE}.new"
+mv -f "${PROFILE_FILE}.new" "${PROFILE_FILE}"
+
+managed_paths=(
+  "${CONFIG_DIR}/shared-gateway.yaml"
+  "${PROFILE_FILE}"
+  "${quadlet_dir}/praxis.container"
+  "${quadlet_dir}/praxis.network"
+)
+if [[ "${profile}" == "valkey" ]]; then
+  managed_paths+=(
+    "${CONFIG_DIR}/valkey.conf"
+    "${quadlet_dir}/praxis-valkey.container"
+    "${quadlet_dir}/praxis-valkey.volume"
+  )
+fi
+for path in "${managed_paths[@]}"; do
+  printf '%s  %s\n' "$(sha256_file "${path}")" "${path}"
+done >"${MANIFEST_FILE}.new"
+chown root:"${gid}" "${MANIFEST_FILE}.new"
+chmod 0640 "${MANIFEST_FILE}.new"
+mv -f "${MANIFEST_FILE}.new" "${MANIFEST_FILE}"
+
+as_service systemctl --user daemon-reload
+if [[ "${profile}" == "valkey" ]]; then
+  as_service systemctl --user restart praxis-valkey.service
+fi
+as_service systemctl --user restart praxis.service
+
+if [[ "${profile}" == "valkey" ]]; then
+  as_service systemctl --user is-active --quiet praxis-valkey.service ||
+    die "praxis-valkey.service did not start"
+fi
+
+health=""
+for (( attempt = 0; attempt < 60; attempt++ )); do
+  health="$(as_service podman inspect praxis-shared-gateway \
+    --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+  [[ "${health}" == "healthy" ]] && break
+  sleep 1
+done
+[[ "${health}" == "healthy" ]] || die "Praxis did not become healthy; inspect the user-service journal"
+
+note "installed shared-gateway ${profile} profile"
+note "run scripts/shared-gateway/status and scripts/shared-gateway/verify"
