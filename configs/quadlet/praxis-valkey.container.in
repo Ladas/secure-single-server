@@ -1,0 +1,29 @@
+[Unit]
+Description=Private Valkey backend for Praxis token limits
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=@@VALKEY_IMAGE@@
+ContainerName=praxis-valkey
+Pull=never
+User=999
+Group=999
+UserNS=keep-id:uid=999,gid=999
+Network=praxis.network
+Volume=praxis-valkey.volume:/data:Z
+Volume=/etc/praxis/valkey.conf:/usr/local/etc/valkey/valkey.conf:ro
+Secret=@@VALKEY_ACL_SECRET@@,target=/run/secrets/users.acl,uid=999,gid=999,mode=0400
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+Exec=valkey-server /usr/local/etc/valkey/valkey.conf
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=900
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

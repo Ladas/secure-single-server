@@ -1,0 +1,48 @@
+name: Validate shared gateway
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-images:
+    name: Native ${{ matrix.arch }} images and static checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install static-check tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq ripgrep ruby shellcheck
+      - name: Check scripts, templates, documentation, and regressions
+        run: tests/shared-gateway-static.sh
+      - name: Check native runner architecture
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          source scripts/shared-gateway/lib.sh
+          test "$(oci_architecture "$(uname -m)")" = "$EXPECTED_ARCH"
+      - name: Start pinned Praxis profiles without provider keys
+        env:
+          CONTAINER_ENGINE: docker
+        run: tests/shared-gateway-image.sh
+      - name: Verify Valkey ACL and persistence without provider keys
+        env:
+          CONTAINER_ENGINE: docker
+        run: tests/shared-gateway-valkey-image.sh

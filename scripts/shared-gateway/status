@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+# shellcheck source=scripts/shared-gateway/lib.sh
+source "${SCRIPT_DIR}/lib.sh"
+
+require_root
+for command in getenforce loginctl podman runuser sha256sum ss systemctl; do
+  require_command "${command}"
+done
+
+uid="$(service_uid)"
+printf 'service account: %s (uid %s)\n' "${SERVICE_USER}" "${uid}"
+printf 'host: '
+# shellcheck disable=SC1091
+source /etc/os-release
+printf '%s; %s; %s\n' "${PRETTY_NAME:-unknown Linux}" "$(uname -m)" "$(uname -r)"
+printf 'SELinux: %s\n' "$(getenforce)"
+printf 'cgroups: '
+[[ -f /sys/fs/cgroup/cgroup.controllers ]] && printf 'v2\n' || printf 'not v2\n'
+printf 'Podman: %s\n' "$(as_service podman version --format '{{.Client.Version}}')"
+if loginctl show-user "${SERVICE_USER}" -p Linger --value 2>/dev/null | grep -qx yes; then
+  printf 'linger: enabled\n'
+else
+  printf 'linger: disabled\n'
+fi
+
+if [[ -f "${PROFILE_FILE}" ]]; then
+  printf 'profile: %s\n' "$(<"${PROFILE_FILE}")"
+else
+  printf 'profile: not installed\n'
+fi
+
+for unit in praxis.service praxis-valkey.service; do
+  if as_service systemctl --user cat "${unit}" >/dev/null 2>&1; then
+    active="$(as_service systemctl --user is-active "${unit}" 2>/dev/null || true)"
+    restarts="$(as_service systemctl --user show "${unit}" -p NRestarts --value 2>/dev/null || true)"
+    printf '%s: %s; restarts=%s\n' "${unit}" "${active:-unknown}" "${restarts:-unknown}"
+  fi
+done
+
+if as_service podman container exists praxis-shared-gateway; then
+  praxis_image="$(as_service podman inspect praxis-shared-gateway --format '{{.ImageName}}')"
+  as_service podman inspect praxis-shared-gateway \
+    --format 'praxis image: {{.ImageName}}; status={{.State.Status}}; health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
+  as_service podman image inspect "${praxis_image}" \
+    --format 'praxis platform: linux/{{.Architecture}}; source-revision={{index .Config.Labels "org.opencontainers.image.revision"}}; features={{index .Config.Labels "io.praxis.build.features"}}'
+fi
+if as_service podman container exists praxis-valkey; then
+  as_service podman inspect praxis-valkey \
+    --format 'valkey image: {{.ImageName}}; status={{.State.Status}}'
+fi
+
+printf 'host listeners:\n'
+ss -H -ltnp | awk '$4 ~ /:(8080|8081|8082|9901|6379|8000)$/ { print "  " $0 }'
+
+if [[ -f "${MANIFEST_FILE}" ]]; then
+  verify_managed_manifest
+  printf 'managed files: match installer manifest\n'
+fi
+
+if command -v tmux >/dev/null 2>&1; then
+  printf 'tmux: installed\n'
+else
+  printf 'tmux: not installed (optional for user sessions)\n'
+fi

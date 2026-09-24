@@ -1,0 +1,2 @@
+user default off
+user praxis on #SHA256_PASSWORD ~secure-single-server:limits:* +ping +eval +time +get +set +exists +incr +hget +hmget +hgetall +hset +hdel +zadd +zrem +zrange +zcard +zscore +zremrangebyscore +pexpire
