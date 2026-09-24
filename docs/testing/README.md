@@ -20,7 +20,9 @@ quickstarts.
 Static checks require Bash, Git, `jq`, `rg` (ripgrep), and Ruby with Psych.
 The credential, AWS and remote image tests also need Python 3.9+ and OpenSSL.
 AWS session tests cover Bash and, when installed, zsh; CI installs both shells.
-Install ShellCheck too; the script warns and skips linting if it is missing.
+Install ShellCheck too (0.11.0 matches CI); the script prints its version and
+warns if linting is skipped because it is missing. CI pins the official Linux
+binaries by version and SHA-256 for both architectures.
 
 From the repository root on macOS with the Podman machine running:
 

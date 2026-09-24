@@ -28,8 +28,9 @@ expect_failure require_linux_image_platform praxis windows amd64 amd64
 
 # The engine server can differ from the laptop. Test its architecture, not
 # the shell's uname, and reject emulation as evidence of native support.
-# Invoked indirectly through the engine argument to check_native_image.
-# shellcheck disable=SC2329
+# These mocks are invoked indirectly through check_native_image's engine argument.
+# ShellCheck 0.9 reports SC2317; newer versions report SC2329.
+# shellcheck disable=SC2317,SC2329
 podman() {
   case "$*" in
     'info --format {{.Host.OS}}/{{.Host.Arch}}') printf '%s\n' "${fake_server_platform}" ;;
@@ -37,7 +38,7 @@ podman() {
     *) return 2 ;;
   esac
 }
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 docker() {
   case "$*" in
     'info --format {{.OSType}}/{{.Architecture}}') printf '%s\n' "${fake_server_platform}" ;;

@@ -40,6 +40,7 @@ if rg -n '\]\][[:space:]]*$' "${shell_files[@]}"; then
 fi
 
 if command -v shellcheck >/dev/null 2>&1; then
+  shellcheck --version
   shellcheck -x "${shell_files[@]}"
 else
   printf 'warning: shellcheck is not installed; skipped\n' >&2
