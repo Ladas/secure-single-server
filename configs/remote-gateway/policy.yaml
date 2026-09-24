@@ -1,0 +1,19 @@
+# Offline JWT validation. Only the public verification key is deployed.
+plugins:
+  - name: caller-identity
+    kind: identity/jwt
+    hooks: [identity.resolve]
+    mode: sequential
+    priority: 10
+    on_error: fail
+    config:
+      header: Authorization
+      trusted_issuers:
+        - issuer: "https://secure-single-server.local"
+          audiences: ["praxis-gateway"]
+          algorithms: ["RS256"]
+          decoding_key:
+            kind: pem_file
+            path: /etc/praxis/jwt-public.pem
+          leeway_seconds: 60
+      claim_mapper: standard

@@ -6,8 +6,8 @@ TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly TEST_DIR
 REPO_DIR="$(cd -- "${TEST_DIR}/.." && pwd)"
 readonly REPO_DIR
-# shellcheck source=scripts/shared-gateway/lib.sh
-source "${REPO_DIR}/scripts/shared-gateway/lib.sh"
+# shellcheck source=scripts/common/lib.sh
+source "${REPO_DIR}/scripts/common/lib.sh"
 readonly IMAGE="${VALKEY_IMAGE:-docker.io/valkey/valkey@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2}"
 readonly TEST_PASSWORD="local-valkey-test"
 readonly TEST_PASSWORD_HASH="69d6dc9618d24d693cad07557702696090d0f575d9c0868384b8001fd1252358"
@@ -43,7 +43,7 @@ cleanup() {
 trap cleanup EXIT
 
 sed "s/SHA256_PASSWORD/${TEST_PASSWORD_HASH}/" \
-  "${REPO_DIR}/configs/valkey/users.acl.example" >"${tmp_dir}/users.acl"
+  "${REPO_DIR}/configs/common/valkey/users.acl.example" >"${tmp_dir}/users.acl"
 
 "${engine}" network create "${network}" >/dev/null
 "${engine}" volume create "${volume}" >/dev/null
@@ -60,7 +60,7 @@ fi
   "${isolation_args[@]}" \
   --network "${network}" \
   --mount "type=volume,source=${volume},target=/data" \
-  --mount "type=bind,source=${REPO_DIR}/configs/valkey/valkey.conf,target=/usr/local/etc/valkey/valkey.conf,readonly" \
+  --mount "type=bind,source=${REPO_DIR}/configs/common/valkey/valkey.conf,target=/usr/local/etc/valkey/valkey.conf,readonly" \
   --mount "type=bind,source=${tmp_dir}/users.acl,target=/run/secrets/users.acl,readonly" \
   "${IMAGE}" valkey-server /usr/local/etc/valkey/valkey.conf >/dev/null
 

@@ -1,7 +1,7 @@
-# Shared private Praxis on one RHEL server
+# All-in-one RHEL AI gateway
 
-One administrator-managed Praxis gateway serves developers who have separate
-accounts on the same private RHEL 9 server. Developers can use the configured
+One administrator-managed Praxis gateway serves users who have separate
+accounts on the same private RHEL 9 server. Users can use the configured
 model providers, but cannot read provider credentials or change gateway
 policy.
 
@@ -10,8 +10,8 @@ policy.
 ```mermaid
 flowchart LR
     A[Administrator]
-    U1[Developer Alice]
-    U2[Developer Bob]
+    U1[User Alice]
+    U2[User Bob]
 
     subgraph RHEL[Private RHEL 9 server]
         C[Root-owned configuration and Quadlets]
@@ -34,29 +34,29 @@ flowchart LR
     A -->|installs and operates| C
     U1 -->|SSH or Session Manager| H1
     U2 -->|SSH or Session Manager| H2
-    P -->|injected provider credential| API[Hosted model API]
+    P -->|injected provider credential| API[3rd party hosted model APIs]
 ```
 
 `praxis-svc` is a non-login service account used only to own and run the
 Praxis containers. Its systemd user manager remains active across logouts and
-reboots. Developers cannot sign in as this account.
+reboots. Users cannot sign in as this account.
 
 ## Trust model
 
 | Boundary | Decision |
 | --- | --- |
 | Remote entry | SSH or AWS Systems Manager Session Manager |
-| User identity | One OS account per developer; no shared `ssm-user` account |
+| User identity | One OS account per user; no shared `ssm-user` account |
 | Praxis access | Any admitted server user may call the loopback inference ports |
 | Caller JWT | Not required by the default profiles |
 | Limits | Shared globally by every caller of each protocol chain |
 | Service owner | Dedicated non-login `praxis-svc` account |
 | Provider credentials | Podman secrets available only inside the Praxis container |
-| Configuration | Root-owned and unavailable for modification by developers |
+| Configuration | Root-owned and unavailable for modification by users |
 | Admin and Valkey ports | Not published to the host |
 
 This design trusts admitted accounts to share one service and one set of
-allowances. It does not prevent one developer from consuming the global
+allowances. It does not prevent one user from consuming the global
 allowance. Root and the server administrator remain trusted.
 
 Praxis cannot determine the originating OS user from a loopback TCP request.
@@ -65,13 +65,14 @@ need subject-keyed state before that identity can receive an individual limit.
 
 ## Administrator setup
 
-Choose one mutually exclusive profile:
+Choose one mutually exclusive profile. Use Valkey for persistent daily token
+quotas; memory and Switchyard profiles are development/evaluation paths.
 
 | Profile | Host ports | State after Praxis restart | Quickstart |
 | --- | --- | --- | --- |
-| In-memory | `127.0.0.1:8080`, `:8081` | Request and token limits reset | [Install](quickstarts/in-memory.md) |
-| Valkey | `127.0.0.1:8080`, `:8081` | Token usage survives; request limits reset | [Install](quickstarts/valkey.md) |
-| Switchyard | baseline plus `127.0.0.1:8082` | Limits and routing decisions reset | [Install](quickstarts/switchyard.md) |
+| In-memory | `127.0.0.1:8080`, `:8081` | Request-rate protection and token quotas reset | [Install](in-memory.md) |
+| Valkey | `127.0.0.1:8080`, `:8081` | Token usage survives; request limits reset | [Install](valkey.md) |
+| Switchyard | baseline plus `127.0.0.1:8082` | Limits and routing decisions reset | [Install](switchyard.md) |
 
 Use the selected quickstart from a reviewed checkout on the administrator's
 workstation. It transfers only the required deployment bundle into the
@@ -82,7 +83,7 @@ requires uninstalling the current profile first.
 
 ## User workflow
 
-Each developer signs in with a separate OS account and runs Claude Code, Codex,
+Each user signs in with a separate OS account and runs Claude Code, Codex,
 or OpenCode on the RHEL server. The harness sends a non-secret placeholder to
 a loopback listener; Praxis removes it and injects the protected provider
 credential upstream.
@@ -93,7 +94,7 @@ credential upstream.
 | Native Anthropic Messages | `http://127.0.0.1:8081` |
 | Switchyard Chat Completions, when installed | `http://127.0.0.1:8082/v1` |
 
-Follow the [user workflow](user-workflow.md) for harness setup and
+Follow the [user workflow](users.md) for harness setup and
 the supported SSH-disconnect options.
 
 ## Switchyard behavior
@@ -113,7 +114,7 @@ the other target.
 Switchyard gaps to fill are:
 
 1. support APIs beyond Chat Completions;
-2. key token limits by the trusted selected model;
+2. key token quotas by the trusted selected model;
 3. include judge usage in accounting;
 4. add selected-target failover or a separate configured failure target; and
 5. add trusted per-caller session namespacing and durable routing state.
@@ -123,7 +124,7 @@ Switchyard gaps to fill are:
 1. Request and token allowances are global per protocol chain, not per OS user
    or harness.
 2. Request-limit state is always in memory; only the Valkey profile retains
-   token-limit usage across a Praxis restart.
+   token-quota usage across a Praxis restart.
 3. The Valkey and Switchyard profiles cannot currently be combined.
 4. Switchyard has no selected-target failover and no per-selected-model token
    allowance.
@@ -136,7 +137,7 @@ Switchyard gaps to fill are:
 ### Optional components
 
 Valkey is one standalone Redis-compatible container. It does not require a
-separate Redis service. It has no host port and stores token-limit data in a
+separate Redis service. It has no host port and stores token-quota data in a
 named volume using AOF with `appendfsync everysec`. A sudden failure may lose
 about the last second of writes. Valkey does not store request-rate buckets or
 Switchyard routing decisions.
@@ -150,7 +151,7 @@ accelerator hardware. The current deployment quickstarts do not install vLLM.
 OpenShell is a later phase for retained, sandboxed harness sessions. The
 current workflows use normal harness resume after reconnecting or `tmux`.
 
-### Request and token limits
+### Request-rate protection and token quotas
 
 Each protocol chain has independent limiter instances:
 
@@ -166,10 +167,9 @@ per-harness, per-selected-model, calendar-aligned, or monetary limits.
 
 ### Caller JWTs
 
-Caller JWTs are optional future work. They become useful when Praxis needs its
-own caller identity, individual admission, or subject-based policy. JWT
-validation alone does not add per-user limits; the request and token limiters
-must also key state by the validated subject.
+Caller JWTs are omitted in this loopback-only scenario. For off-host clients,
+use the [remote HTTPS/JWT scenario](../remote-gateway/README.md); do not publish
+these plaintext listeners. JWT validation alone does not add per-user quotas.
 
 ### How the persistent service runs
 

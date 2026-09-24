@@ -1,0 +1,125 @@
+# One native HTTPS endpoint; no unauthenticated inference listener.
+# Native API passthrough, not translation or per-JWT quotas.
+admin:
+  address: "127.0.0.1:9901"
+telemetry:
+  sampling_rate: 1.0
+listeners:
+  - name: https
+    address: "0.0.0.0:8443"
+    filter_chains: [inference]
+    tls:
+      certificates:
+        - cert_path: /etc/praxis/tls.pem
+          key_path: /etc/praxis/tls-key.pem
+filter_chains:
+  - name: inference
+    filters:
+      - filter: request_id
+      - filter: policy
+        config_path: /etc/praxis/policy.yaml
+      - filter: headers
+        request_remove:
+          - Authorization
+          - Proxy-Authorization
+          - X-Api-Key
+          - Forwarded
+          - X-Forwarded-For
+          - X-Forwarded-Host
+          - X-Forwarded-Proto
+          - X-Real-IP
+          - Via
+          - X-App-Id
+          - X-Cluster
+          - X-Model
+          - X-Route
+          - X-Selected-Model
+          - X-Tier
+      - filter: access_log
+      - filter: router
+        routes:
+          # Batch creation has asynchronous usage and is not quota-safe here.
+          - path: /v1/messages
+            cluster: anthropic
+          - path: /v1/messages/count_tokens
+            cluster: anthropic
+          - path_prefix: /v1/responses
+            cluster: openai
+          - path: /v1/chat/completions
+            cluster: openai
+          - path: /v1/models
+            cluster: openai
+      - filter: rate_limit
+        mode: global
+        rate: 2
+        burst: 10
+      # These are separate provider/API allowances, not an aggregate USD cap.
+      - filter: token_rate_limit
+        conditions:
+          - unless:
+              path_prefix: /v1/messages
+          - when:
+              methods: [POST]
+        backend:
+          kind: memory
+        rules:
+          - name: openai-rolling-day
+            algorithm: sliding_window
+            window: "24h"
+            capacity: 1000000
+            reserved_tokens: 10000
+            reservation_timeout: "300s"
+      - filter: token_rate_limit
+        conditions:
+          - when:
+              path: /v1/messages
+              methods: [POST]
+        backend:
+          kind: memory
+        rules:
+          - name: anthropic-rolling-day
+            algorithm: sliding_window
+            window: "24h"
+            capacity: 1000000
+            reserved_tokens: 10000
+            reservation_timeout: "300s"
+      - filter: anthropic_messages_protocol
+        conditions:
+          - when:
+              path_prefix: /v1/messages
+      - filter: token_count
+        provider: openai
+        conditions:
+          - unless:
+              path_prefix: /v1/messages
+          - when:
+              methods: [POST]
+      - filter: token_count
+        provider: anthropic
+        conditions:
+          - when:
+              path: /v1/messages
+              methods: [POST]
+      - filter: credential_injection
+        clusters:
+          - name: openai
+            header: Authorization
+            header_prefix: "Bearer "
+            env_var: OPENAI_API_KEY
+          - name: anthropic
+            header: x-api-key
+            env_var: ANTHROPIC_API_KEY
+      - filter: load_balancer
+        clusters:
+          - name: openai
+            endpoints: ["api.openai.com:443"]
+            http:
+              authority: api.openai.com
+            tls:
+              sni: api.openai.com
+          - name: anthropic
+            endpoints: ["api.anthropic.com:443"]
+            http:
+              authority: api.anthropic.com
+            tls:
+              sni: api.anthropic.com

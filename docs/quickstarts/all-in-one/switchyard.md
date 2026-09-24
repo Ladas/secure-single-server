@@ -8,7 +8,7 @@ This profile keeps all limiter and Switchyard state in memory. It cannot be
 combined with the Valkey profile in the current deployment.
 
 Configuration template:
-[`shared-gateway-switchyard.yaml.in`](../../configs/praxis/shared-gateway-switchyard.yaml.in).
+[`shared-gateway-switchyard.yaml.in`](../../../configs/all-in-one/shared-gateway-switchyard.yaml.in).
 
 The administrator runs the deployment scripts. Ordinary users do not receive
 the scripts, configuration, or repository. The scripts validate the host,
@@ -51,9 +51,9 @@ if [[ -n "$SSH_KEY" ]]; then
 fi
 ssh "${SSH_OPTIONS[@]}" "$RHEL_HOST" \
   'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests'
-scp "${SSH_OPTIONS[@]}" -pr configs/praxis configs/quadlet configs/valkey \
+scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/common \
   "$RHEL_HOST:~/secure-single-server-deploy/configs/"
-scp "${SSH_OPTIONS[@]}" -pr scripts/shared-gateway \
+scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/all-in-one \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/"
 scp "${SSH_OPTIONS[@]}" -p tests/shared-gateway-host.sh \
   "$RHEL_HOST:~/secure-single-server-deploy/tests/"
@@ -78,7 +78,7 @@ Copy and run unchanged:
 
 ```console
 sudo dnf install -y podman openssl policycoreutils-python-utils jq tar gzip
-sudo scripts/shared-gateway/install --prepare
+sudo scripts/all-in-one/install --prepare
 ```
 
 ## 3. Create provider and judge secrets
@@ -99,12 +99,12 @@ Copy and run unchanged in the same RHEL shell to store the secrets:
 
 ```console
 printf '%s' "$PRAXIS_OPENAI_KEY" \
-  | sudo scripts/shared-gateway/secret-set openai v1
+  | sudo scripts/common/secret-set openai v1
 printf '%s' "$PRAXIS_ANTHROPIC_KEY" \
-  | sudo scripts/shared-gateway/secret-set anthropic v1
+  | sudo scripts/common/secret-set anthropic v1
 unset PRAXIS_OPENAI_KEY PRAXIS_ANTHROPIC_KEY
 printf '%s' "$PRAXIS_JUDGE_KEY" \
-  | sudo scripts/shared-gateway/secret-set judge v1
+  | sudo scripts/common/secret-set judge v1
 unset PRAXIS_JUDGE_KEY
 ```
 
@@ -135,7 +135,7 @@ prompted. These are model names, not API keys.
 Copy and run unchanged in the same RHEL shell:
 
 ```console
-sudo scripts/shared-gateway/install \
+sudo scripts/all-in-one/install \
   --profile switchyard \
   --openai-secret praxis-openai-api-key-v1 \
   --anthropic-secret praxis-anthropic-api-key-v1 \
@@ -143,8 +143,8 @@ sudo scripts/shared-gateway/install \
   --judge-model "$JUDGE_MODEL" \
   --weak-model "$WEAK_MODEL" \
   --strong-model "$STRONG_MODEL"
-sudo scripts/shared-gateway/status
-sudo scripts/shared-gateway/verify --host
+sudo scripts/common/status
+sudo scripts/common/verify --host
 ```
 
 Expected listeners are:
@@ -160,7 +160,7 @@ same catch-all token allowance. The judge's tokens are outside that allowance.
 Judge failure is closed, and failure of the selected target does not try the
 other target.
 
-For the direct endpoints, use the [user workflow](../user-workflow.md).
+For the direct endpoints, use the [user workflow](users.md).
 Point a Chat Completions client at `http://127.0.0.1:8082/v1` to use
 Switchyard. Responses clients such as Codex remain on port `8080`.
 
@@ -170,5 +170,5 @@ Profiles are mutually exclusive. Remove the current profile before installing
 Switchyard:
 
 ```console
-sudo scripts/shared-gateway/uninstall
+sudo scripts/common/uninstall
 ```

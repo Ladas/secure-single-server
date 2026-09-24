@@ -12,10 +12,14 @@ quickstarts.
 | Fedora CoreOS Podman machine | Pinned images start on the Mac's native architecture; Praxis profiles and Valkey persistence work in containers | RHEL packages, SELinux labels, user systemd, logout, or reboot |
 | Disposable Podman container | A developer can inspect configuration and make provider calls without installing a service | Locked service account, boot startup, recovery, or protected administrator ownership |
 | Local RHEL 9 VM | Complete installer, rootless Podman, SELinux, user systemd, account separation, logout, and reboot | Final AWS networking, IAM, or target-instance behavior |
+| Full Fedora VM | Both installers with an explicit development override; systemd/SELinux behavior | RHEL package and host qualification |
+| Two AWS RHEL VMs | All-in-one and remote HTTPS/JWT under separate networking and state | Other architectures or untested harness/model combinations |
 
 ## Fast local checks
 
 Static checks require Bash, Git, `jq`, `rg` (ripgrep), and Ruby with Psych.
+The credential, AWS and remote image tests also need Python 3.9+ and OpenSSL.
+AWS session tests cover Bash and, when installed, zsh; CI installs both shells.
 Install ShellCheck too; the script warns and skips linting if it is missing.
 
 From the repository root on macOS with the Podman machine running:
@@ -24,6 +28,12 @@ From the repository root on macOS with the Podman machine running:
 tests/shared-gateway-static.sh
 CONTAINER_ENGINE=podman tests/shared-gateway-image.sh
 CONTAINER_ENGINE=podman tests/shared-gateway-valkey-image.sh
+python3 tests/remote-gateway/credentials.py
+python3 tests/remote-gateway/security.py
+python3 tests/aws/plan.py
+python3 tests/aws/session.py
+CONTAINER_ENGINE=podman python3 tests/remote-gateway/image.py
+CONTAINER_ENGINE=podman python3 tests/remote-gateway/image.py --valkey
 ```
 
 Continue with one of these instructions:
@@ -32,6 +42,11 @@ Continue with one of these instructions:
   and configuration loop;
 - [disposable Podman container](podman.md) for manual provider calls; or
 - [local RHEL 9 VM](rhel-vm.md) for the full pre-production host gate.
+
+For an existing local Fedora VM, follow [full Fedora development](fedora-vm.md).
+Test **all-in-one and remote gateway** separately, each with memory and Valkey.
+Then use the [AWS two-VM guide](aws.md). The cloud helper does nothing unless
+invoked; `plan` and `verify` are read-only, while `apply` requires confirmation.
 
 Do not use the Fedora CoreOS or disposable-container path as evidence that the
 persistent RHEL deployment is accepted. The RHEL VM is the minimum complete
@@ -45,7 +60,7 @@ tests compare the image with the engine server, including a remote Podman VM;
 an emulated image does not count as native qualification.
 
 The [CI workflow](../../.github/workflows/validate.yml) runs static checks,
-Praxis startup, and Valkey ACL/persistence tests on native amd64 and arm64
+Praxis startup, Valkey ACL/persistence and synthetic remote TLS/JWT/quota tests on native amd64 and arm64
 Linux runners, using dummy credentials only. CI does not run the RHEL installer
 or make paid provider calls. Check the PR's actual job results after pushing.
 

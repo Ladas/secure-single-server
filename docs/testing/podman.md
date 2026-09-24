@@ -5,7 +5,7 @@ box without installing a system service. It runs under the current user and is
 not the shared-server deployment.
 
 Configuration:
-[`shared-gateway.yaml`](../../configs/praxis/shared-gateway.yaml).
+[`shared-gateway.yaml`](../../configs/all-in-one/shared-gateway.yaml).
 
 Podman detaches the container from the terminal, so it normally continues
 after an SSH disconnect. This is not a persistence guarantee: it does not
@@ -45,7 +45,7 @@ podman run --replace --rm --detach --name praxis-dev \
   --publish 127.0.0.1:8081:8081 \
   --env OPENAI_API_KEY \
   --env ANTHROPIC_API_KEY \
-  --volume "$PWD/configs/praxis/shared-gateway.yaml:/etc/praxis/shared-gateway.yaml:ro,Z" \
+  --volume "$PWD/configs/all-in-one/shared-gateway.yaml:/etc/praxis/shared-gateway.yaml:ro,Z" \
   "$PRAXIS_IMAGE" -c /etc/praxis/shared-gateway.yaml
 ```
 
@@ -59,7 +59,7 @@ podman port praxis-dev
 Expected published ports are `127.0.0.1:8080` and `127.0.0.1:8081`. Admin port
 `9901` is reachable only from inside the container.
 
-Use the [user workflow](../user-workflow.md) to configure a harness, or
+Use the [user workflow](../quickstarts/all-in-one/users.md) to configure a harness, or
 send a direct request:
 
 ```console
@@ -81,5 +81,5 @@ podman stop praxis-dev
 
 For boot startup, failure recovery, protected secrets, and an
 administrator-owned policy, continue with the [in-memory deployment
-quickstart](../quickstarts/in-memory.md) or the [Valkey deployment
-quickstart](../quickstarts/valkey.md).
+quickstart](../quickstarts/all-in-one/in-memory.md) or the [Valkey deployment
+quickstart](../quickstarts/all-in-one/valkey.md).

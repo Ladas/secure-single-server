@@ -4,8 +4,8 @@ set -euo pipefail
 
 TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "${TEST_DIR}/.." && pwd)"
-# shellcheck source=scripts/shared-gateway/lib.sh
-source "${REPO_DIR}/scripts/shared-gateway/lib.sh"
+# shellcheck source=scripts/common/lib.sh
+source "${REPO_DIR}/scripts/common/lib.sh"
 
 expect_failure() {
   if ( "$@" ) >/dev/null 2>&1; then
@@ -64,15 +64,15 @@ unset -f podman docker
 
 password_hash=69d6dc9618d24d693cad07557702696090d0f575d9c0868384b8001fd1252358
 acl="$(valkey_acl "${password_hash}")"
-[[ "${acl}" == "$(sed "s/SHA256_PASSWORD/${password_hash}/" "${REPO_DIR}/configs/valkey/users.acl.example")" ]] ||
+[[ "${acl}" == "$(sed "s/SHA256_PASSWORD/${password_hash}/" "${REPO_DIR}/configs/common/valkey/users.acl.example")" ]] ||
   die "generated Valkey ACL differs from the example"
 [[ " ${acl} " == *' +ping '* ]] || die "Valkey ACL lacks PING"
 [[ " ${acl} " != *' +@all '* ]] || die "Valkey ACL grants unrestricted commands"
 expect_failure valkey_acl invalid-hash
 # Assert that the installer/secret helper actually use the tested functions.
 # shellcheck disable=SC2016
-grep -Fq 'expected_arch="$(oci_architecture "$(uname -m)")"' "${REPO_DIR}/scripts/shared-gateway/install"
+grep -Fq 'expected_arch="$(oci_architecture "$(uname -m)")"' "${REPO_DIR}/scripts/common/install"
 # shellcheck disable=SC2016
-grep -Fq 'acl="$(valkey_acl "${password_hash}")"' "${REPO_DIR}/scripts/shared-gateway/secret-set"
+grep -Fq 'acl="$(valkey_acl "${password_hash}")"' "${REPO_DIR}/scripts/common/secret-set"
 
 printf 'architecture mapping, native-image checks, and Valkey ACL unit checks passed\n'

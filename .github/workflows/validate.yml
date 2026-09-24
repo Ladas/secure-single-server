@@ -1,4 +1,4 @@
-name: Validate shared gateway
+name: Validate gateway scenarios
 
 on:
   pull_request:
@@ -29,14 +29,14 @@ jobs:
       - name: Install static-check tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq ripgrep ruby shellcheck
+          sudo apt-get install -y jq ripgrep ruby shellcheck zsh
       - name: Check scripts, templates, documentation, and regressions
         run: tests/shared-gateway-static.sh
       - name: Check native runner architecture
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
-          source scripts/shared-gateway/lib.sh
+          source scripts/common/lib.sh
           test "$(oci_architecture "$(uname -m)")" = "$EXPECTED_ARCH"
       - name: Start pinned Praxis profiles without provider keys
         env:
@@ -46,3 +46,15 @@ jobs:
         env:
           CONTAINER_ENGINE: docker
         run: tests/shared-gateway-valkey-image.sh
+      - name: Offline caller credentials and AWS planning safety
+        run: |
+          python3 tests/remote-gateway/credentials.py
+          python3 tests/remote-gateway/security.py
+          python3 tests/aws/plan.py
+          python3 tests/aws/session.py
+      - name: Verify native TLS and JWT with synthetic providers
+        env:
+          CONTAINER_ENGINE: docker
+        run: |
+          python3 tests/remote-gateway/image.py
+          python3 tests/remote-gateway/image.py --valkey

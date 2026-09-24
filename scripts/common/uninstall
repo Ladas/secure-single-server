@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-# shellcheck source=scripts/shared-gateway/lib.sh
+# shellcheck source=scripts/common/lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
 purge_valkey_data=0
@@ -12,7 +12,7 @@ if [[ "${1:-}" == "--purge-valkey-data" ]]; then
   purge_valkey_data=1
   shift
 fi
-[[ "$#" -eq 0 ]] || die "usage: sudo scripts/shared-gateway/uninstall [--purge-valkey-data]"
+[[ "$#" -eq 0 ]] || die "usage: sudo scripts/common/uninstall [--purge-valkey-data]"
 
 require_root
 for command in podman runuser semanage systemctl; do
@@ -28,13 +28,14 @@ as_service podman network rm praxis-private >/dev/null 2>&1 || true
 
 while read -r _ path; do
   validate_owned_path "${path}"
+  case "${path}" in
+    "${CONFIG_DIR}/shared-gateway.yaml"|"${CONFIG_DIR}/valkey.conf"|"${CONFIG_DIR}/policy.yaml"|"${CONFIG_DIR}/jwt-public.pem"|"${CONFIG_DIR}/tls.pem"|"${CONFIG_DIR}/tls-key.pem")
+      semanage fcontext -d "$(selinux_path_regex "${path}")" >/dev/null 2>&1 || true
+      ;;
+  esac
   rm -f -- "${path}"
 done <"${MANIFEST_FILE}"
 rm -f -- "${MANIFEST_FILE}"
-
-for path in "${CONFIG_DIR}/shared-gateway.yaml" "${CONFIG_DIR}/valkey.conf"; do
-  semanage fcontext -d "$(selinux_path_regex "${path}")" >/dev/null 2>&1 || true
-done
 
 as_service systemctl --user daemon-reload
 if (( purge_valkey_data == 1 )); then

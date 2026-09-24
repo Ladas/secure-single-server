@@ -1,12 +1,15 @@
 # In-memory deployment quickstart
 
+Development only: use the [Valkey profile](valkey.md) when daily token quotas
+must survive a service or server restart.
+
 This profile runs Praxis as a rootless container owned by the locked
 `praxis-svc` account. systemd starts it at boot and restarts it after failure.
-Request and token-limit state is kept in Praxis memory and resets whenever
+Request and token-quota state is kept in Praxis memory and resets whenever
 Praxis restarts.
 
 Configuration:
-[`shared-gateway.yaml`](../../configs/praxis/shared-gateway.yaml).
+[`shared-gateway.yaml`](../../../configs/all-in-one/shared-gateway.yaml).
 
 The administrator runs the deployment scripts. Ordinary users do not receive
 the scripts, configuration, or repository. The scripts validate the host,
@@ -48,9 +51,9 @@ if [[ -n "$SSH_KEY" ]]; then
 fi
 ssh "${SSH_OPTIONS[@]}" "$RHEL_HOST" \
   'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests'
-scp "${SSH_OPTIONS[@]}" -pr configs/praxis configs/quadlet configs/valkey \
+scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/common \
   "$RHEL_HOST:~/secure-single-server-deploy/configs/"
-scp "${SSH_OPTIONS[@]}" -pr scripts/shared-gateway \
+scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/all-in-one \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/"
 scp "${SSH_OPTIONS[@]}" -p tests/shared-gateway-host.sh \
   "$RHEL_HOST:~/secure-single-server-deploy/tests/"
@@ -78,7 +81,7 @@ sudo dnf install -y podman openssl policycoreutils-python-utils jq tar gzip
 ## 3. Prepare the service account
 
 ```console
-sudo scripts/shared-gateway/install --prepare
+sudo scripts/all-in-one/install --prepare
 ```
 
 The command validates RHEL 9, SELinux enforcing, cgroups v2, Podman 4.6 or
@@ -116,9 +119,9 @@ Copy and run unchanged in the same RHEL shell to store the secrets:
 
 ```console
 printf '%s' "$PRAXIS_OPENAI_KEY" \
-  | sudo scripts/shared-gateway/secret-set openai v1
+  | sudo scripts/common/secret-set openai v1
 printf '%s' "${PRAXIS_ANTHROPIC_KEY:-provider-not-configured}" \
-  | sudo scripts/shared-gateway/secret-set anthropic v1
+  | sudo scripts/common/secret-set anthropic v1
 unset PRAXIS_OPENAI_KEY PRAXIS_ANTHROPIC_KEY
 ```
 
@@ -131,12 +134,12 @@ an encrypted vault: root and the service account remain trusted.
 ## 5. Install and verify Praxis
 
 ```console
-sudo scripts/shared-gateway/install \
+sudo scripts/all-in-one/install \
   --profile memory \
   --openai-secret praxis-openai-api-key-v1 \
   --anthropic-secret praxis-anthropic-api-key-v1
-sudo scripts/shared-gateway/status
-sudo scripts/shared-gateway/verify --host
+sudo scripts/common/status
+sudo scripts/common/verify --host
 ```
 
 Expected listeners are:
@@ -149,13 +152,13 @@ Expected listeners are:
 Admin port `9901` remains inside the container. The provider secrets and
 configuration are unavailable to ordinary server users.
 
-Continue with the [user workflow](../user-workflow.md).
+Continue with the [user workflow](users.md).
 
 ## Operate the service
 
 ```console
-sudo scripts/shared-gateway/status
-sudo scripts/shared-gateway/verify --host
+sudo scripts/common/status
+sudo scripts/common/verify --host
 ```
 
 For a reviewed same-profile update, create new versioned secrets and pass the
@@ -179,12 +182,12 @@ Copy and run unchanged to create version `v2` secrets and apply the update:
 
 ```console
 printf '%s' "$PRAXIS_OPENAI_KEY" \
-  | sudo scripts/shared-gateway/secret-set openai v2
+  | sudo scripts/common/secret-set openai v2
 printf '%s' "${PRAXIS_ANTHROPIC_KEY:-provider-not-configured}" \
-  | sudo scripts/shared-gateway/secret-set anthropic v2
+  | sudo scripts/common/secret-set anthropic v2
 unset PRAXIS_OPENAI_KEY PRAXIS_ANTHROPIC_KEY
 
-sudo scripts/shared-gateway/upgrade --profile memory \
+sudo scripts/common/upgrade --profile memory \
   --openai-secret praxis-openai-api-key-v2 \
   --anthropic-secret praxis-anthropic-api-key-v2
 ```
@@ -192,7 +195,7 @@ sudo scripts/shared-gateway/upgrade --profile memory \
 To remove the installed profile:
 
 ```console
-sudo scripts/shared-gateway/uninstall
+sudo scripts/common/uninstall
 ```
 
 Removal preserves Podman secrets, the service account, and its lingering

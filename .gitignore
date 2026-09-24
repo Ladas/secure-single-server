@@ -2,3 +2,5 @@
 evidence/
 *.local
 *.secret
+__pycache__/
+*.pyc

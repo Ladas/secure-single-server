@@ -5,10 +5,22 @@ systemd user services, logout, and reboot behavior before testing in AWS.
 
 ## Create the VM
 
-On macOS, install Red Hat build of Podman Desktop, then install its Red Hat
-Authentication and RHEL VMs extensions. Sign in, open **Settings → RHEL VMs**,
-and create a RHEL 9 VM with approximately 4 CPUs, 8 GiB memory, and 40 GiB
-disk. Open its details page to obtain the configured SSH destination.
+On a Mac M4, use a native **RHEL 9 aarch64** guest. Suggested allocation:
+4 vCPUs, 8 GiB RAM and 50 GiB disk for hosted-model tests; no GPU is needed.
+
+1. Download the RHEL **9** aarch64 installation ISO from
+   [Red Hat Developer](https://developers.redhat.com/products/rhel/download).
+   Verify its supplied checksum. Use x86_64 on an Intel/AMD machine instead.
+2. In UTM or an equivalent native macOS virtualizer, choose **Virtualize →
+   Linux**, attach that ISO, and install a minimal server with an administrator
+   account. Use UEFI and a private/shared VM network reachable from the Mac.
+3. Enable SSH in the guest console, obtain its IP with `ip -brief address`, and
+   authorize your dedicated public SSH key. Keep the private key on the Mac.
+
+The [RHEL VMs extension for Podman Desktop](https://developers.redhat.com/articles/2025/06/11/how-manage-rhel-virtual-machines-podman-desktop)
+is another option if it offers a RHEL 9 image for your architecture. A RHEL 10
+guest does not qualify this RHEL 9 installer. This local VM is a test target,
+not a claim that every Mac hypervisor is a Red Hat-supported production host.
 
 Use the native guest architecture:
 
@@ -21,6 +33,26 @@ Both architectures are targets, not yet qualified RHEL deployments. The
 commands are the same, and the installer checks the selected images against
 the guest architecture. Complete and record the checks on each architecture
 separately. GPU drivers and local vLLM require separate hardware tests.
+
+## Register the local guest
+
+For an ISO-installed guest using your Developer Subscription, register
+**inside the VM**. The interactive command prompts for your Red Hat account
+credentials; do not put a password in arguments or scripts:
+
+```console
+sudo subscription-manager register
+sudo subscription-manager identity
+sudo dnf repolist
+sudo dnf update -y
+sudo systemctl enable --now sshd
+getenforce
+```
+
+If already registered, inspect its identity instead of registering again.
+With Simple Content Access, do not add an `attach --auto` step. Follow the
+[RHEL registration guide](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_basic_system_settings/assembly_registering-the-system-and-managing-subscriptions_configuring-basic-system-settings)
+if repositories are unavailable. AWS PAYG guests use RHUI instead.
 
 ## Put the repository in the VM
 
@@ -73,32 +105,38 @@ git rev-parse HEAD
 ```
 
 For unpushed changes, use the bundle-transfer step of the [in-memory
-quickstart](../quickstarts/in-memory.md) instead, and record the local revision
+quickstart](../quickstarts/all-in-one/in-memory.md) instead, and record the local revision
 plus the uncommitted diff. In that case use `~/secure-single-server-deploy`
 as the working directory below.
 
 ## Install and verify
 
-Inside the RHEL VM:
+Use one guest per scenario, or uninstall/reset between them. For the
+**all-in-one** scenario, inside the RHEL VM:
 
 ```console
 sudo dnf install -y git podman openssl policycoreutils-python-utils tmux curl jq tar gzip python3
-sudo scripts/shared-gateway/install --prepare
+sudo scripts/all-in-one/install --prepare
 printf '%s' local-openai-test \
-  | sudo scripts/shared-gateway/secret-set openai vm1
+  | sudo scripts/common/secret-set openai vm1
 printf '%s' local-anthropic-test \
-  | sudo scripts/shared-gateway/secret-set anthropic vm1
-sudo scripts/shared-gateway/install \
+  | sudo scripts/common/secret-set anthropic vm1
+sudo scripts/all-in-one/install \
   --profile memory \
   --openai-secret praxis-openai-api-key-vm1 \
   --anthropic-secret praxis-anthropic-api-key-vm1
-sudo scripts/shared-gateway/status
-sudo scripts/shared-gateway/verify --host
+sudo scripts/common/status
+sudo scripts/common/verify --host
 ```
 
 Dummy credentials are enough for lifecycle checks. Use real versioned
 secrets only when testing provider protocols, streaming, tools, accounting,
 and coding harnesses.
+
+For the **remote gateway** guest, follow [private-CA preparation and external
+TLS/JWT tests](remote-gateway.md) and the [remote installer](../quickstarts/remote-gateway/install.md).
+Run the harnesses on your Mac, not in the gateway's service account. No Fedora
+override is used on RHEL.
 
 ## Test reboot and user separation
 
@@ -116,12 +154,12 @@ Inside the VM (use `~/secure-single-server-deploy` for a transferred bundle):
 
 ```console
 cd ~/secure-single-server
-sudo scripts/shared-gateway/status
-sudo scripts/shared-gateway/verify --host
+sudo scripts/common/status
+sudo scripts/common/verify --host
 ```
 
 Create two ordinary VM accounts and test the [user
-workflow](../user-workflow.md) from each. Both accounts should reach the
+workflow](../quickstarts/all-in-one/users.md) from each. Both accounts should reach the
 loopback inference ports. Neither should be able to read `/etc/praxis`, enter
 `/var/lib/praxis-svc`, inspect the service account Podman store, or control
 its systemd user services.

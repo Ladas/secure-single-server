@@ -1,5 +1,5 @@
 [Unit]
-Description=Private Valkey backend for Praxis token limits
+Description=Private Valkey backend for Praxis token quotas
 After=network-online.target
 Wants=network-online.target
 

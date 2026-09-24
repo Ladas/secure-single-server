@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 REPO_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 readonly REPO_DIR
-# shellcheck source=scripts/shared-gateway/lib.sh
+# shellcheck source=scripts/common/lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
 profile="memory"
@@ -22,22 +22,31 @@ weak_model=""
 strong_model=""
 prepare_only=0
 replace=0
+scenario="all-in-one"
+development_fedora=0
+tls_cert=""
+tls_key=""
+jwt_public_key=""
 
 usage() {
   cat <<'EOF'
 Usage:
-  sudo scripts/shared-gateway/install --prepare
-  sudo scripts/shared-gateway/install --profile memory \
+  sudo scripts/common/install --prepare
+  sudo scripts/common/install --profile memory \
     --openai-secret NAME --anthropic-secret NAME [OPTIONS]
-  sudo scripts/shared-gateway/install --profile switchyard \
+  sudo scripts/common/install --profile switchyard \
     --openai-secret NAME --anthropic-secret NAME --judge-secret NAME \
     --judge-model MODEL --weak-model MODEL --strong-model MODEL [OPTIONS]
-  sudo scripts/shared-gateway/install --profile valkey \
+  sudo scripts/common/install --profile valkey \
     --openai-secret NAME --anthropic-secret NAME \
     --valkey-image IMAGE@sha256:DIGEST \
     --valkey-url-secret NAME --valkey-acl-secret NAME [OPTIONS]
 
 Options:
+  --scenario all-in-one|remote-gateway  Set by the scenario install wrapper.
+  --tls-cert PATH --tls-key PATH        Remote: PEM full chain and matching key.
+  --jwt-public-key PATH                 Remote: RSA public verification key only.
+  --development-fedora                  Allow mutable Fedora for development.
   --praxis-image IMAGE@sha256:DIGEST  Override the reviewed Praxis digest.
   --replace                          Replace a same-profile managed install.
 EOF
@@ -45,6 +54,11 @@ EOF
 
 while (( "$#" )); do
   case "$1" in
+    --scenario) scenario="${2:-}"; shift 2 ;;
+    --tls-cert) tls_cert="${2:-}"; shift 2 ;;
+    --tls-key) tls_key="${2:-}"; shift 2 ;;
+    --jwt-public-key) jwt_public_key="${2:-}"; shift 2 ;;
+    --development-fedora) development_fedora=1; shift ;;
     --profile) profile="${2:-}"; shift 2 ;;
     --praxis-image) praxis_image="${2:-}"; shift 2 ;;
     --valkey-image) valkey_image="${2:-}"; shift 2 ;;
@@ -72,8 +86,12 @@ validate_platform() {
   [[ "$(uname -s)" == "Linux" ]] || die "shared-gateway installation requires Linux"
   # shellcheck disable=SC1091
   source /etc/os-release
-  [[ "${ID:-}" == "rhel" && "${VERSION_ID:-}" == 9* ]] ||
-    die "supported host is RHEL 9; found ${PRETTY_NAME:-unknown}"
+  if [[ "${ID:-}" == "fedora" && "${VARIANT_ID:-}" != "coreos" && "${development_fedora}" == 1 ]]; then
+    note "DEVELOPMENT ONLY: Fedora does not qualify the RHEL deployment."
+  else
+    [[ "${ID:-}" == "rhel" && "${VERSION_ID:-}" == 9.* ]] ||
+      die "supported host is RHEL 9; mutable Fedora needs --development-fedora"
+  fi
   case "$(uname -m)" in
     x86_64|aarch64) ;;
     *) die "unsupported host architecture: $(uname -m)" ;;
@@ -153,11 +171,25 @@ ensure_service_account() {
   install -d -o root -g "${gid}" -m 0750 "/etc/containers/systemd/users/${uid}"
 }
 
+case "${scenario}" in
+  all-in-one|remote-gateway) ;;
+  *) die "scenario must be all-in-one or remote-gateway" ;;
+esac
+if [[ "${scenario}" == remote-gateway && "${prepare_only}" == 0 ]]; then
+  [[ "${profile}" != switchyard ]] || die "remote Switchyard is not qualified; use memory or valkey"
+  require_command python3
+  require_command openssl
+  [[ -f "${tls_cert}" && -f "${tls_key}" && -f "${jwt_public_key}" ]] ||
+    die "remote gateway requires --tls-cert, --tls-key and --jwt-public-key"
+  "${REPO_DIR}/scripts/remote-gateway/credentials" check-tls --cert "${tls_cert}" --key "${tls_key}"
+  openssl rsa -pubin -in "${jwt_public_key}" -noout >/dev/null 2>&1 || die "JWT key must be an RSA public key"
+  if grep -q 'PRIVATE KEY' "${jwt_public_key}"; then die "do not deploy the JWT private key"; fi
+fi
 validate_platform
 ensure_service_account
 
 if (( prepare_only == 1 )); then
-  note "prepared ${SERVICE_USER}; create versioned secrets with scripts/shared-gateway/secret-set"
+  note "prepared ${SERVICE_USER}; create versioned secrets with scripts/common/secret-set"
   exit 0
 fi
 
@@ -173,6 +205,9 @@ require_secret "${openai_secret}"
 require_secret "${anthropic_secret}"
 
 if [[ -f "${PROFILE_FILE}" ]]; then
+  installed_scenario="all-in-one"
+  [[ ! -f "${SCENARIO_FILE}" ]] || installed_scenario="$(<"${SCENARIO_FILE}")"
+  [[ "${installed_scenario}" == "${scenario}" ]] || die "uninstall the current scenario before changing it"
   installed_profile="$(<"${PROFILE_FILE}")"
   [[ "${installed_profile}" == "${profile}" ]] ||
     die "profile ${installed_profile} is installed; uninstall it before selecting ${profile}"
@@ -202,7 +237,9 @@ if [[ -f "${PROFILE_FILE}" && "${replace}" -ne 1 ]]; then
   exit 0
 fi
 
-for port in 8080 8081; do
+ports=(8080 8081)
+[[ "${scenario}" != remote-gateway ]] || ports=(8443)
+for port in "${ports[@]}"; do
   if [[ ! -f "${PROFILE_FILE}" ]] && ss -H -ltn | awk '{print $4}' | grep -Eq ":${port}$"; then
     die "host TCP port ${port} is already in use"
   fi
@@ -244,19 +281,19 @@ trap 'rm -rf "${tmp_dir}"' EXIT
 
 case "${profile}" in
   memory)
-    cp "${REPO_DIR}/configs/praxis/shared-gateway.yaml" "${tmp_dir}/shared-gateway.yaml"
-    render_template "${REPO_DIR}/configs/quadlet/praxis.container.in" "${tmp_dir}/praxis.container" \
+    cp "${REPO_DIR}/configs/all-in-one/shared-gateway.yaml" "${tmp_dir}/shared-gateway.yaml"
+    render_template "${REPO_DIR}/configs/common/quadlet/praxis.container.in" "${tmp_dir}/praxis.container" \
       PRAXIS_IMAGE "${praxis_image}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}"
     ;;
   valkey)
-    cp "${REPO_DIR}/configs/praxis/shared-gateway-valkey.yaml" "${tmp_dir}/shared-gateway.yaml"
-    cp "${REPO_DIR}/configs/valkey/valkey.conf" "${tmp_dir}/valkey.conf"
-    render_template "${REPO_DIR}/configs/quadlet/praxis-valkey-backend.container.in" "${tmp_dir}/praxis.container" \
+    cp "${REPO_DIR}/configs/all-in-one/shared-gateway-valkey.yaml" "${tmp_dir}/shared-gateway.yaml"
+    cp "${REPO_DIR}/configs/common/valkey/valkey.conf" "${tmp_dir}/valkey.conf"
+    render_template "${REPO_DIR}/configs/common/quadlet/praxis-valkey-backend.container.in" "${tmp_dir}/praxis.container" \
       PRAXIS_IMAGE "${praxis_image}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}" \
       VALKEY_URL_SECRET "${valkey_url_secret}"
-    render_template "${REPO_DIR}/configs/quadlet/praxis-valkey.container.in" "${tmp_dir}/praxis-valkey.container" \
+    render_template "${REPO_DIR}/configs/common/quadlet/praxis-valkey.container.in" "${tmp_dir}/praxis-valkey.container" \
       VALKEY_IMAGE "${valkey_image}" VALKEY_ACL_SECRET "${valkey_acl_secret}"
-    cp "${REPO_DIR}/configs/quadlet/praxis-valkey.volume" "${tmp_dir}/praxis-valkey.volume"
+    cp "${REPO_DIR}/configs/common/quadlet/praxis-valkey.volume" "${tmp_dir}/praxis-valkey.volume"
     ;;
   switchyard)
     awk '
@@ -267,17 +304,23 @@ case "${profile}" in
       }
       /# @@BASELINE_FILTER_CHAINS@@/ { printf "%s", baseline; next }
       { print }
-    ' "${REPO_DIR}/configs/praxis/shared-gateway.yaml" \
-      "${REPO_DIR}/configs/praxis/shared-gateway-switchyard.yaml.in" >"${tmp_dir}/switchyard.yaml.in"
+    ' "${REPO_DIR}/configs/all-in-one/shared-gateway.yaml" \
+      "${REPO_DIR}/configs/all-in-one/shared-gateway-switchyard.yaml.in" >"${tmp_dir}/switchyard.yaml.in"
     render_template "${tmp_dir}/switchyard.yaml.in" "${tmp_dir}/shared-gateway.yaml" \
       JUDGE_MODEL "${judge_model}" WEAK_MODEL "${weak_model}" STRONG_MODEL "${strong_model}"
-    render_template "${REPO_DIR}/configs/quadlet/praxis-switchyard.container.in" "${tmp_dir}/praxis.container" \
+    render_template "${REPO_DIR}/configs/common/quadlet/praxis-switchyard.container.in" "${tmp_dir}/praxis.container" \
       PRAXIS_IMAGE "${praxis_image}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}" \
       JUDGE_SECRET "${judge_secret}"
     ;;
 esac
 
-cp "${REPO_DIR}/configs/quadlet/praxis.network" "${tmp_dir}/praxis.network"
+if [[ "${scenario}" == remote-gateway ]]; then
+  render_remote_config "${profile}" "${REPO_DIR}/configs/remote-gateway/gateway.yaml" "${tmp_dir}/shared-gateway.yaml"
+  render_remote_quadlet "${tmp_dir}/praxis.container" "${tmp_dir}/remote.container"
+  mv "${tmp_dir}/remote.container" "${tmp_dir}/praxis.container"
+fi
+
+cp "${REPO_DIR}/configs/common/quadlet/praxis.network" "${tmp_dir}/praxis.network"
 
 install_managed() {
   local source="$1" destination="$2" mode="$3" owner="$4" group="$5"
@@ -312,6 +355,20 @@ install_container_file_label() {
 
 install_container_file_label "${CONFIG_DIR}/shared-gateway.yaml"
 
+remote_paths=()
+if [[ "${scenario}" == remote-gateway ]]; then
+  install_managed "${REPO_DIR}/configs/remote-gateway/policy.yaml" "${CONFIG_DIR}/policy.yaml" 0640 root "${gid}"
+  install_managed "${jwt_public_key}" "${CONFIG_DIR}/jwt-public.pem" 0640 root "${gid}"
+  install_managed "${tls_cert}" "${CONFIG_DIR}/tls.pem" 0640 root "${gid}"
+  install_managed "${tls_key}" "${CONFIG_DIR}/tls-key.pem" 0640 root "${gid}"
+  for file in policy.yaml jwt-public.pem tls.pem tls-key.pem; do
+    remote_paths+=("${CONFIG_DIR}/${file}")
+    install_container_file_label "${CONFIG_DIR}/${file}"
+  done
+fi
+printf '%s\n' "${scenario}" >"${tmp_dir}/gateway.scenario"
+install_managed "${tmp_dir}/gateway.scenario" "${SCENARIO_FILE}" 0640 root "${gid}"
+
 if [[ "${profile}" == "valkey" ]]; then
   install_managed "${tmp_dir}/valkey.conf" "${CONFIG_DIR}/valkey.conf" 0640 root "${gid}"
   install_managed "${tmp_dir}/praxis-valkey.container" "${quadlet_dir}/praxis-valkey.container" 0640 root "${gid}"
@@ -325,11 +382,15 @@ chmod 0640 "${PROFILE_FILE}.new"
 mv -f "${PROFILE_FILE}.new" "${PROFILE_FILE}"
 
 managed_paths=(
+  "${SCENARIO_FILE}"
   "${CONFIG_DIR}/shared-gateway.yaml"
   "${PROFILE_FILE}"
   "${quadlet_dir}/praxis.container"
   "${quadlet_dir}/praxis.network"
 )
+if [[ "${scenario}" == remote-gateway ]]; then
+  managed_paths+=("${remote_paths[@]}")
+fi
 if [[ "${profile}" == "valkey" ]]; then
   managed_paths+=(
     "${CONFIG_DIR}/valkey.conf"
@@ -364,5 +425,5 @@ for (( attempt = 0; attempt < 60; attempt++ )); do
 done
 [[ "${health}" == "healthy" ]] || die "Praxis did not become healthy; inspect the user-service journal"
 
-note "installed shared-gateway ${profile} profile"
-note "run scripts/shared-gateway/status and scripts/shared-gateway/verify"
+note "installed ${scenario}, ${profile} token-quota profile"
+note "run scripts/common/status and scripts/common/verify"

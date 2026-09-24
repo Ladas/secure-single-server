@@ -18,7 +18,7 @@ case "${mode}" in
     "${REPO_DIR}/tests/shared-gateway-host.sh"
     ;;
   --help|-h)
-    printf 'usage: scripts/shared-gateway/verify --local | --host\n'
+    printf 'usage: scripts/common/verify --local | --host\n'
     ;;
   '')
     if [[ "$(uname -s)" == "Linux" && "${EUID}" -eq 0 && -f /etc/praxis/shared-gateway.profile ]]; then

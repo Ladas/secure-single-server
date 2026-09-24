@@ -6,8 +6,8 @@ TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly TEST_DIR
 REPO_DIR="$(cd -- "${TEST_DIR}/.." && pwd)"
 readonly REPO_DIR
-# shellcheck source=scripts/shared-gateway/lib.sh
-source "${REPO_DIR}/scripts/shared-gateway/lib.sh"
+# shellcheck source=scripts/common/lib.sh
+source "${REPO_DIR}/scripts/common/lib.sh"
 readonly IMAGE="${PRAXIS_IMAGE:-quay.io/opendatahub/praxis-experimental@sha256:a3006352106c2264427faa79b57cf7b49287f3f9bfffe9b2eef869d3429988e8}"
 
 engine="${CONTAINER_ENGINE:-}"
@@ -49,8 +49,8 @@ awk '
   }
   /# @@BASELINE_FILTER_CHAINS@@/ { printf "%s", baseline; next }
   { print }
-' "${REPO_DIR}/configs/praxis/shared-gateway.yaml" \
-  "${REPO_DIR}/configs/praxis/shared-gateway-switchyard.yaml.in" >"${tmp_dir}/switchyard.yaml"
+' "${REPO_DIR}/configs/all-in-one/shared-gateway.yaml" \
+  "${REPO_DIR}/configs/all-in-one/shared-gateway-switchyard.yaml.in" >"${tmp_dir}/switchyard.yaml"
 sed -i.bak \
   -e 's/@@JUDGE_MODEL@@/judge-model/g' \
   -e 's/@@WEAK_MODEL@@/weak-model/g' \
@@ -99,8 +99,8 @@ run_config() {
   "${engine}" rm --force "${name}" >/dev/null
 }
 
-run_config memory "${REPO_DIR}/configs/praxis/shared-gateway.yaml"
-run_config valkey "${REPO_DIR}/configs/praxis/shared-gateway-valkey.yaml"
+run_config memory "${REPO_DIR}/configs/all-in-one/shared-gateway.yaml"
+run_config valkey "${REPO_DIR}/configs/all-in-one/shared-gateway-valkey.yaml"
 run_config switchyard "${tmp_dir}/switchyard.yaml"
 
 printf 'pinned Praxis image and all rendered configs start on linux/%s\n' "${architecture}"

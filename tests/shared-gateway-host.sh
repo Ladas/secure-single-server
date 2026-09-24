@@ -6,8 +6,8 @@ TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly TEST_DIR
 REPO_DIR="$(cd -- "${TEST_DIR}/.." && pwd)"
 readonly REPO_DIR
-# shellcheck source=scripts/shared-gateway/lib.sh
-source "${REPO_DIR}/scripts/shared-gateway/lib.sh"
+# shellcheck source=scripts/common/lib.sh
+source "${REPO_DIR}/scripts/common/lib.sh"
 
 require_root
 verify_managed_manifest
@@ -21,14 +21,24 @@ verify_managed_manifest
 as_service systemctl --user is-active --quiet praxis.service
 as_service podman inspect praxis-shared-gateway --format '{{.State.Status}} {{.Config.User}}' \
   | grep -Eqx 'running 1001(:1001)?'
-[[ "$(as_service podman port praxis-shared-gateway 8080/tcp)" == "127.0.0.1:8080" ]] || die "unexpected OpenAI port binding"
-[[ "$(as_service podman port praxis-shared-gateway 8081/tcp)" == "127.0.0.1:8081" ]] || die "unexpected Anthropic port binding"
+scenario="all-in-one"
+[[ ! -f "${SCENARIO_FILE}" ]] || scenario="$(<"${SCENARIO_FILE}")"
+if [[ "${scenario}" == remote-gateway ]]; then
+  [[ "$(as_service podman port praxis-shared-gateway)" == "8443/tcp -> 0.0.0.0:8443" ]] ||
+    die "remote gateway must publish only HTTPS on 8443"
+  if ss -H -ltn | awk '{print $4}' | grep -Eq ':(8080|8081|8082)$'; then
+    die "plaintext inference port is host-visible"
+  fi
+else
+  [[ "$(as_service podman port praxis-shared-gateway 8080/tcp)" == "127.0.0.1:8080" ]] || die "unexpected OpenAI port binding"
+  [[ "$(as_service podman port praxis-shared-gateway 8081/tcp)" == "127.0.0.1:8081" ]] || die "unexpected Anthropic port binding"
+  for port in 8080 8081; do
+    ss -H -ltn | awk '{print $4}' | grep -qx "127.0.0.1:${port}"
+  done
+fi
 as_service podman exec praxis-shared-gateway \
   curl --fail --silent http://127.0.0.1:9901/healthy >/dev/null
 
-for port in 8080 8081; do
-  ss -H -ltn | awk '{print $4}' | grep -qx "127.0.0.1:${port}"
-done
 if ss -H -ltn | awk '{print $4}' | grep -Eq ':(9901|6379|8000)$'; then
   printf 'error: private admin or dependency listener is host-visible\n' >&2
   exit 1
@@ -43,6 +53,12 @@ gid="$(service_gid)"
 quadlet_dir="/etc/containers/systemd/users/${uid}"
 [[ "$(stat -c '%u:%g %a' "${CONFIG_DIR}/shared-gateway.yaml")" == "0:${gid} 640" ]] || die "unexpected configuration permissions"
 stat -c '%C' "${CONFIG_DIR}/shared-gateway.yaml" | grep -q ':container_file_t:'
+if [[ "${scenario}" == remote-gateway ]]; then
+  for file in policy.yaml jwt-public.pem tls.pem tls-key.pem; do
+    [[ "$(stat -c '%u:%g %a' "${CONFIG_DIR}/${file}")" == "0:${gid} 640" ]] || die "unsafe ${file} permissions"
+    stat -c '%C' "${CONFIG_DIR}/${file}" | grep -q ':container_file_t:'
+  done
+fi
 [[ "$(stat -c '%u:%g %a' "${quadlet_dir}")" == "0:${gid} 750" ]] || die "unexpected Quadlet directory permissions"
 [[ "$(stat -c '%u:%g %a' "${quadlet_dir}/praxis.container")" == "0:${gid} 640" ]] || die "unexpected Quadlet permissions"
 

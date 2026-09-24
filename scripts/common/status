@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-# shellcheck source=scripts/shared-gateway/lib.sh
+# shellcheck source=scripts/common/lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
 require_root
@@ -33,6 +33,9 @@ if [[ -f "${PROFILE_FILE}" ]]; then
 else
   printf 'profile: not installed\n'
 fi
+if [[ -f "${SCENARIO_FILE}" ]]; then
+  printf 'scenario: %s\n' "$(<"${SCENARIO_FILE}")"
+fi
 
 for unit in praxis.service praxis-valkey.service; do
   if as_service systemctl --user cat "${unit}" >/dev/null 2>&1; then
@@ -55,7 +58,7 @@ if as_service podman container exists praxis-valkey; then
 fi
 
 printf 'host listeners:\n'
-ss -H -ltnp | awk '$4 ~ /:(8080|8081|8082|9901|6379|8000)$/ { print "  " $0 }'
+ss -H -ltnp | awk '$4 ~ /:(8443|8080|8081|8082|9901|6379|8000)$/ { print "  " $0 }'
 
 if [[ -f "${MANIFEST_FILE}" ]]; then
   verify_managed_manifest

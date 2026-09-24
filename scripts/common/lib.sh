@@ -7,6 +7,8 @@ readonly CONFIG_DIR="${PRAXIS_CONFIG_DIR:-/etc/praxis}"
 # Consumed by scripts that source this library.
 # shellcheck disable=SC2034
 readonly PROFILE_FILE="${CONFIG_DIR}/shared-gateway.profile"
+# shellcheck disable=SC2034
+readonly SCENARIO_FILE="${CONFIG_DIR}/gateway.scenario"
 readonly MANIFEST_FILE="${CONFIG_DIR}/shared-gateway.manifest"
 # Consumed by the installer that sources this library.
 # shellcheck disable=SC2034
@@ -132,6 +134,37 @@ sha256_file() {
   sha256sum "$1" | awk '{print $1}'
 }
 
+render_remote_config() {
+  local profile="$1" source="$2" destination="$3"
+  case "${profile}" in memory|valkey) ;; *) die "remote profile must be memory or valkey" ;; esac
+  awk -v profile="${profile}" '
+    /kind: memory/ {
+      count++
+      if (profile == "valkey") {
+        print "          kind: valkey"
+        print "          url: \"${TOKEN_RATE_LIMIT_VALKEY_URL}\""
+        print "          namespace: secure-single-server:limits:" (count == 1 ? "openai" : "anthropic")
+        next
+      }
+    }
+    { print }
+    END { if (count != 2) exit 1 }
+  ' "${source}" >"${destination}" || die "expected exactly two quota backends in the remote config"
+}
+
+render_remote_quadlet() {
+  local source="$1" destination="$2"
+  awk '
+    /^PublishPort=/ { next }
+    { print }
+    /^Network=/ {
+      print "PublishPort=0.0.0.0:8443:8443"
+      split("policy.yaml jwt-public.pem tls.pem tls-key.pem", files, " ")
+      for (i = 1; i <= 4; i++) print "Volume=/etc/praxis/" files[i] ":/etc/praxis/" files[i] ":ro"
+    }
+  ' "${source}" >"${destination}"
+}
+
 selinux_path_regex() {
   local escaped
   escaped="$(printf '%s' "$1" | sed 's/[][(){}.*+?^$|\\]/\\&/g')"
@@ -142,6 +175,7 @@ validate_owned_path() {
   local path="$1" uid
   uid="$(service_uid)"
   case "${path}" in
+    "${CONFIG_DIR}/gateway.scenario"|"${CONFIG_DIR}/policy.yaml"|"${CONFIG_DIR}/jwt-public.pem"|"${CONFIG_DIR}/tls.pem"|"${CONFIG_DIR}/tls-key.pem") ;;
     "${CONFIG_DIR}/shared-gateway.yaml"|"${CONFIG_DIR}/shared-gateway.profile"|"${CONFIG_DIR}/valkey.conf"|"/etc/containers/systemd/users/${uid}/praxis.container"|"/etc/containers/systemd/users/${uid}/praxis.network"|"/etc/containers/systemd/users/${uid}/praxis-valkey.container"|"/etc/containers/systemd/users/${uid}/praxis-valkey.volume") ;;
     *) die "manifest contains an unmanaged path: ${path}" ;;
   esac
