@@ -35,6 +35,29 @@ def yaml_file(path):
     return json.loads(run("ruby", "-ryaml", "-rjson", "-e", "puts YAML.load_file(ARGV[0]).to_json", path))
 
 
+def restart_gateway(name):
+    # Docker may assign a different random host port after a restart.
+    run(ENGINE, "restart", name)
+    return run(ENGINE, "port", name, "8443/tcp").rsplit(":", 1)[1]
+
+
+def wait_for_gateway(request, attempts=30):
+    last_result = "no response"
+    for attempt in range(attempts):
+        try:
+            status = request("/v1/models", method="GET")
+            if status == 401:
+                return
+            last_result = f"HTTP {status}"
+        except (OSError, urllib.error.URLError) as error:
+            if isinstance(getattr(error, "reason", error), ssl.SSLCertVerificationError):
+                raise
+            last_result = str(error)
+        if attempt + 1 < attempts:
+            time.sleep(1)
+    raise AssertionError(f"TLS/JWT endpoint did not become ready: {last_result}")
+
+
 def expect_certificate_rejection(opener, url):
     try:
         with opener.open(url, timeout=5):
@@ -156,16 +179,7 @@ def main():
                         return response.status
                 except urllib.error.HTTPError as error:
                     return error.code
-            for _ in range(30):
-                try:
-                    if request("/v1/messages") == 401:
-                        break
-                except (OSError, urllib.error.URLError) as error:
-                    if isinstance(getattr(error, "reason", error), ssl.SSLCertVerificationError):
-                        raise
-                time.sleep(1)
-            else:
-                raise AssertionError("TLS/JWT endpoint did not become ready")
+            wait_for_gateway(request)
             key = work / "issuer/private.pem"
             for bad in [None, "invalid", token(key, exp=int(time.time()) - 600),
                         token(key, iss="https://wrong.local"), token(key, aud="wrong")]:
@@ -195,15 +209,9 @@ def main():
                 assert request("/v1/messages/batches", valid) == 404, "batch bypass after quota exhaustion"
             if profile == "valkey":
                 time.sleep(2)  # allow the documented AOF everysec flush
-                run(ENGINE, "restart", name)
+                port = restart_gateway(name)
                 run(ENGINE, "restart", name + "-valkey")
-                for _ in range(20):
-                    try:
-                        if request("/v1/models") == 401:
-                            break
-                    except (OSError, urllib.error.URLError):
-                        pass
-                    time.sleep(1)
+                wait_for_gateway(request, attempts=20)
                 time.sleep(1)
                 assert request("/v1/responses", valid) == 429, "restart reset persistent OpenAI quota"
                 run(ENGINE, "stop", "--time", "1", name + "-valkey")
