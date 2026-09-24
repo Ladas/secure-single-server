@@ -70,7 +70,7 @@ sed -i.bak \
   "${tmp_dir}/switchyard.yaml"
 rm -f "${tmp_dir}/switchyard.yaml.bak"
 
-ruby -rpsych -e 'ARGV.each { |path| Psych.parse_stream(File.read(path), path) }' \
+ruby -rpsych -e 'ARGV.each { |path| Psych.parse_stream(File.read(path), filename: path) }' \
   configs/remote-gateway/gateway.yaml configs/remote-gateway/policy.yaml \
   configs/all-in-one/shared-gateway.yaml \
   configs/all-in-one/shared-gateway-valkey.yaml \
@@ -109,12 +109,13 @@ done < <(find docs -type f -name '*.md' -print | sort)
 ruby -e '
   require "open3"
   ARGV.each do |source|
-    File.read(source).scan(/\]\(([^)#]+)(?:#[^)]+)?\)/).flatten.each do |link|
+    content = File.read(source, encoding: "UTF-8")
+    content.scan(/\]\(([^)#]+)(?:#[^)]+)?\)/).flatten.each do |link|
       next if link.match?(%r{^[a-z]+://})
       target = File.expand_path(link, File.dirname(source))
       abort "missing Markdown link target: #{source} -> #{link}" unless File.exist?(target)
     end
-    File.read(source).scan(/^```(?:console|sh|bash)\n(.*?)^```/m).each_with_index do |(code), index|
+    content.scan(/^```(?:console|sh|bash)\n(.*?)^```/m).each_with_index do |(code), index|
       _, error, status = Open3.capture3("bash", "-n", stdin_data: code)
       abort "invalid shell block #{index + 1} in #{source}: #{error}" unless status.success?
     end
