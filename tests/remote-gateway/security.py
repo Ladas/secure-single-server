@@ -3,11 +3,13 @@
 import importlib.util
 from pathlib import Path
 import ssl
+import sys
 import unittest
 import urllib.error
 from unittest.mock import Mock, MagicMock, call, patch
 
-spec = importlib.util.spec_from_file_location("remote_image", Path(__file__).with_name("image.py"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+spec = importlib.util.spec_from_file_location("gateway", Path(__file__).resolve().parents[1] / "common/gateway.py")
 image = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(image)
 

@@ -25,7 +25,7 @@ jobs:
             shellcheck_arch: aarch64
             shellcheck_sha256: 68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -56,7 +56,7 @@ jobs:
           "${bin_dir}/shellcheck" --version | grep -Fx "version: ${SHELLCHECK_VERSION}"
           printf '%s\n' "${bin_dir}" >> "${GITHUB_PATH}"
       - name: Check scripts, templates, documentation, and regressions
-        run: tests/shared-gateway-static.sh
+        run: python3 tests/mocked-provider.py --suite offline --engine docker
       - name: Check bootc build contract without registry credentials
         run: |
           python3 bootc/tests/build.py
@@ -75,15 +75,43 @@ jobs:
         env:
           CONTAINER_ENGINE: docker
         run: tests/shared-gateway-valkey-image.sh
-      - name: Offline caller credentials and AWS planning safety
-        run: |
-          python3 tests/remote-gateway/credentials.py
-          python3 tests/remote-gateway/security.py
-          python3 tests/aws/plan.py
-          python3 tests/aws/session.py
-      - name: Verify native TLS and JWT with synthetic providers
+      - name: All-in-one and HTTPS/JWT contracts with memory and Valkey
         env:
           CONTAINER_ENGINE: docker
+        run: python3 tests/mocked-provider.py --suite gateways
+      - name: Upload redacted test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mocked-provider-${{ matrix.arch }}
+          path: evidence/mocked-provider/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  # Executable/configuration contracts run without a sandbox gateway.
+  # The manual disposable-RHEL runtime lane remains separate.
+  openshell-regressions:
+    name: OpenShell harness contracts and pinned schemas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install policy parser
+        run: sudo apt-get update && sudo apt-get install -y python3-yaml nodejs
+      - name: Exercise harness entry points and denial regressions
+        run: python3 tests/mocked-provider.py --suite openshell --engine docker
+      - name: Report runtime coverage separately
+        if: always()
         run: |
-          python3 tests/remote-gateway/image.py
-          python3 tests/remote-gateway/image.py --valkey
+          echo 'OpenShell runtime: NOT RUN. Use the separate manual disposable-RHEL qualification lane.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload regression status
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: openshell-regressions
+          path: |
+            evidence/mocked-provider/suite-openshell-*.json
+            evidence/mocked-provider/openshell-schema.json
+          retention-days: 7
