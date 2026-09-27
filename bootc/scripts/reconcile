@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+trap 'printf "bootc reconciliation failed at line %s\n" "${LINENO}" >&2' ERR
+# shellcheck disable=SC1091
+source /usr/share/secure-single-server/bootc/scripts/common
+# shellcheck disable=SC1091
+source "${ROOT}/openshell/scripts/gateway-lib.sh"
+require_root
+cd /
+[[ "$(uname -m)" == x86_64 ]] || die 'bootc currently targets x86_64 only'
+
+# Serialize manual activation and boot/retry runs.
+exec 9>/run/secure-single-server.lock
+flock 9
+"${ROOT}/scripts/common/install" --prepare
+PRAXIS_SERVICE_USER=openshell-svc PRAXIS_CONFIG_DIR=/etc/secure-single-server/openshell \
+  "${ROOT}/scripts/common/install" --prepare
+install -d -o openshell-svc -g openshell-svc -m 0700 /var/lib/openshell
+as_openshell mkdir -p /var/lib/openshell-svc/.config/openshell
+as_openshell systemctl --user enable --now podman.socket
+
+pull_missing as_service "${DEFAULT_PRAXIS_IMAGE}"
+for image in "${ODH_GATEWAY_IMAGE}" "${ODH_SUPERVISOR_IMAGE}" "${ODH_SANDBOX_IMAGE}"; do
+  pull_missing as_openshell "${image}"
+done
+workload="$(harness_image "$(selected_harness)")"
+pull_missing as_openshell "${workload}"
+
+gateway_ensure_certificates as_openshell
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "${tmp}"' EXIT
+# The reconciler starts units only after caching this OS deployment's images.
+gateway_install_config openshell-svc /var/lib/openshell-svc "${tmp}" "${workload}" no
+gateway_start as_openshell /usr/bin/openshell /var/lib/openshell-svc/.config/openshell/bootc-registered
+
+# Secrets are provisioned separately through stdin. Only their names live here.
+openai_secret=praxis-openai-api-key-v1
+anthropic_secret=praxis-anthropic-api-key-v1
+if [[ -f /etc/secure-single-server/secret-names ]]; then
+  read -r openai_secret anthropic_secret extra </etc/secure-single-server/secret-names
+  [[ -z "${extra}" ]] || die 'expected exactly two secret names'
+fi
+validate_secret_name "${openai_secret}"
+validate_secret_name "${anthropic_secret}"
+praxis_units="/etc/containers/systemd/users/$(service_uid)"
+if ! secret_exists "${openai_secret}" || ! secret_exists "${anthropic_secret}"; then
+  as_service systemctl --user stop praxis.service 2>/dev/null || true
+  note 'OpenShell ready; Praxis awaits provider secrets. See sss-bootc help.'
+  exit 0
+fi
+
+install -o root -g "$(service_gid)" -m 0640 "${ROOT}/configs/all-in-one/shared-gateway.yaml" \
+  /etc/praxis/shared-gateway.yaml
+regex="$(selinux_path_regex /etc/praxis/shared-gateway.yaml)"
+semanage fcontext -a -t container_file_t "${regex}" 2>/dev/null || \
+  semanage fcontext -m -t container_file_t "${regex}"
+restorecon -F /etc/praxis/shared-gateway.yaml
+render_template "${ROOT}/configs/common/quadlet/praxis.container.in" "${tmp}/praxis.container" \
+  PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}"
+sed '/^\[Install\]/,$d' "${tmp}/praxis.container" >"${tmp}/praxis-bootc.container"
+install -m 0644 "${tmp}/praxis-bootc.container" "${praxis_units}/praxis.container"
+install -m 0644 "${ROOT}/configs/common/quadlet/praxis.network" "${praxis_units}/praxis.network"
+as_service systemctl --user daemon-reload
+as_service systemctl --user restart praxis.service
+for (( attempt=0; attempt<60; attempt++ )); do
+  health="$(as_service podman inspect praxis-shared-gateway --format '{{.State.Health.Status}}' 2>/dev/null || true)"
+  [[ "${health}" != healthy ]] || { note 'Praxis and OpenShell ready'; exit 0; }
+  sleep 1
+done
+die 'Praxis failed its health check'

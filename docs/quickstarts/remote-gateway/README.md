@@ -51,8 +51,9 @@ Using 8443 avoids changing the host's privileged-port policy.
   or USD budgets. All valid callers can use every configured model/provider.
 - Administrator-issued, expiring JWTs; no OIDC login/refresh or immediate
   per-token revocation. Emergency key rotation invalidates all callers.
-- Real-harness and RHEL host qualification remain required. Switchyard,
-  local vLLM and OpenShell are separate phases.
+- Real-harness and RHEL host qualification remain required. Switchyard
+  and local vLLM are outside this scenario. For host-local sandbox experiments,
+  see [OpenShell + Praxis](../openshell-praxis/README.md).
 
 TLS certificates and JWT verification keys are replaced through a reviewed
 same-profile reinstall/restart. Automatic certificate renewal is not supplied.

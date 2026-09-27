@@ -16,12 +16,14 @@ Volume=%h/.config/openshell/gateway.toml:/etc/openshell/gateway.toml:ro
 Volume=/var/lib/openshell:/var/lib/openshell
 Volume=%t/podman/podman.sock:/run/podman/podman.sock
 SecurityLabelDisable=true
-PodmanArgs=--userns=keep-id
+PodmanArgs=--userns=keep-id:uid=1001,gid=1001
+User=1001
+Group=1001
 Environment=OPENSHELL_GATEWAY_CONFIG=/etc/openshell/gateway.toml
 Environment=OPENSHELL_DB_URL=sqlite:/var/lib/openshell/gateway.db?mode=rwc
 Environment=XDG_DATA_HOME=/var/lib/openshell
 Environment=HOME=/var/lib/openshell
-Exec=
+Exec=--bind-address 127.0.0.1 --port 8090
 
 [Service]
 Restart=on-failure

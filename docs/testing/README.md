@@ -77,3 +77,26 @@ After the no-key checks, follow [harness acceptance](harnesses.md) on the local
 RHEL VM, then repeat on AWS RHEL. This round covers **in-memory and Valkey**;
 real-provider Switchyard acceptance is a separate next phase. A successful
 arm64 run does not complete the amd64 column.
+
+## OpenShell and bootc
+
+OpenShell and bootc currently target RHEL 9 x86_64. Start with offline checks:
+
+```console
+bash openshell/tests/openshell-static.sh
+python3 openshell/tests/probe-test.py
+python3 bootc/tests/build.py
+shellcheck -x bootc/build bootc/test-images bootc/test-host bootc/scripts/*
+```
+
+OpenShell static CI runs in UBI 9. Its runtime job requires manual dispatch,
+`OPENSHELL_SELF_HOSTED=true`, and a disposable runner labeled
+`self-hosted/Linux/X64/rhel9/openshell-disposable`. It uses one installer-owned
+fixture for native schema and controlled policy checks; a skipped job is not
+runtime evidence. Combined Praxis inference needs a separately configured fixture.
+
+Follow the [bootc guide](../../bootc/README.md) for native image builds and booted
+host checks. The [AWS validation record](../../bootc/VALIDATION.md) covers completed
+mutable lifecycle and bootc tests, with remaining inference/network gaps. These
+results are separate from the full Praxis architecture matrix above and do not
+qualify real-provider tasks or every profile.

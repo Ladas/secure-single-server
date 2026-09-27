@@ -1,0 +1,25 @@
+ARG RHEL_BOOTC_IMAGE
+ARG OPENSHELL_CLI_IMAGE
+FROM ${OPENSHELL_CLI_IMAGE} AS cli
+FROM ${RHEL_BOOTC_IMAGE}
+
+# Workload containers are pulled into persistent rootless storage after boot.
+# Only the native CLI is copied into the OS image.
+RUN dnf install -y podman skopeo policycoreutils-python-utils shadow-utils \
+      util-linux openssl openssh-clients jq python3 curl cloud-init \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf /var/lib/dnf /var/lib/rhsm /run/cloud-init /run/rhsm \
+    && find /var/log -type f -delete
+COPY --from=cli /usr/local/bin/openshell /usr/bin/openshell
+COPY scripts/common /usr/share/secure-single-server/scripts/common
+COPY configs /usr/share/secure-single-server/configs
+COPY openshell/configs /usr/share/secure-single-server/openshell/configs
+COPY openshell/scripts /usr/share/secure-single-server/openshell/scripts
+COPY bootc/scripts /usr/share/secure-single-server/bootc/scripts
+COPY bootc/systemd/secure-single-server.service /usr/lib/systemd/system/
+COPY bootc/systemd/delegate.conf /usr/lib/systemd/system/user@.service.d/50-secure-single-server.conf
+RUN chmod 0755 /usr/share/secure-single-server/bootc/scripts/* \
+    && ln -s /usr/share/secure-single-server/bootc/scripts/admin /usr/bin/sss-bootc \
+    && systemctl enable secure-single-server.service \
+    && bootc container lint
+LABEL containers.bootc=1

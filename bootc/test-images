@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+prefix="${1:-localhost/secure-single-server}"
+for variant in base codex opencode openclaw; do
+  image="${prefix}:${variant}"
+  [[ "$(podman image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')" == linux/amd64 ]] || exit 1
+  podman run --rm --network=none --entrypoint /bin/bash "${image}" -euc '
+    source /etc/os-release
+    [[ "$ID" == rhel && "$VERSION_ID" == 9.* ]]
+    test -x /usr/bin/openshell
+    /usr/bin/openshell --version
+    test -x /usr/bin/bootc
+    test -x /usr/bin/podman
+    test -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
+    test ! -e /var/lib/openshell/tls/jwt/signing.pem
+    test ! -e /etc/secure-single-server/secret-names
+    test ! -e /etc/pki/rhui/content-rhel9.key
+    test ! -s /etc/yum.repos.d/bootc-rhui.repo
+    root=/usr/share/secure-single-server
+    if [[ "$1" == base ]]; then
+      test ! -e "$root/bootc/harness"
+      test ! -d "$root/openshell/harnesses"
+    else
+      test "$(cat "$root/bootc/harness")" = "$1"
+      test -x "$root/openshell/harnesses/$1/create.sh"
+      test "$(find "$root/openshell/harnesses" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 1
+      # Argument parsing must reach validation (catch shared-library readonly collisions).
+      if "$root/openshell/harnesses/$1/create.sh" --profile invalid >/tmp/harness-check 2>&1; then
+        exit 1
+      fi
+      grep -q "no such profile: invalid" /tmp/harness-check
+    fi
+    sss-bootc help
+  ' -- "${variant}"
+done

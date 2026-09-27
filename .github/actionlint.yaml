@@ -1,0 +1,4 @@
+self-hosted-runner:
+  labels:
+    - rhel9
+    - openshell-disposable

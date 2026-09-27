@@ -9,6 +9,7 @@ readonly REPO_DIR
 # shellcheck source=scripts/common/lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
+openshell_owner=""
 profile="memory"
 praxis_image="${DEFAULT_PRAXIS_IMAGE}"
 valkey_image=""
@@ -44,6 +45,7 @@ Usage:
 
 Options:
   --scenario all-in-one|remote-gateway|openshell-praxis  Set by the scenario install wrapper.
+  --owner ACCOUNT                     OpenShell add-on: dedicated locked account.
   --tls-cert PATH --tls-key PATH        Remote: PEM full chain and matching key.
   --jwt-public-key PATH                 Remote: RSA public verification key only.
   --development-fedora                  Allow mutable Fedora for development.
@@ -54,6 +56,7 @@ EOF
 
 while (( "$#" )); do
   case "$1" in
+    --owner) openshell_owner="${2:-}"; shift 2 ;;
     --scenario) scenario="${2:-}"; shift 2 ;;
     --tls-cert) tls_cert="${2:-}"; shift 2 ;;
     --tls-key) tls_key="${2:-}"; shift 2 ;;
@@ -177,6 +180,7 @@ case "${scenario}" in
 esac
 
 if [[ "${scenario}" == openshell-praxis ]]; then
+  [[ -n "${openshell_owner}" ]] || die "OpenShell requires --owner ACCOUNT"
   note "installing openshell-praxis scenario (OpenShell gateway + Praxis all-in-one loopback)"
 
   # Assert Praxis all-in-one is installed
@@ -191,21 +195,11 @@ if [[ "${scenario}" == openshell-praxis ]]; then
   [[ "${health}" == "healthy" ]] || die "Praxis all-in-one gateway is not healthy; current state: ${health}"
   note "Praxis all-in-one gateway is healthy"
 
-  # Install OpenShell gateway
-  note "installing OpenShell gateway"
-  runuser -u "$(logname)" -- "${REPO_DIR}/openshell/scripts/install.sh"
-
-  # Record scenario
-  printf '%s\n' "${scenario}" >"${SCENARIO_FILE}.new"
-  uid="$(service_uid)"
-  gid="$(service_gid)"
-  chown root:"${gid}" "${SCENARIO_FILE}.new"
-  chmod 0640 "${SCENARIO_FILE}.new"
-  mv -f "${SCENARIO_FILE}.new" "${SCENARIO_FILE}"
-
-  note "openshell-praxis scenario installed successfully"
-  note "OpenShell gateway: http://127.0.0.1:8091/healthz"
-  note "Praxis loopback: http://127.0.0.1:8080/v1 (via OpenShell sandbox only)"
+  # OpenShell is an independent add-on; never rewrite the hashed Praxis scenario.
+  verify_managed_manifest
+  "${REPO_DIR}/openshell/scripts/install.sh" --owner "${openshell_owner}"
+  verify_managed_manifest
+  note "OpenShell add-on installed; Praxis remains managed as all-in-one"
   exit 0
 fi
 

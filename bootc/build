@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/common/lib.sh
+source "${ROOT}/scripts/common/lib.sh"
+# shellcheck source=openshell/configs/images.env
+source "${ROOT}/openshell/configs/images.env"
+
+if [[ "${1:-}" == --help || "$#" -lt 1 || "$#" -gt 2 ]]; then
+  cat <<'EOF'
+Usage: bootc/build base|codex|opencode|openclaw|all [IMAGE_PREFIX]
+Run on an x86_64 Linux Podman builder, normally with sudo.
+RHEL_BOOTC_IMAGE must be a reviewed registry.redhat.io/rhel9/rhel-bootc@sha256:... reference.
+IMAGE_PREFIX defaults to localhost/secure-single-server.
+On an AWS PAYG RHEL builder set AWS_RHUI_REGION (for example us-east-1).
+Build base before an individual harness; all builds base plus all three harnesses.
+EOF
+  [[ "${1:-}" == --help ]] && exit 0
+  exit 2
+fi
+target="$1"
+case "${target}" in base|codex|opencode|openclaw|all) ;; *) die "unknown target: ${target}" ;; esac
+prefix="${2:-localhost/secure-single-server}"
+[[ "${prefix}" =~ ^[a-z0-9][a-z0-9./:_-]*$ ]] || die 'invalid image prefix'
+[[ "$(podman info --format '{{.Host.OS}}/{{.Host.Arch}}')" == linux/amd64 ]] ||
+  die 'an x86_64 Linux Podman builder is required'
+
+# Send a narrowly selected context, never local credentials, Git history, or evidence.
+context="$(mktemp -d)"
+rhui_repo=""
+trap 'rm -rf "${context}"; if [[ -n "${rhui_repo}" ]]; then rm -f "${rhui_repo}"; fi' EXIT
+tar -C "${ROOT}" --exclude='*.secret' --exclude='*.local' --exclude='.env' \
+  --exclude='auth.json' --exclude='*.pem' --exclude='*.key' \
+  --exclude='__pycache__' --exclude='._*' \
+  -cf - scripts/common configs openshell/configs openshell/scripts \
+  openshell/harnesses bootc | tar -C "${context}" -xf -
+if [[ "${target}" == base || "${target}" == all ]]; then
+  : "${RHEL_BOOTC_IMAGE:?set RHEL_BOOTC_IMAGE to the reviewed RHEL 9 bootc digest}"
+  validate_digest_image "${RHEL_BOOTC_IMAGE}"
+  [[ "${RHEL_BOOTC_IMAGE}" == registry.redhat.io/rhel9/rhel-bootc@sha256:* ]] ||
+    die 'expected the Red Hat RHEL 9 bootc repository'
+  repo_args=()
+  if [[ -n "${AWS_RHUI_REGION:-}" ]]; then
+    [[ "${AWS_RHUI_REGION}" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]] || die 'invalid AWS RHUI region'
+    [[ -f /etc/yum.repos.d/redhat-rhui.repo && -d /etc/pki/rhui ]] || die 'AWS RHEL RHUI files not found'
+    rhui_repo="$(mktemp)"
+    sed "s/REGION/${AWS_RHUI_REGION}/g" /etc/yum.repos.d/redhat-rhui.repo >"${rhui_repo}"
+    # Ephemeral build mounts: never COPY entitlement keys into image layers.
+    [[ -f /usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py ]] || die 'AWS RHUI DNF plugin not found'
+    # Host networking lets the unmodified RHUI plugin use IMDSv2 with hop limit 1.
+    repo_args=(--security-opt label=disable --network=host \
+      --volume "${rhui_repo}:/etc/yum.repos.d/bootc-rhui.repo:ro" \
+      --volume /etc/pki/rhui:/etc/pki/rhui:ro \
+      --volume /usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py:/usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py:ro \
+      --volume /etc/dnf/plugins/amazon-id.conf:/etc/dnf/plugins/amazon-id.conf:ro)
+  fi
+  podman build "${repo_args[@]}" --arch amd64 --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
+    --build-arg "OPENSHELL_CLI_IMAGE=${ODH_CLI_IMAGE}" \
+    -f "${context}/bootc/Containerfile" -t "${prefix}:base" "${context}"
+fi
+if [[ "${target}" != base ]]; then
+  # Resolve the actual parent ID so a moved local tag cannot change the parent.
+  parent="$(podman image inspect "${prefix}:base" --format '{{.Id}}')"
+  harnesses=("${target}")
+  [[ "${target}" != all ]] || harnesses=(codex opencode openclaw)
+  for harness in "${harnesses[@]}"; do
+    podman build --pull=never --arch amd64 --build-arg "BASE_IMAGE=${parent}" \
+      --build-arg "HARNESS=${harness}" -f "${context}/bootc/Containerfile.harness" \
+      -t "${prefix}:${harness}" "${context}"
+  done
+fi

@@ -1,118 +1,37 @@
-# OpenShell + Praxis Installation
+# Experimental OpenShell add-on installation
 
-## Prerequisites
-
-- RHEL 9 with rootless Podman 4.6 or newer
-- Praxis all-in-one gateway installed and healthy (see `docs/install.md`)
-- Root access for OpenShell gateway installation
-
-## Step 1: Verify Praxis All-in-One
-
-Before installing the openshell-praxis scenario, ensure the Praxis all-in-one gateway is running:
+Use a disposable, trusted single-operator RHEL 9 x86_64 host with the dependencies
+and checkout described in the [RHEL guide](../../testing/rhel-vm.md). Install
+[Praxis all-in-one](../all-in-one/README.md) first. Commands below run on that VM
+from the repository root. Bootc hosts instead use [bootc reconciliation](../../../bootc/README.md).
 
 ```bash
-curl -fsS http://127.0.0.1:8081/healthz
-```
-
-Expected response: `{"status":"ok"}` or similar healthy status.
-
-Verify the scenario file:
-
-```bash
-sudo cat /etc/praxis-shared-gateway/gateway.scenario
-```
-
-Expected output: `all-in-one`
-
-## Step 2: Install OpenShell + Praxis Integration
-
-Run the openshell-praxis scenario installer:
-
-```bash
-sudo scripts/openshell-praxis/install
-```
-
-This installer will:
-
-1. **Validate Praxis** — Confirm all-in-one gateway is installed and healthy
-2. **Enable rootless Podman socket** — For the OpenShell gateway
-3. **Configure cgroup delegation** — For nested containers
-4. **Generate JWT signing keys** — For sandbox authentication
-5. **Pull pinned images** — OpenShell gateway, supervisor, and harness images
-6. **Install OpenShell CLI binary** — At `/usr/local/bin/openshell`
-7. **Start OpenShell gateway** — Binds to `127.0.0.1:8090` (gRPC) and `:8091` (health)
-8. **Record scenario** — Updates `/etc/praxis-shared-gateway/gateway.scenario` to `openshell-praxis`
-
-## Step 3: Verify Installation
-
-Check the OpenShell gateway health:
-
-```bash
+sudo scripts/common/status
+sudo cat /etc/praxis/gateway.scenario   # remains all-in-one
+sudo scripts/openshell-praxis/install --owner openshell-svc
+sudo scripts/common/status
 curl -fsS http://127.0.0.1:8091/healthz
 ```
 
-Check the Praxis gateway health (should still be running):
+The add-on verifies the Praxis managed manifest and never rewrites its scenario,
+configuration, quotas or secrets. The dedicated locked `openshell-svc` account
+owns the rootless gateway; `praxis-svc` continues to own Praxis. Delegation is
+scoped to the OpenShell user manager and applied without restarting it. Lingering
+keeps services running after logout. The installer polls health and CLI access.
 
-```bash
-curl -fsS http://127.0.0.1:8081/healthz
-```
+Rerun the same installer after failure; machine keys and data are retained. It
+refuses an existing data directory owned by another account or unmanaged config.
+Remove the add-on with `sudo openshell/scripts/uninstall.sh`, then rerun
+`sudo scripts/common/status`. Removal stops the gateway and removes its unit;
+it retains account, lingering, CLI, configuration, keys, containers and workspaces.
+Export and delete sandbox work before final host disposal. Praxis uninstall
+remains its independent managed lifecycle; drift checks stay enabled.
 
-Verify the scenario was recorded:
+Praxis listens on loopback 8080 (OpenAI inference) and 8081 (Anthropic inference).
+Its admin health is private inside the container; use `scripts/common/status`,
+not a host health URL. OpenShell uses loopback 8090 (management) and 8091 (health).
+Unauthenticated local management trusts every host user and is not a multi-tenant
+boundary. Do not publish the management endpoint to untrusted users.
 
-```bash
-sudo cat /etc/praxis-shared-gateway/gateway.scenario
-```
-
-Expected output: `openshell-praxis`
-
-## Port Summary
-
-After installation, the following ports are in use on loopback:
-
-| Service               | Port | Protocol | Purpose                          |
-|-----------------------|------|----------|----------------------------------|
-| Praxis gateway        | 8080 | HTTP     | Model proxy (OpenAI-compatible)  |
-| Praxis health         | 8081 | HTTP     | Health/metrics endpoint          |
-| OpenShell gateway     | 8090 | gRPC     | Sandbox management               |
-| OpenShell health      | 8091 | HTTP     | Health/status endpoint           |
-
-## Host Alias Reachability
-
-The integrated scenario depends on `host.openshell.internal` resolving inside bridge-networked sandbox containers to reach the Praxis loopback gateway on the host. This reachability is validated by the host smoke test (Task 11); the installer does not verify it.
-
-## Troubleshooting
-
-### Praxis not healthy
-
-If Praxis is not healthy, check the service status:
-
-```bash
-sudo systemctl --user -M praxis-shared-gateway@ status praxis.service
-```
-
-Reinstall or repair the all-in-one gateway before proceeding with openshell-praxis.
-
-### OpenShell install fails
-
-Check that the user running the install has rootless Podman enabled:
-
-```bash
-systemctl --user status podman.socket
-```
-
-If cgroup delegation fails, you may need to log out and back in after the installer applies the systemd configuration.
-
-### Port conflicts
-
-If ports 8090 or 8091 are already in use, you will see an error during install. Identify the conflicting process:
-
-```bash
-ss -ltn | grep ':809[01]'
-```
-
-Stop the conflicting service before retrying.
-
-## Next Steps
-
-- [User Guide](users.md) — Create harness sandboxes with integrated profiles
-- [README](README.md) — Understand the architecture and security properties
+Host-alias reachability and real inference are qualification requirements, not
+established by gateway health. See [integration status](users.md).

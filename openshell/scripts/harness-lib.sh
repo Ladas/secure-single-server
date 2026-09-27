@@ -19,33 +19,18 @@ _proxy_cmd() {  # <sandbox>
 
 harness_ssh() {  # <sandbox> <cmd...>
   local name="$1"; shift
-  # SendEnv forwards the provider credentials that are set in the caller's
-  # environment; unset vars are silently skipped. The sandbox sshd must
-  # AcceptEnv them (see threat model / quickstart host-validation note).
-  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o SendEnv=OPENAI_API_KEY -o SendEnv=ANTHROPIC_API_KEY \
+  # Provider credentials must use explicit gateway bindings, never SSH forwarding.
+  ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o "ProxyCommand=$(_proxy_cmd "${name}")" \
     "${OPENSHELL_SANDBOX_USER}@${name}" "$@"
 }
 
 harness_connect_tty() {  # <sandbox> [cmd...]
   local name="$1"; shift || true
-  # SendEnv forwards the provider credentials that are set in the caller's
-  # environment; unset vars are silently skipped. The sandbox sshd must
-  # AcceptEnv them (see threat model / quickstart host-validation note).
-  ssh -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o SendEnv=OPENAI_API_KEY -o SendEnv=ANTHROPIC_API_KEY \
+  # Provider credentials must use explicit gateway bindings, never SSH forwarding.
+  ssh -F /dev/null -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o "ProxyCommand=$(_proxy_cmd "${name}")" \
     "${OPENSHELL_SANDBOX_USER}@${name}" "$@"
-}
-
-harness_forward() {  # <sandbox> <port>
-  local name="$1" port="$2"
-  note "Forwarding 127.0.0.1:${port} -> sandbox ${name}:${port} (Ctrl-C to stop)"
-  ssh -N -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o "ProxyCommand=$(_proxy_cmd "${name}")" \
-    -L "127.0.0.1:${port}:127.0.0.1:${port}" \
-    "${OPENSHELL_SANDBOX_USER}@${name}"
 }
 
 harness_destroy() { _os sandbox delete "$1" >/dev/null 2>&1 || true; }
@@ -54,7 +39,7 @@ harness_destroy() { _os sandbox delete "$1" >/dev/null 2>&1 || true; }
 _wait_ready() {  # <sandbox>
   local name="$1" ph _
   for _ in $(seq 1 40); do
-    ph="$(_os sandbox list 2>/dev/null | awk -v n="${name}" '$1==n{print $NF}')"
+    ph="$(_os sandbox list --output json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((s["phase"] for s in d["sandboxes"] if s["name"]==sys.argv[1]), "Missing"))' "${name}")"
     case "${ph}" in
       Ready) return 0;;
       Error) die "sandbox ${name} entered Error phase";;
@@ -66,11 +51,22 @@ _wait_ready() {  # <sandbox>
 
 # Single-phase create: harness is pre-installed in <image_ref>.
 harness_create() {  # <name> <image_ref> <policy_file>
-  local name="$1" image="$2" policy="$3"
+  local name="$1" image="$2" policy="$3" provider="${4:-}"
+  local -a provider_args=()
+  if [[ -n "${provider}" ]]; then
+    [[ "${provider}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || die "invalid provider name"
+    provider_args=(--provider "${provider}")
+  fi
   require_command ssh
   [[ -f "${policy}" ]] || die "policy file not found: ${policy}"
   note "Creating sandbox ${name} from ${image##*/}"
-  _os sandbox create --name "${name}" --from "${image}" --policy "${policy}"
+  _os sandbox create --detach --no-auto-providers --name "${name}" --from "${image}" --policy "${policy}" "${provider_args[@]}"
   _wait_ready "${name}"
   note "Sandbox ${name} ready"
+}
+
+validate_praxis_port() {
+  if [[ ! "${PRAXIS_PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || (( PRAXIS_PORT > 65535 )); then
+    die 'PRAXIS_PORT must be an integer from 1 to 65535'
+  fi
 }

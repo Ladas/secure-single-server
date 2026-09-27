@@ -1,0 +1,7 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG HARNESS
+# Build helper validates the name; the file selection also fails closed.
+COPY bootc/harnesses/${HARNESS} /usr/share/secure-single-server/bootc/harness
+COPY openshell/harnesses/${HARNESS} /usr/share/secure-single-server/openshell/harnesses/${HARNESS}
+RUN test -s /usr/share/secure-single-server/bootc/harness && bootc container lint

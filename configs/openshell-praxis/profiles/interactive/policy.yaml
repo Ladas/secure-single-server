@@ -8,7 +8,7 @@ network_policies:
   praxis_gateway:
     name: praxis-gateway
     endpoints:
-      - {host: host.openshell.internal, port: "@@PRAXIS_PORT@@", protocol: rest, enforcement: enforce}
+      - {host: host.openshell.internal, port: @@PRAXIS_PORT@@, protocol: rest, access: read-write, enforcement: enforce}
     binaries: [{path: /usr/sbin/node}]
   opencode_registry:
     name: opencode-registry

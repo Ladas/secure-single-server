@@ -1,32 +1,30 @@
 #!/usr/bin/env bash
+# Explicit qualification test, not an HTTP-error-as-denial heuristic.
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=../../openshell/scripts/harness-lib.sh
 # shellcheck disable=SC1091
 source "${ROOT}/openshell/scripts/harness-lib.sh"
-# shellcheck source=../../openshell/configs/images.env
-# shellcheck disable=SC1091
-source "${ROOT}/openshell/configs/images.env"
-NAME="ospx-smoke-citest"
-cleanup() { harness_destroy "${NAME}" 2>/dev/null || true; }
+: "${OPENSHELL_MODEL_ID:?set the model exposed by the test Praxis/mock-provider fixture}"
+NAME="ospx-smoke-$$"
+cleanup() { harness_destroy "${NAME}"; }
 trap cleanup EXIT
-
-# Single-phase create with the integrated dev profile (Praxis-loopback only; no
-# direct provider hosts). Then prove a direct provider host is denied.
-# The installer renders no policy; this test renders @@PRAXIS_PORT@@ into a temp
-# copy of the integrated policy itself (default 8080; override via env).
-PRAXIS_PORT="${PRAXIS_PORT:-8080}"
-POL="$(mktemp)"
-sed "s#@@PRAXIS_PORT@@#${PRAXIS_PORT}#g" \
-  "${ROOT}/configs/openshell-praxis/profiles/dev/policy.yaml" > "${POL}"
-harness_create "${NAME}" "${ODH_OPENCODE_IMAGE}" "${POL}"
-rm -f "${POL}"
-
-probe='node --input-type=module -e "const c=AbortSignal.timeout(10000);try{const r=await fetch(process.argv[1],{signal:c});process.exit(r.ok?0:1)}catch(e){process.exit(1)}" '
-
-# Direct provider host must be denied (not in the integrated policy).
-if harness_ssh "${NAME}" "${probe} https://api.openai.com/v1/models" >/dev/null 2>&1; then
-  echo "FAIL: direct provider reachable under integrated policy"; exit 1
-fi
-echo "integrated: direct provider denied (expected)"
-echo "openshell-praxis-smoke: OK"
+"${ROOT}/openshell/harnesses/opencode/create.sh" --name "${NAME}" --profile dev --config "${ROOT}/configs/openshell-praxis"
+harness_ssh "${NAME}" 'node --version' >/dev/null
+# Successful inference is mandatory; a 401 or failed SSH must fail qualification.
+harness_ssh "${NAME}" 'node --input-type=module' <<'JS'
+import fs from 'node:fs';
+const c=JSON.parse(fs.readFileSync(process.env.HOME+'/.config/opencode/opencode.json'));
+const p=c.provider.praxis;
+const response=await fetch(p.options.baseURL+'/chat/completions', {
+ method:'POST',headers:{'Content-Type':'application/json'},
+ body:JSON.stringify({model:Object.keys(p.models)[0],messages:[{role:'user',content:'Reply OK'}],max_tokens:8}),
+ signal:AbortSignal.timeout(30000)});
+if(!response.ok) throw new Error('Praxis inference failed: HTTP '+response.status);
+const data=await response.json();
+if(!data.choices?.length) throw new Error('Missing completion');
+console.log('Praxis inference: OK');
+JS
+# Separate controlled fixture proves network denial; inference alone does not.
+bash "${ROOT}/openshell/tests/openshell-policy.sh"
+echo 'openshell-praxis-smoke: OK'

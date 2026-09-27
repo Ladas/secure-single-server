@@ -6,6 +6,5 @@ H_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${H_DIR}/../../scripts/harness-lib.sh"
 NAME="openclaw-dev"
 [[ "${1:-}" == "--name" ]] && NAME="$2"
-# Launch the Control UI in the background, then forward its port.
-harness_ssh "${NAME}" "nohup openclaw serve --port 18789 >/tmp/openclaw.log 2>&1 &" || true
-harness_forward "${NAME}" 18789
+# Service command and authentication are not qualified for this pinned image.
+harness_connect_tty "${NAME}"

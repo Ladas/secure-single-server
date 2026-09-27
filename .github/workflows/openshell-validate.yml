@@ -2,10 +2,10 @@ name: Validate OpenShell demos
 
 on:
   pull_request:
-    paths: ["openshell/**", "configs/openshell-praxis/**", "scripts/openshell-praxis/**", ".github/workflows/openshell-validate.yml"]
+    paths: ["openshell/**", "configs/openshell-praxis/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
   push:
     branches: [main]
-    paths: ["openshell/**", "configs/openshell-praxis/**", "scripts/openshell-praxis/**", ".github/workflows/openshell-validate.yml"]
+    paths: ["openshell/**", "configs/openshell-praxis/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
   workflow_dispatch:
 
 permissions:
@@ -29,51 +29,33 @@ jobs:
         run: |
           # python3, PyYAML, and tar/xz come from RHEL repos; shellcheck is not
           # packaged for RHEL, so install a pinned static binary.
-          dnf install -y python3 python3-pyyaml tar xz findutils
+          # UBI 9 defaults to Node 16; the probe needs the standard fetch API.
+          dnf module enable -y nodejs:22
+          dnf install -y python3 python3-pyyaml nodejs tar xz findutils
           SC_VER=v0.10.0
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SC_VER}/shellcheck-${SC_VER}.linux.x86_64.tar.xz" -o /tmp/sc.tar.xz
           tar -C /tmp -xf /tmp/sc.tar.xz
           install -m 0755 "/tmp/shellcheck-${SC_VER}/shellcheck" /usr/local/bin/shellcheck
           shellcheck --version
       - name: Static checks
-        run: bash openshell/tests/openshell-static.sh
+        run: |
+          bash openshell/tests/openshell-static.sh
+          python3 openshell/tests/probe-test.py
       - name: Native architecture check
         env: {EXPECTED_ARCH: amd64}
         run: |
           source scripts/common/lib.sh
-          test "$(oci_architecture "$(uname -m)")" = "$EXPECTED_ARCH"
+          test "$(oci_architecture "$(uname -m)")" = amd64
 
-  # The boot, policy, and integrated-smoke tests need a podman-capable host that
-  # can run the ODH gateway image and spawn sibling supervisor/sandbox
-  # containers. GitHub-hosted runners cannot do this reliably, so these steps are
-  # gated behind the repo variable OPENSHELL_SELF_HOSTED and skipped (not failed)
-  # by default. Point OPENSHELL_SELF_HOSTED='true' at a RHEL 9 + rootless podman
-  # host (self-hosted runner) to exercise them.
+  # Opt-in only on a disposable pre-provisioned RHEL 9 x86_64 host.
+  # Never execute pull-request code on a privileged self-hosted runner.
   runtime:
-    name: OpenShell runtime (podman host)
-    if: ${{ vars.OPENSHELL_SELF_HOSTED == 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    env:
-      CONTAINER_ENGINE: podman
+    name: OpenShell runtime (RHEL 9 fixture)
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.OPENSHELL_SELF_HOSTED == 'true' }}
+    runs-on: [self-hosted, Linux, X64, rhel9, openshell-disposable]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: {persist-credentials: false}
-      - name: Enable rootless podman socket
-        run: |
-          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-          loginctl enable-linger "$(id -un)" || true
-          systemctl --user enable --now podman.socket || true
-      - name: Boot pinned gateway without provider keys
-        run: |
-          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-          sudo install -d -o "$(id -u)" /var/lib/openshell
-          bash openshell/tests/openshell-image.sh
-      - name: Policy proof
-        run: |
-          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-          bash openshell/tests/openshell-policy.sh
-      - name: Integrated smoke
-        run: |
-          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-          bash tests/openshell-praxis/smoke.sh
+      - name: Run one fixture lifecycle (dummy credentials only)
+        run: sudo bash openshell/tests/runtime.sh

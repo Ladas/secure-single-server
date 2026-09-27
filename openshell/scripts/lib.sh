@@ -9,26 +9,18 @@ source "${REPO_ROOT}/scripts/common/lib.sh"
 # shellcheck disable=SC1091
 source "${OPENSHELL_DIR}/configs/images.env"
 
-CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
-
-render_template() {  # <template.in> <output>
+render_openshell_template() {  # <template.in> <output> [workload-image]
   local in="$1" out="$2"
   sed \
     -e "s#@@ODH_GATEWAY_IMAGE@@#${ODH_GATEWAY_IMAGE}#g" \
     -e "s#@@ODH_SUPERVISOR_IMAGE@@#${ODH_SUPERVISOR_IMAGE}#g" \
     -e "s#@@ODH_SANDBOX_IMAGE@@#${ODH_SANDBOX_IMAGE}#g" \
     -e "s#@@ODH_CLI_IMAGE@@#${ODH_CLI_IMAGE}#g" \
-    -e "s#@@ODH_OPENCODE_IMAGE@@#${ODH_OPENCODE_IMAGE}#g" \
+    -e "s#@@ODH_OPENCODE_IMAGE@@#${3:-${ODH_OPENCODE_IMAGE}}#g" \
     -e "s#@@ODH_OPENCLAW_IMAGE@@#${ODH_OPENCLAW_IMAGE}#g" \
     -e "s#@@ODH_CODEX_IMAGE@@#${ODH_CODEX_IMAGE}#g" \
     "${in}" > "${out}"
-}
-
-# Run the openshell CLI from the pinned odh CLI image against the local gateway.
-openshell_cli() {
-  "${CONTAINER_ENGINE}" run --rm --network host \
-    --userns=keep-id \
-    -e HOME=/home/openshell \
-    -v "${HOME}/.config/openshell:/home/openshell/.config/openshell:z" \
-    "${ODH_CLI_IMAGE}" "$@"
+  if grep -Eq '@@[A-Z0-9_]+@@' "${out}"; then
+    die "unresolved template placeholder in ${in}"
+  fi
 }

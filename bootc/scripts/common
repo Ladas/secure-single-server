@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT=/usr/share/secure-single-server
+# shellcheck disable=SC1091
+source "${ROOT}/openshell/scripts/lib.sh"
+
+as_openshell() {
+  local uid
+  uid="$(id -u openshell-svc)"
+  runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
+    XDG_RUNTIME_DIR="/run/user/${uid}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+    OPENSHELL_BIN=/usr/bin/openshell "$@"
+}
+
+pull_missing() {
+  local runner="$1" image="$2"
+  validate_digest_image "${image}"
+  if ! "${runner}" podman image exists "${image}"; then
+    "${runner}" podman pull "${image}"
+  fi
+  local platform
+  platform="$("${runner}" podman image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')"
+  [[ "${platform}" == linux/amd64 ]] || die "unexpected image platform: ${platform}"
+}
+
+selected_harness() {
+  if [[ -f "${ROOT}/bootc/harness" ]]; then
+    cat "${ROOT}/bootc/harness"
+  else
+    printf 'base\n'
+  fi
+}
+
+harness_image() {
+  case "$1" in
+    codex) printf '%s\n' "${ODH_CODEX_IMAGE}" ;;
+    opencode) printf '%s\n' "${ODH_OPENCODE_IMAGE}" ;;
+    openclaw) printf '%s\n' "${ODH_OPENCLAW_IMAGE}" ;;
+    base) printf '%s\n' "${ODH_SANDBOX_IMAGE}" ;;
+    *) die "unknown bootc harness: $1" ;;
+  esac
+}

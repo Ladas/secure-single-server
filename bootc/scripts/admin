@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck disable=SC1091
+source /usr/share/secure-single-server/bootc/scripts/common
+# Root's home or a private administrator checkout may be unreadable to service users.
+cd /
+case "${1:-help}" in
+  help|--help|-h)
+    cat <<'EOF'
+Usage (run as root except help):
+  sss-bootc status
+  sss-bootc secret openai|anthropic VERSION       Read secret from stdin
+  sss-bootc activate OPENAI_SECRET ANTHROPIC_SECRET
+  sss-bootc openshell ARGS...                    CLI as openshell-svc
+  sss-bootc harness create|connect ARGS...        Selected harness scripts
+Activation uses the memory quota profile. No provider credentials enter the OS image.
+EOF
+    ;;
+  status)
+    require_root
+    printf 'Harness: %s\n' "$(selected_harness)"
+    systemctl status secure-single-server.service --no-pager
+    as_openshell systemctl --user status openshell-gateway.service --no-pager
+    as_service systemctl --user status praxis.service --no-pager
+    ;;
+  secret)
+    require_root
+    [[ "$#" == 3 ]] || die 'secret requires provider and version'
+    case "$2" in openai|anthropic) ;; *) die 'expected openai or anthropic' ;; esac
+    exec "${ROOT}/scripts/common/secret-set" "$2" "$3"
+    ;;
+  activate)
+    require_root
+    [[ "$#" == 3 ]] || die 'activate requires two secret names'
+    require_secret "$2"
+    require_secret "$3"
+    install -d -m 0700 /etc/secure-single-server
+    umask 077
+    printf '%s %s\n' "$2" "$3" >/etc/secure-single-server/secret-names
+    systemctl restart secure-single-server.service
+    ;;
+  openshell)
+    require_root
+    shift
+    as_openshell openshell "$@"
+    ;;
+  harness)
+    require_root
+    harness="$(selected_harness)"
+    [[ "${harness}" != base ]] || die 'select a harness bootc image first'
+    action="${2:-}"
+    case "${action}" in create|connect) ;; *) die 'expected create or connect' ;; esac
+    shift 2
+    as_openshell "${ROOT}/openshell/harnesses/${harness}/${action}.sh" "$@"
+    ;;
+  *) die 'unknown command; see sss-bootc help' ;;
+esac

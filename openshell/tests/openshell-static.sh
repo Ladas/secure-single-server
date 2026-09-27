@@ -32,7 +32,7 @@ fi
 
 # 3. Gateway quadlet template renders with no leftover placeholders.
 tmp="$(mktemp)"
-render_template "${OS_DIR}/configs/quadlet/openshell-gateway.container.in" "${tmp}"
+render_openshell_template "${OS_DIR}/configs/quadlet/openshell-gateway.container.in" "${tmp}"
 grep -q '@@' "${tmp}" && fail "unrendered placeholder in gateway quadlet"
 grep -q "Image=${ODH_GATEWAY_IMAGE}" "${tmp}" || fail "gateway image not pinned in unit"
 grep -q 'Pull=never' "${tmp}" || fail "gateway unit must set Pull=never"
@@ -45,17 +45,25 @@ grep -q '\[openshell.gateway.gateway_jwt\]' "${gt}" || fail "gateway.toml missin
 grep -q 'supervisor_image *= *"@@ODH_SUPERVISOR_IMAGE@@"' "${gt}" || fail "supervisor image placeholder missing"
 grep -q 'default_image *= *"@@ODH_OPENCODE_IMAGE@@"' "${gt}" || fail "default_image must be an aipcc workload image (@@ODH_OPENCODE_IMAGE@@)"
 
-# 5. Every profile policy is schema-valid.
+# 5. Structural checks only; schema.py validates with the pinned native CLI.
 if command -v python3 >/dev/null 2>&1; then
   while IFS= read -r p; do
     python3 - "$p" <<'PY' || fail "invalid policy: $p"
 import sys, yaml
-d = yaml.safe_load(open(sys.argv[1]))
+d = yaml.safe_load(open(sys.argv[1]).read().replace("@@PRAXIS_PORT@@", "8080"))
 assert d.get("version") == 1, "version"
 assert "network_policies" in d, "network_policies"
 assert "filesystem_policy" in d, "filesystem_policy"
+for name, policy in d["network_policies"].items():
+    for endpoint in policy.get("endpoints", []):
+        assert type(endpoint["port"]) is int and 1 <= endpoint["port"] <= 65535
+        if endpoint.get("protocol") == "rest":
+            assert endpoint.get("access") or endpoint.get("rules"), \
+                f"{name}: REST endpoint requires access or rules"
 PY
-  done < <(find "${OS_DIR}" -path '*/profiles/*/policy.yaml')
+  done < <(find "${OS_DIR}" "${ROOT}/configs/openshell-praxis" -path '*/profiles/*/policy.yaml')
 fi
 
+python3 "${OS_DIR}/tests/regressions.py"
+python3 "${OS_DIR}/tests/gateway.py"
 printf 'openshell-static: OK\n'

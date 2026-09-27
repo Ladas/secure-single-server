@@ -130,7 +130,8 @@ Switchyard gaps to fill are:
    allowance.
 5. Caller JWT validation alone does not provide per-user request or token
    limits.
-6. A local vLLM service and OpenShell harness sandbox are later phases.
+6. A local vLLM service is not deployed by these profiles. OpenShell integration
+   has a separate [experimental add-on](../openshell-praxis/README.md).
 
 ## Additional details
 
@@ -148,8 +149,10 @@ and accelerator, and passes model, tools, streaming, accounting, security,
 lifecycle, performance, and real coding-task acceptance. Gaudi is Intel AI
 accelerator hardware. The current deployment quickstarts do not install vLLM.
 
-OpenShell is a later phase for retained, sandboxed harness sessions. The
-current workflows use normal harness resume after reconnecting or `tmux`.
+For sandboxed harnesses, see the [OpenShell add-on](../openshell-praxis/README.md)
+or [bootc deployment](../../../bootc/README.md). Neither qualifies retained
+harness sessions. The direct-host workflows here use normal harness resume
+after reconnecting or `tmux`.
 
 ### Request-rate protection and token quotas
 

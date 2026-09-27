@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Read-only checks after boot and dummy/real secret provisioning; makes no model calls.
+set -euo pipefail
+# shellcheck disable=SC1091
+source /usr/share/secure-single-server/bootc/scripts/common
+require_root
+cd /
+expected="${1:?usage: sudo bootc/test-host base|codex|opencode|openclaw}"
+[[ "$(selected_harness)" == "${expected}" ]] || die 'unexpected harness selection'
+[[ "$(getenforce)" == Enforcing ]] || die 'SELinux is not enforcing'
+bootc status --json | jq -e '.status.type == "bootcHost" and .status.booted.image.architecture == "amd64"' >/dev/null
+findmnt -T /usr -no OPTIONS | grep -Eq '(^|,)ro(,|$)' || die '/usr is not read-only'
+systemctl is-active --quiet secure-single-server.service
+as_service systemctl --user is-active --quiet praxis.service
+as_openshell systemctl --user is-active --quiet openshell-gateway.service
+[[ "$(as_service podman inspect praxis-shared-gateway --format '{{.State.Health.Status}}')" == healthy ]] || die 'Praxis is unhealthy'
+curl --fail --silent http://127.0.0.1:8091/healthz >/dev/null
+as_openshell openshell sandbox list >/dev/null
+as_openshell podman image exists "$(harness_image "${expected}")"
+for port in 8080 8081 8090 8091; do
+  listeners="$(ss -H -ltn | awk -v p="${port}" '$4 ~ ":" p "$" {print $4}')"
+  [[ "${listeners}" == "127.0.0.1:${port}" ]] || die "unexpected listeners on ${port}: ${listeners}"
+done
+for user in praxis-svc openshell-svc; do
+  [[ "$(stat -c '%a' "/var/lib/${user}")" == 700 ]] || die "${user} home is not private"
+  [[ "$(getent passwd "${user}" | cut -d: -f7)" == /usr/sbin/nologin ]] || die "${user} has a login shell"
+done
+printf 'bootc host: %s ready; SELinux enforcing; root filesystem read-only; gateways loopback-only\n' "${expected}"

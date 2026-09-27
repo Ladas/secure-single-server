@@ -57,6 +57,10 @@ jobs:
           printf '%s\n' "${bin_dir}" >> "${GITHUB_PATH}"
       - name: Check scripts, templates, documentation, and regressions
         run: tests/shared-gateway-static.sh
+      - name: Check bootc build contract without registry credentials
+        run: |
+          python3 bootc/tests/build.py
+          shellcheck -x bootc/build bootc/test-images bootc/test-host bootc/scripts/*
       - name: Check native runner architecture
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}

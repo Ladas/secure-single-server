@@ -8,6 +8,6 @@ network_policies:
   model_api:
     name: model-api
     endpoints:
-      - {host: api.anthropic.com, port: 443, protocol: rest, enforcement: enforce}
-      - {host: api.openai.com, port: 443, protocol: rest, enforcement: enforce}
+      - {host: api.anthropic.com, port: 443, protocol: rest, access: read-write, enforcement: enforce}
+      - {host: api.openai.com, port: 443, protocol: rest, access: read-write, enforcement: enforce}
     binaries: [{path: /usr/sbin/node}, {path: /usr/local/sbin/openclaw}]
