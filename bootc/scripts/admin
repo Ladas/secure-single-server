@@ -8,6 +8,8 @@ case "${1:-help}" in
   help|--help|-h)
     cat <<'EOF'
 Usage (run as root except help):
+  sss-bootc vllm disabled|cpu|gpu|status          Optional local Qwen3-8B
+  sss-bootc inference cloud|vllm|status|check    Select/check Praxis upstream
   sss-bootc status
   sss-bootc secret openai|anthropic VERSION       Read secret from stdin
   sss-bootc activate OPENAI_SECRET ANTHROPIC_SECRET
@@ -15,6 +17,39 @@ Usage (run as root except help):
   sss-bootc harness create|connect ARGS...        Selected harness scripts
 Activation uses the memory quota profile. No provider credentials enter the OS image.
 EOF
+    ;;
+  vllm)
+    require_root
+    [[ "$#" == 2 ]] || die "expected vllm disabled|cpu|gpu|status"
+    if [[ "$2" == status ]]; then
+      exec "${ROOT}/bootc/scripts/vllm" status
+    fi
+    "${ROOT}/bootc/scripts/vllm" select "$2"
+    systemctl restart secure-single-server-vllm.service
+    ;;
+  inference)
+    require_root
+    [[ "$#" == 2 ]] || die 'expected inference cloud|vllm|status|check'
+    case "$2" in
+      check) exec "${ROOT}/bootc/scripts/inference-check" ;;
+      status) printf 'Praxis upstream: %s\n' "$(inference_backend)"; exit 0 ;;
+      cloud) ;;
+      vllm)
+        # shellcheck disable=SC1091
+        source "${ROOT}/bootc/scripts/vllm-lib"
+        [[ "$(vllm_mode)" != disabled ]] || die 'enable vLLM CPU or GPU mode first'
+        ;;
+      *) die 'expected inference cloud|vllm|status|check' ;;
+    esac
+    exec 9>/run/secure-single-server.lock
+    flock 9
+    install -d -m 0755 /etc/secure-single-server
+    tmp="$(mktemp /etc/secure-single-server/.inference-backend.XXXXXX)"
+    printf '%s\n' "$2" >"${tmp}"
+    chmod 0644 "${tmp}"
+    mv "${tmp}" /etc/secure-single-server/inference-backend
+    flock -u 9
+    systemctl restart secure-single-server.service
     ;;
   status)
     require_root
@@ -51,7 +86,17 @@ EOF
     action="${2:-}"
     case "${action}" in create|connect) ;; *) die 'expected create or connect' ;; esac
     shift 2
-    as_openshell "${ROOT}/openshell/harnesses/${harness}/${action}.sh" "$@"
+    if [[ "${action}" == create && "$(inference_backend)" == vllm ]]; then
+      [[ "${harness}" == opencode ]] || die 'local Praxis integration currently supports the OpenCode OS variant only'
+      for argument in "$@"; do
+        case "${argument}" in --provider|--config|--provider=*|--config=*) die 'local inference owns provider configuration; omit --provider and --config' ;; esac
+      done
+      as_openshell env OPENSHELL_MODEL_ID=Qwen/Qwen3-8B PRAXIS_PORT=8080 \
+        "${ROOT}/openshell/harnesses/${harness}/${action}.sh" \
+        --config "${ROOT}/configs/vllm/harness" "$@"
+    else
+      as_openshell "${ROOT}/openshell/harnesses/${harness}/${action}.sh" "$@"
+    fi
     ;;
   *) die 'unknown command; see sss-bootc help' ;;
 esac

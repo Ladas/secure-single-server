@@ -33,7 +33,7 @@ jobs:
       - name: Install static-check tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq ripgrep ruby zsh
+          sudo apt-get install -y curl jq ripgrep ruby zsh python3-yaml
       - name: Install pinned ShellCheck
         env:
           # Update both matrix checksums when changing this version.
@@ -60,7 +60,9 @@ jobs:
       - name: Check bootc build contract without registry credentials
         run: |
           python3 bootc/tests/build.py
-          shellcheck -x bootc/build bootc/test-images bootc/test-host bootc/scripts/*
+          python3 bootc/tests/vllm.py
+          python3 bootc/tests/inference.py
+          shellcheck -x bootc/build bootc/install-nvidia bootc/test-images bootc/test-host bootc/test-inference bootc/scripts/*
       - name: Check native runner architecture
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}

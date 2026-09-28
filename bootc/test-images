@@ -12,6 +12,10 @@ for variant in base codex opencode openclaw; do
     test -x /usr/bin/bootc
     test -x /usr/bin/podman
     test -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
+    test -L /etc/systemd/system/multi-user.target.wants/secure-single-server-vllm.service
+    test -x /usr/share/secure-single-server/bootc/scripts/vllm
+    test -f /usr/share/secure-single-server/configs/vllm/images.env
+    test ! -e /etc/secure-single-server/vllm-mode
     test ! -e /var/lib/openshell/tls/jwt/signing.pem
     test ! -e /etc/secure-single-server/secret-names
     test ! -e /etc/pki/rhui/content-rhel9.key

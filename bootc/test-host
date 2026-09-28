@@ -17,7 +17,9 @@ as_openshell systemctl --user is-active --quiet openshell-gateway.service
 curl --fail --silent http://127.0.0.1:8091/healthz >/dev/null
 as_openshell openshell sandbox list >/dev/null
 as_openshell podman image exists "$(harness_image "${expected}")"
-for port in 8080 8081 8090 8091; do
+ports=(8080 8090 8091)
+[[ "$(inference_backend)" != cloud ]] || ports+=(8081)
+for port in "${ports[@]}"; do
   listeners="$(ss -H -ltn | awk -v p="${port}" '$4 ~ ":" p "$" {print $4}')"
   [[ "${listeners}" == "127.0.0.1:${port}" ]] || die "unexpected listeners on ${port}: ${listeners}"
 done

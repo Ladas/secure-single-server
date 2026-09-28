@@ -1,0 +1,68 @@
+# Local Qwen3-8B through vLLM with in-memory shared limits.
+# Caller authentication is intentionally omitted. Separate OS logins are the
+# admission boundary, and Podman publishes these listeners on host loopback.
+
+# This profile has exactly one fixed loopback upstream.
+insecure_options:
+  allow_private_endpoints: true
+
+admin:
+  address: "127.0.0.1:9901"
+
+telemetry:
+  sampling_rate: 1.0
+
+listeners:
+  - name: openai
+    address: "127.0.0.1:8080"
+    filter_chains: [openai]
+
+filter_chains:
+  - name: openai
+    filters:
+      - filter: request_id
+      - filter: access_log
+      - filter: headers
+        request_remove:
+          - Authorization
+          - Proxy-Authorization
+          - Forwarded
+          - X-Forwarded-For
+          - X-Forwarded-Host
+          - X-Forwarded-Proto
+          - X-Real-IP
+          - Via
+          - X-App-Id
+          - X-Cluster
+          - X-Model
+          - X-Route
+          - X-Selected-Model
+          - X-Tier
+      - filter: rate_limit
+        mode: global
+        rate: 2
+        burst: 10
+      - filter: token_rate_limit
+        backend:
+          kind: memory
+        rules:
+          - name: openai-rolling-day
+            algorithm: sliding_window
+            window: "24h"
+            capacity: 1000000
+            reserved_tokens: 4096
+            reservation_timeout: "1800s"
+      # Response hooks run in reverse declaration order. token_count must
+      # publish usage before token_rate_limit reconciles its reservation.
+      - filter: token_count
+        provider: openai
+      - filter: router
+        routes:
+          - path_prefix: "/"
+            cluster: openai
+      - filter: load_balancer
+        clusters:
+          - name: openai
+            endpoints: ["127.0.0.1:8000"]
+            http:
+              authority: "localhost:8000"

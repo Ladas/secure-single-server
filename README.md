@@ -1,83 +1,118 @@
-# Secure single-server AI gateway
+# Secure single-server AI agent environment
 
-Give people access to approved AI coding models on one administrator-managed
-RHEL server without handing out provider credentials. The goal is to control
-shared inference usage, protect the server and workspaces, and make the setup
-repeatable as more harnesses and model providers are added.
+Run AI coding agents on one administrator-managed RHEL server with controlled
+tool execution, model access, and shared inference usage. Users work through a
+coding harness; administrators choose the execution policies and approved
+models, keep cloud-provider credentials out of harnesses, and manage the host
+as a repeatable deployment.
 
-The starting workflow is a user logging into RHEL and running Claude Code,
-Codex or OpenCode through Praxis. OpenShell extends that model with sandboxed
-execution and, as a qualification target, retained work that collaborators can
-reconnect to. bootc packages the host setup into a reviewed OS image.
+The environment brings together **harnesses, OpenShell, Praxis, and local or
+cloud inference**. bootc packages the host setup into an updatable OS image.
+The validated local example runs OpenCode through Praxis against Qwen3-8B in a
+vLLM container, using either CPU or a single NVIDIA L4.
 
-| Component | What it adds to a harness |
+## How the pieces fit
+
+| Component | Responsibility |
 | --- | --- |
-| **OpenShell** | A sandbox with declarative filesystem and network policies, separating agent tools from the host environment. |
-| **Praxis** | A model gateway that holds provider credentials and applies shared request and token limits. |
-| **bootc** | A bootable OS image containing the service setup and selected harness configuration, with image-based updates and OS rollback. |
+| **Harnesses** | Provide the coding-agent experience: prompts, model interactions, and tool calls. Recipes cover several harnesses; supported integrations differ. |
+| **OpenShell** | Runs the harness and tools inside a sandbox with declarative filesystem and network policies. |
+| **Praxis** | Routes model requests and applies shared request and token limits. Cloud profiles keep provider credentials at the gateway. |
+| **Inference backend** | Supplies the model: optional containerized vLLM for local Qwen3-8B, or a cloud provider through a separate Praxis profile. |
+| **bootc** | Packages service setup and the selected harness configuration into a reviewed RHEL OS image, with image-based updates and OS rollback. |
 
-The intended combined model path is:
+Two paths meet at the harness: tools execute within OpenShell's policies, while
+model requests travel through Praxis. The diagram shows the validated local
+path and the separate cloud-profile option:
 
 ```mermaid
 flowchart LR
-    subgraph Host[bootc-managed RHEL host]
-        subgraph Sandbox[OpenShell sandbox]
-            H[Harness and tools]
+    subgraph Host["bootc-managed RHEL host"]
+        subgraph Sandbox["OpenShell sandbox: filesystem and network policies"]
+            H["OpenCode harness"]
+            T["Agent tools and workspace"]
+            H -->|Tool execution| T
         end
-        P[Praxis model gateway]
-        H -. Model requests: integration under qualification .-> P
+        P["Praxis container<br/>Shared request and token limits<br/>127.0.0.1:8080"]
+        V["vLLM container<br/>Qwen3-8B: CPU or NVIDIA L4<br/>127.0.0.1:8000"]
+        H -->|Policy-permitted model requests| P
+        P -->|Local inference profile| V
     end
-    P --> Provider[Model provider]
+    P -. Separate cloud profile .-> Provider["Cloud model provider"]
 ```
 
-OpenShell governs the harness's execution environment. Praxis governs model
-requests routed through it. bootc packages their host setup so each machine
-starts from the same reviewed deployment. These are complementary controls;
-OS rollback does not roll back sandbox workspaces or application data.
+The local profile permits sandbox inference traffic only to Praxis. Direct
+vLLM and cloud-provider access are denied, and there is no cloud fallback.
+CPU and GPU are alternative vLLM modes. OpenCode is the validated harness for
+this local path; Codex and OpenClaw local adapters are not enabled.
 
-The [scope and roadmap](docs/roadmap.md) connects these building blocks to the
-phased goals: durable quotas, model routing, guardrails, private inference,
-individual access controls, retained work and usage visibility.
+Pinned workload containers are pulled on first boot and cached across reboots.
+Credentials, model caches, and workspace data stay outside the OS image.
+OS rollback restores the host deployment; it does not restore application data
+or sandbox workspaces.
 
-## Start here
+## Choose a deployment
 
-| Goal | Guide |
-| --- | --- |
-| Build a bootable host with one selected harness | [RHEL 9 bootc images](bootc/README.md) |
-| Explore Codex, OpenCode or OpenClaw in a sandbox | [OpenShell recipes](openshell/docs/README.md) |
-| Connect a sandboxed harness to Praxis | [Combined integration and current status](docs/quickstarts/openshell-praxis/README.md) |
-| Use Praxis with harnesses running directly on a shared RHEL host | [All-in-one gateway](docs/quickstarts/all-in-one/README.md) |
-| Use Praxis from harnesses on other machines | [Remote HTTPS/JWT gateway](docs/quickstarts/remote-gateway/README.md) |
-| Develop or validate a change | [Testing guide](docs/testing/README.md) |
+| Workflow | Where the harness and tools run | Guide |
+| --- | --- | --- |
+| Sandboxed agents with local inference | OpenShell on a bootc-managed server; Praxis routes to CPU or NVIDIA L4 vLLM | [Local Qwen3-8B example](bootc/VLLM.md) |
+| Sandboxed harness exploration | OpenShell on the server, with harness-specific policies and provider setup | [OpenShell recipes](openshell/docs/README.md) |
+| Shared host with a cloud gateway | Harnesses run directly under OS accounts on RHEL; Praxis owns provider credentials | [All-in-one gateway](docs/quickstarts/all-in-one/README.md) |
+| Remote clients with a central gateway | Harnesses and tools stay on client machines; requests reach Praxis over HTTPS with caller JWTs | [Remote gateway](docs/quickstarts/remote-gateway/README.md) |
 
-The bootc path builds a shared base and one image each for **Codex, OpenCode and
-OpenClaw**. Pinned workload containers are pulled on first boot and cached across
-reboots, keeping them out of the OS layers. Credentials and machine state are
-provisioned separately. The current bootc target is RHEL 9 x86_64.
+For OS image creation, start with the [RHEL 9 bootc guide](bootc/README.md).
+The current target is x86_64, with a shared base and separate **Codex, OpenCode,
+and OpenClaw** OS variants. A harness image being available does not mean every
+Praxis/backend combination is supported; consult the
+[integration matrix](docs/quickstarts/openshell-praxis/users.md) and the local
+example's validation report.
 
-## What works today
+## Validated today
 
-This is an experimental deployment and validation repository. AWS RHEL testing
-has built all four bootc images, booted Codex and OpenCode, exercised OS upgrades,
-a harness switch and rollback, and checked rootless services, SELinux, loopback
-listeners and sandbox CLI execution. See the [validation record](bootc/VALIDATION.md).
+This is an experimental deployment and validation repository. The strongest
+end-to-end example is **OpenCode → Praxis → vLLM** on bootc. AWS tests with
+OpenShell `0.1.2-rhaiv.0` passed on CPU and NVIDIA L4, covering real Qwen3-8B
+inference, streamed responses, independently verified tool execution, explicit
+bypass denials, cached reboot, and disable/re-enable behavior. The
+[local inference report](bootc/VLLM-VALIDATION.md) records exact pins and limits,
+including the GPU instance's cleanup issue.
 
-The complete **sandbox → Praxis → provider** path is still under qualification:
-OpenCode has experimental configuration support; Codex and OpenClaw reject Praxis
-configuration. Host routing, real-provider inference and tool tasks remain gaps.
-Use the [integration matrix](docs/quickstarts/openshell-praxis/users.md) for details.
+Earlier AWS testing also exercised bootc builds, Codex/OpenCode boot and CLI
+execution, OS upgrades, a harness switch, and rollback. See the
+[host validation record](bootc/VALIDATION.md). The separate sandbox-to-Praxis
+cloud-provider path remains under qualification; Codex and OpenClaw reject
+Praxis configuration.
 
-OpenShell currently assumes a trusted single operator; local management is not a
-multi-tenant authorization boundary. Praxis quotas are shared, not per-user or
-USD budgets. The bootc profile uses in-memory quotas; the mutable Praxis deployment
-offers Valkey for persistent token usage. Durable quotas are a baseline target;
-the bootc memory profile is a development step toward it. Read the
-[OpenShell trust model](openshell/docs/threat-model.md) and
-[quota semantics](docs/quickstarts/common/token-quotas.md) before granting access.
+The current trust and usage boundaries are explicit:
+
+- OpenShell assumes a trusted single operator. Local management is not a
+  multi-tenant authorization boundary.
+- Praxis quotas are shared token allowances, not per-user limits or USD budgets.
+  bootc uses in-memory quotas; the mutable Praxis deployment offers Valkey for
+  persistent token usage.
+- CPU inference is functional but slow on the tested eight-vCPU host. Additional
+  hardware, sustained load, and coding quality are not qualified by the smoke tests.
+
+See the [OpenShell trust model](openshell/docs/threat-model.md) and
+[quota semantics](docs/quickstarts/common/token-quotas.md) for the control boundaries.
+
+## Where this is going
+
+The broader goal is an environment where people can run useful agent tasks
+with approved models, controlled workspaces, predictable shared usage, and
+repeatable operations. Local inference now provides a tested foundation for
+that work. Durable bootc quotas, routing and failover, inference guardrails,
+individual and team authorization, retained collaborative sessions, and usage
+visibility remain planned or partially implemented capabilities.
+
+The [scope and roadmap](docs/roadmap.md) separates those goals from current
+acceptance. To contribute or validate a new combination, use the
+[testing guide](docs/testing/README.md).
 
 ## Upstream projects
 
-This repository supplies deployment configuration, lifecycle scripts and tests.
-It consumes [Praxis experimental](https://github.com/praxis-proxy/experimental)
-and [OpenShell](https://github.com/opendatahub-io/openshell) images; it does not
-implement either runtime or the harnesses themselves.
+This repository supplies deployment configuration, lifecycle scripts, harness
+recipes, and acceptance tests. It consumes [Praxis experimental](https://github.com/praxis-proxy/experimental),
+[OpenShell](https://github.com/opendatahub-io/openshell), and
+[vLLM](https://github.com/vllm-project/vllm); it does not implement those runtimes
+or the harnesses themselves.

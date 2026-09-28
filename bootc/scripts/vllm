@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export PRAXIS_SERVICE_USER=vllm-svc PRAXIS_CONFIG_DIR=/etc/secure-single-server/vllm
+# shellcheck disable=SC1091
+source /usr/share/secure-single-server/bootc/scripts/common
+# shellcheck disable=SC1091
+source "${ROOT}/bootc/scripts/vllm-lib"
+require_root
+cd /
+exec 8>/run/secure-single-server-vllm.lock
+flock 8
+case "${1:-reconcile}" in
+  select)
+    [[ "$#" == 2 ]] || die 'usage: sss-bootc vllm disabled|cpu|gpu'
+    vllm_preflight "$2"
+    install -d -m 0755 /etc/secure-single-server
+    tmp="$(mktemp /etc/secure-single-server/.vllm-mode.XXXXXX)"
+    printf '%s\n' "$2" >"${tmp}"
+    chmod 0644 "${tmp}"
+    mv "${tmp}" /etc/secure-single-server/vllm-mode
+    exit 0
+    ;;
+  status)
+    printf 'vLLM mode: %s\n' "$(vllm_mode)"
+    [[ "$(vllm_mode)" != disabled ]] || exit 0
+    as_service systemctl --user status vllm.service --no-pager
+    exit
+    ;;
+  reconcile) ;;
+  *) die 'expected select, status, or reconcile' ;;
+esac
+mode="$(vllm_mode)"
+if [[ "${mode}" == disabled ]]; then
+  if getent passwd vllm-svc >/dev/null; then
+    if [[ -f "/etc/containers/systemd/users/$(service_uid)/vllm.container" ]]; then
+      as_service systemctl --user stop vllm.service
+    fi
+    rm -f "/etc/containers/systemd/users/$(service_uid)/vllm.container"
+    as_service systemctl --user daemon-reload
+  fi
+  exit 0
+fi
+# Serialize account/subuid allocation with the main boot reconciler.
+exec 9>/run/secure-single-server.lock
+flock 9
+vllm_preflight "${mode}"
+"${ROOT}/scripts/common/install" --prepare
+flock -u 9
+if [[ "${mode}" == gpu ]]; then
+  install -d -m 0755 /etc/cdi
+  nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+  chmod 0644 /etc/cdi/nvidia.yaml
+fi
+pull_missing as_service "$(vllm_image "${mode}")"
+as_service mkdir -p /var/lib/vllm-svc/cache
+unit="/etc/containers/systemd/users/$(service_uid)/vllm.container"
+tmp="$(mktemp)"
+trap 'rm -f "${tmp}"' EXIT
+vllm_render "${mode}" >"${tmp}"
+changed=0
+if ! cmp -s "${tmp}" "${unit}"; then
+  install -m 0644 "${tmp}" "${unit}"
+  changed=1
+fi
+as_service systemctl --user daemon-reload
+if (( changed )); then
+  as_service systemctl --user restart vllm.service
+else
+  as_service systemctl --user start vllm.service
+fi
+note 'vLLM started; model loading continues asynchronously. Check /health and run the inference example.'

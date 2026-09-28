@@ -57,6 +57,18 @@ else:
             self.assertIn('HARNESS=' + harness, call)
             self.assertIn('--pull=never', call)
 
+    def test_gpu_flag_is_explicit_and_validated(self):
+        import json
+        self.env['NVIDIA_GPU'] = '1'
+        result = self.run_build('base', 'localhost/gpu-test')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(row) for row in self.log.read_text().splitlines()]
+        self.assertIn('NVIDIA_GPU=1', next(c for c in calls if c[0] == 'build'))
+        self.log.unlink()
+        self.env['NVIDIA_GPU'] = 'yes'
+        self.assertNotEqual(self.run_build('base').returncode, 0)
+        self.assertFalse(self.log.exists())
+
     def test_rejects_unpinned_or_wrong_distribution(self):
         for image in ('registry.redhat.io/rhel9/rhel-bootc:latest',
                       'registry.redhat.io/rhel10/rhel-bootc@sha256:' + 'a' * 64):

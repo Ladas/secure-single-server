@@ -16,3 +16,8 @@ is experimental until host-alias routing, actual inference and tool tasks pass.
 Development profiles also permit selected GitHub/package/documentation traffic;
 they are not restricted to Praxis for all egress. Loopback management trusts local
 host users, and is not a multi-tenant authorization boundary.
+
+For local Qwen3-8B on bootc, see the [vLLM/Praxis workflow](../../../bootc/VLLM.md).
+It includes CPU/GPU serving, a loopback Praxis upstream, and an OpenCode dev
+configuration with a dedicated Praxis-only policy. Its updated OpenShell pins
+provide host-alias routing; see the linked guide for runtime evidence.
