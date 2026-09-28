@@ -30,6 +30,13 @@ On bootc, use `sudo sss-bootc harness create --profile dev` instead.
 Creation is detached and returns after structured Ready status; this does not
 prove a subsequently launched harness task survives SSH disconnect.
 
+Every harness sandbox is created with Podman runtime limits of two CPUs and
+4 GiB of memory by default. Set `OPENSHELL_SANDBOX_CPU` (for example `1`,
+`0.5`, or `500m`) and `OPENSHELL_SANDBOX_MEMORY` (for example `512Mi`, `4Gi`,
+or `8G`) in the service-owner environment to change those per-sandbox limits.
+These limits constrain a single sandbox; they are not an aggregate host budget
+and do not reserve capacity for Praxis or other workloads.
+
 No provider key is forwarded over SSH. Standalone credentials must be explicitly
 registered with the pinned CLI's `provider create --credential KEY` environment
 lookup and attached with `create.sh --provider NAME`. Use a hidden prompt in the

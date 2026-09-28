@@ -45,6 +45,17 @@ grep -q '\[openshell.gateway.gateway_jwt\]' "${gt}" || fail "gateway.toml missin
 grep -q 'supervisor_image *= *"@@ODH_SUPERVISOR_IMAGE@@"' "${gt}" || fail "supervisor image placeholder missing"
 grep -q 'default_image *= *"@@ODH_OPENCODE_IMAGE@@"' "${gt}" || fail "default_image must be an aipcc workload image (@@ODH_OPENCODE_IMAGE@@)"
 
+# 4b. Harness creation applies bounded per-sandbox CPU and memory limits.
+hl="${OS_DIR}/scripts/harness-lib.sh"
+# shellcheck disable=SC2016
+grep -q ': "${OPENSHELL_SANDBOX_CPU:=2}"' "${hl}" || fail "harness CPU default missing"
+# shellcheck disable=SC2016
+grep -q ': "${OPENSHELL_SANDBOX_MEMORY:=4Gi}"' "${hl}" || fail "harness memory default missing"
+# shellcheck disable=SC2016
+grep -q -- '--cpu "${OPENSHELL_SANDBOX_CPU}"' "${hl}" || fail "sandbox create must pass --cpu"
+# shellcheck disable=SC2016
+grep -q -- '--memory "${OPENSHELL_SANDBOX_MEMORY}"' "${hl}" || fail "sandbox create must pass --memory"
+
 # 5. Structural checks only; schema.py validates with the pinned native CLI.
 if command -v python3 >/dev/null 2>&1; then
   while IFS= read -r p; do

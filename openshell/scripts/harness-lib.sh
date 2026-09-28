@@ -8,6 +8,8 @@ source "${_HL_DIR}/lib.sh"
 : "${OPENSHELL_BIN:=/usr/local/bin/openshell}"
 : "${OPENSHELL_GATEWAY_NAME:=local}"
 : "${OPENSHELL_SANDBOX_USER:=sandbox}"
+: "${OPENSHELL_SANDBOX_CPU:=2}"
+: "${OPENSHELL_SANDBOX_MEMORY:=4Gi}"
 
 _os() { "${OPENSHELL_BIN}" "$@"; }
 
@@ -59,8 +61,13 @@ harness_create() {  # <name> <image_ref> <policy_file>
   fi
   require_command ssh
   [[ -f "${policy}" ]] || die "policy file not found: ${policy}"
+  [[ "${OPENSHELL_SANDBOX_CPU}" =~ ^[0-9]+([.][0-9]+)?[m]?$ ]] \
+    || die 'OPENSHELL_SANDBOX_CPU must be positive cores or millicores (for example 2, 0.5, or 500m)'
+  [[ "${OPENSHELL_SANDBOX_MEMORY}" =~ ^[0-9]+(Ki|Mi|Gi|Ti|K|M|G|T|B)?$ ]] \
+    || die 'OPENSHELL_SANDBOX_MEMORY must be positive bytes or a quantity (for example 512Mi, 4Gi, or 8G)'
   note "Creating sandbox ${name} from ${image##*/}"
-  _os sandbox create --detach --no-auto-providers --name "${name}" --from "${image}" --policy "${policy}" "${provider_args[@]}"
+  _os sandbox create --detach --no-auto-providers --name "${name}" --from "${image}" --policy "${policy}" \
+    --cpu "${OPENSHELL_SANDBOX_CPU}" --memory "${OPENSHELL_SANDBOX_MEMORY}" "${provider_args[@]}"
   _wait_ready "${name}"
   note "Sandbox ${name} ready"
 }
