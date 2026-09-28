@@ -48,7 +48,12 @@ grep -q 'key_path *= *"/var/lib/openshell/tls/server/tls.key"' "${gt}" || fail "
 grep -q 'client_ca_path *= *"/var/lib/openshell/tls/ca.crt"' "${gt}" || fail "gateway client CA path missing"
 grep -q 'allow_unauthenticated_users = false' "${gt}" || fail "gateway must reject unauthenticated users"
 grep -q '\[openshell.gateway.mtls_auth\]' "${gt}" || fail "gateway missing mTLS auth block"
-grep -q 'enabled = true' "${gt}" || fail "gateway mTLS auth must be enabled"
+awk '
+  /^\[openshell\.gateway\.mtls_auth\]$/ { in_mtls=1; next }
+  /^\[/ { in_mtls=0 }
+  in_mtls && $0 ~ /^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true[[:space:]]*$/ { found=1 }
+  END { exit found ? 0 : 1 }
+' "${gt}" || fail "gateway mTLS auth must be enabled"
 grep -q 'disable_tls' "${gt}" && fail "gateway must not disable TLS"
 grep -q 'grpc_endpoint' "${gt}" && fail "gateway must let the Podman driver derive the https endpoint"
 grep -q 'supervisor_image *= *"@@ODH_SUPERVISOR_IMAGE@@"' "${gt}" || fail "supervisor image placeholder missing"

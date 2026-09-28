@@ -28,7 +28,7 @@ gateway_install_config() {  # <owner> <home> <temporary-directory> <workload-ima
 }
 
 gateway_start() {  # <runner> <native-cli> <registration-marker>
-  local runner="$1" cli="$2" marker="$3" attempt
+  local runner="$1" cli="$2" marker="$3" attempt registration_version=2
   "${runner}" systemctl --user daemon-reload
   "${runner}" systemctl --user restart openshell-gateway.service
   for ((attempt=0; attempt<60; attempt++)); do
@@ -36,12 +36,13 @@ gateway_start() {  # <runner> <native-cli> <registration-marker>
     sleep 2
   done
   curl --fail --silent http://127.0.0.1:8091/healthz >/dev/null
-  if [[ ! -f "${marker}" ]]; then
+  if [[ "$(cat "${marker}" 2>/dev/null || true)" != "${registration_version}" ]]; then
+    "${runner}" "${cli}" gateway remove local >/dev/null 2>&1 || true
     "${runner}" env OPENSHELL_LOCAL_TLS_DIR=/var/lib/openshell/tls \
       "${cli}" gateway add https://127.0.0.1:8090 --local --name local
     "${runner}" env OPENSHELL_LOCAL_TLS_DIR=/var/lib/openshell/tls \
       "${cli}" gateway select local
-    "${runner}" touch "${marker}"
+    printf '%s\n' "${registration_version}" | "${runner}" tee "${marker}" >/dev/null
   fi
   "${runner}" "${cli}" sandbox list >/dev/null
 }

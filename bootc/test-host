@@ -16,10 +16,12 @@ as_openshell systemctl --user is-active --quiet openshell-gateway.service
 [[ "$(as_service podman inspect praxis-shared-gateway --format '{{.State.Health.Status}}')" == healthy ]] || die 'Praxis is unhealthy'
 curl --fail --silent http://127.0.0.1:8091/healthz >/dev/null
 gateway_config=/var/lib/openshell-svc/.config/openshell/gateway.toml
-grep -q '\[openshell.gateway.tls\]' "${gateway_config}" || die 'OpenShell gateway TLS is not configured'
-grep -q 'allow_unauthenticated_users = false' "${gateway_config}" || die 'OpenShell gateway accepts unauthenticated users'
+grep -Eq '^[[:space:]]*\[openshell\.gateway\.tls\][[:space:]]*$' "${gateway_config}" \
+  || die 'OpenShell gateway TLS is not configured'
+grep -Eq '^[[:space:]]*allow_unauthenticated_users[[:space:]]*=[[:space:]]*false[[:space:]]*($|#)' "${gateway_config}" \
+  || die 'OpenShell gateway accepts unauthenticated users'
 grep -q 'disable_tls' "${gateway_config}" && die 'OpenShell gateway TLS is disabled'
-if curl --fail --silent --max-time 5 http://127.0.0.1:8090/ >/dev/null 2>&1; then
+if curl --silent --max-time 5 http://127.0.0.1:8090/ >/dev/null 2>&1; then
   die 'OpenShell gateway accepts plaintext HTTP on port 8090'
 fi
 as_openshell openshell sandbox list >/dev/null
