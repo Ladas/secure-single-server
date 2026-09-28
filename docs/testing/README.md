@@ -17,6 +17,18 @@ quickstarts.
 
 ## Fast local checks
 
+For one entry point covering static checks, existing image regressions and all
+four mocked-provider profiles, use the [mocked-provider CI guide](mocked-provider.md):
+
+```console
+python3 tests/mocked-provider.py --engine podman
+```
+
+OpenShell harness and pinned-schema regressions run in a separate hosted job;
+sandbox runtime uses the manual disposable-RHEL gate described below. The
+[coverage map](mocked-provider.md#roadmap-coverage) distinguishes current
+contracts from the roadmap's remaining acceptance targets.
+
 Static checks require Bash, Git, `jq`, `rg` (ripgrep), and Ruby with Psych.
 The credential, AWS and remote image tests also need Python 3.9+ and OpenSSL.
 AWS session tests cover Bash and, when installed, zsh; CI installs both shells.
@@ -62,7 +74,8 @@ tests compare the image with the engine server, including a remote Podman VM;
 an emulated image does not count as native qualification.
 
 The [CI workflow](../../.github/workflows/validate.yml) runs static checks,
-Praxis startup, Valkey ACL/persistence and synthetic remote TLS/JWT/quota tests on native amd64 and arm64
+Praxis startup, Valkey ACL/persistence and shared mocked-provider JSON/SSE/tool,
+credential and quota contracts for all-in-one and remote profiles on native amd64 and arm64
 Linux runners, using dummy credentials only. CI does not run the RHEL installer
 or make paid provider calls. Check the PR's actual job results after pushing.
 
