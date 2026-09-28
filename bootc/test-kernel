@@ -17,7 +17,9 @@ print(next((item["phase"] for item in data["sandboxes"] if item["name"] == sys.a
 [[ "${phase}" == Ready ]] || die "sandbox ${name} is ${phase}, not Ready"
 
 kernel="$(uname -r)"
-if tr ',' '\n' </sys/kernel/security/lsm | grep -qx landlock; then
+if [[ ! -r /sys/kernel/security/lsm ]]; then
+  die 'cannot read /sys/kernel/security/lsm to determine Landlock LSM status'
+elif tr ',' '\n' </sys/kernel/security/lsm | grep -qx landlock; then
   landlock_lsm=enabled
 else
   landlock_lsm=disabled
@@ -32,14 +34,14 @@ printf 'landlock_note=Ready sandbox proves Landlock ABI v3+ (sandbox fails close
 probe="$(mktemp)"
 trap 'rm -f "${probe}"' EXIT
 cat >"${probe}" <<'JS'
-const net = require('net');
+import net from 'node:net';
 const server = net.createServer();
 const finish = (result) => { console.log('ACCEPT_PEER_RESULT=' + result); process.exit(0); };
 server.on('connection', (socket) => {
   try {
     const peer = socket.remoteAddress;
     socket.end();
-    finish(peer ? 'ok:' + peer : 'ok:empty-peer');
+    finish(peer ? 'ok:' + peer : 'errno:empty-peer');
   } catch (error) {
     finish('errno:' + (error.code || error.errno || 'unknown'));
   }
@@ -53,8 +55,10 @@ setTimeout(() => finish('timeout'), 10000);
 JS
 
 # shellcheck disable=SC2016
-result="$(as_openshell bash -c 'source "$1/openshell/scripts/harness-lib.sh"; harness_ssh "$2" node --input-type=module' \
-  test "${ROOT}" "${name}" <"${probe}")"
+if ! result="$(as_openshell bash -c 'source "$1/openshell/scripts/harness-lib.sh"; harness_ssh "$2" node --input-type=module' \
+  test "${ROOT}" "${name}" <"${probe}" 2>&1)"; then
+  die "sandbox accept/getpeername probe failed: ${result}"
+fi
 printf '%s\n' "${result}"
 case "${result}" in
   *ACCEPT_PEER_RESULT=ok:*)
