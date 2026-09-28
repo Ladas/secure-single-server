@@ -7,28 +7,48 @@ source /usr/share/secure-single-server/bootc/scripts/common
 source "${ROOT}/bootc/scripts/vllm-lib"
 require_root
 cd /
-exec 8>/run/secure-single-server-vllm.lock
-flock 8
 case "${1:-reconcile}" in
   select)
     [[ "$#" == 2 ]] || die 'usage: sss-bootc vllm disabled|cpu|gpu'
     vllm_preflight "$2"
+    # Serialize selectors while stopping a reconcile that may be pulling an image.
+    # Stop before taking its lock; systemd kills the pull's entire control group.
+    exec 7>/run/secure-single-server-vllm-selection.lock
+    flock 7
+    systemctl stop secure-single-server-vllm.service
+    exec 8>/run/secure-single-server-vllm.lock
+    flock 8
     install -d -m 0755 /etc/secure-single-server
     tmp="$(mktemp /etc/secure-single-server/.vllm-mode.XXXXXX)"
     printf '%s\n' "$2" >"${tmp}"
     chmod 0644 "${tmp}"
     mv "${tmp}" /etc/secure-single-server/vllm-mode
+    flock -u 8
+    if [[ "$2" == disabled ]]; then
+      systemctl restart secure-single-server-vllm.service
+    else
+      # Do not hold the selector lock for the image pull: another selection must
+      # be able to cancel this start. Reconciliation remains serialized by fd 8.
+      systemctl restart --no-block secure-single-server-vllm.service
+      note 'vLLM preparation queued; use status and /health to check readiness'
+    fi
     exit 0
     ;;
   status)
     printf 'vLLM mode: %s\n' "$(vllm_mode)"
     [[ "$(vllm_mode)" != disabled ]] || exit 0
+    if ! getent passwd vllm-svc >/dev/null; then
+      note 'vLLM account is not prepared yet'
+      exit 0
+    fi
     as_service systemctl --user status vllm.service --no-pager
     exit
     ;;
   reconcile) ;;
   *) die 'expected select, status, or reconcile' ;;
 esac
+exec 8>/run/secure-single-server-vllm.lock
+flock 8
 mode="$(vllm_mode)"
 if [[ "${mode}" == disabled ]]; then
   if getent passwd vllm-svc >/dev/null; then

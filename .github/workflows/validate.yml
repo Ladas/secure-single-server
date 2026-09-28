@@ -61,6 +61,7 @@ jobs:
         run: |
           python3 bootc/tests/build.py
           python3 bootc/tests/vllm.py
+          python3 bootc/tests/vllm-lock.py
           python3 bootc/tests/inference.py
           shellcheck -x bootc/build bootc/install-nvidia bootc/test-images bootc/test-host bootc/test-inference bootc/scripts/*
       - name: Check native runner architecture
@@ -73,6 +74,10 @@ jobs:
         env:
           CONTAINER_ENGINE: docker
         run: tests/shared-gateway-image.sh
+      - name: Verify local inference routing with a synthetic vLLM server
+        env:
+          CONTAINER_ENGINE: docker
+        run: python3 bootc/tests/inference-image.py
       - name: Verify Valkey ACL and persistence without provider keys
         env:
           CONTAINER_ENGINE: docker

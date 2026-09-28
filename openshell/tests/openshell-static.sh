@@ -61,7 +61,7 @@ for name, policy in d["network_policies"].items():
             assert endpoint.get("access") or endpoint.get("rules"), \
                 f"{name}: REST endpoint requires access or rules"
 PY
-  done < <(find "${OS_DIR}" "${ROOT}/configs/openshell-praxis" -path '*/profiles/*/policy.yaml')
+  done < <(find "${OS_DIR}" "${ROOT}/configs/openshell-praxis" "${ROOT}/configs/vllm/harness" -path '*/profiles/*/policy.yaml')
 fi
 
 python3 "${OS_DIR}/tests/regressions.py"

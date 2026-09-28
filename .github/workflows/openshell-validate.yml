@@ -2,10 +2,10 @@ name: Validate OpenShell demos
 
 on:
   pull_request:
-    paths: ["openshell/**", "configs/openshell-praxis/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
+    paths: ["openshell/**", "configs/openshell-praxis/**", "configs/vllm/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
   push:
     branches: [main]
-    paths: ["openshell/**", "configs/openshell-praxis/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
+    paths: ["openshell/**", "configs/openshell-praxis/**", "configs/vllm/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
   workflow_dispatch:
 
 permissions:

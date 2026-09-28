@@ -111,6 +111,7 @@ python3 bootc/tests/build.py
 shellcheck -x bootc/scripts/*
 ```
 
+See [CI coverage](CI.md) for automated checks.
 See the runtime report for boot, inference, sandbox and lifecycle results.
 Registry-failure recovery, offline operation, OS rollback, sustained load and
 additional hardware remain separate qualification work. Static rendering
@@ -181,3 +182,7 @@ path is `/usr/local/bin/opencode`; its `/usr/local/sbin` launcher is a symlink.
 See [runtime validation](VLLM-VALIDATION.md) for the tested hardware, image revisions,
 actual inference results, and remaining limits. Use the dedicated local policy;
 the general development profiles intentionally permit additional network access.
+
+CPU/GPU selection queues preparation asynchronously so a later disable command
+can cancel a slow image pull. Check status and `/health` for readiness. Status
+does not wait for the reconciliation lock; disabling waits for the service to stop.

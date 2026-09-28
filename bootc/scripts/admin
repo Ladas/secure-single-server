@@ -25,7 +25,6 @@ EOF
       exec "${ROOT}/bootc/scripts/vllm" status
     fi
     "${ROOT}/bootc/scripts/vllm" select "$2"
-    systemctl restart secure-single-server-vllm.service
     ;;
   inference)
     require_root
