@@ -15,6 +15,10 @@ sudo openshell/scripts/install.sh --owner openshell-svc
 ```
 
 The owner is a dedicated locked service account with lingering and a user bus.
+The gateway binds loopback only, requires TLS, and maps the generated local
+client certificate to the operator principal through mTLS; unauthenticated
+gateway calls are rejected. The CLI imports its client bundle from
+`/var/lib/openshell/tls` during first registration.
 Run CLI/harness commands as that account, with its HOME and runtime bus:
 
 ```bash

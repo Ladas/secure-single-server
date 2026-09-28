@@ -37,8 +37,10 @@ gateway_start() {  # <runner> <native-cli> <registration-marker>
   done
   curl --fail --silent http://127.0.0.1:8091/healthz >/dev/null
   if [[ ! -f "${marker}" ]]; then
-    "${runner}" "${cli}" gateway add http://127.0.0.1:8090 --name local
-    "${runner}" "${cli}" gateway select local
+    "${runner}" env OPENSHELL_LOCAL_TLS_DIR=/var/lib/openshell/tls \
+      "${cli}" gateway add https://127.0.0.1:8090 --local --name local
+    "${runner}" env OPENSHELL_LOCAL_TLS_DIR=/var/lib/openshell/tls \
+      "${cli}" gateway select local
     "${runner}" touch "${marker}"
   fi
   "${runner}" "${cli}" sandbox list >/dev/null
