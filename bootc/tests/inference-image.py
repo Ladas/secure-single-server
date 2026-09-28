@@ -4,13 +4,12 @@
 Use host networking so the shipped profile is tested unchanged, including its
 loopback-only listeners and upstream. No weights, GPUs or provider keys needed.
 """
-import http.server
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -19,43 +18,10 @@ import uuid
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = os.environ.get('CONTAINER_ENGINE', 'podman')
 MODEL = 'Qwen/Qwen3-8B'
-TOOL = {'index': 0, 'id': 'call_test', 'type': 'function',
-        'function': {'name': 'bash', 'arguments': '{"command":"echo hello"}'}}
-SEEN = []
-
-
-class Provider(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *_):
-        pass
-
-    def do_GET(self):
-        SEEN.append((self.path, dict(self.headers), None))
-        self.send_body({'object': 'list', 'data': [{'id': MODEL, 'object': 'model'}]})
-
-    def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-        SEEN.append((self.path, dict(self.headers), body))
-        if body.get('stream'):
-            chunk = {'id': 'test', 'object': 'chat.completion.chunk', 'model': MODEL,
-                     'choices': [{'index': 0, 'delta': {'tool_calls': [TOOL]}, 'finish_reason': None}]}
-            end = {'id': 'test', 'object': 'chat.completion.chunk', 'model': MODEL,
-                   'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'tool_calls'}],
-                   'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5}}
-            self.send_body('data: ' + json.dumps(chunk) + '\n\ndata: ' + json.dumps(end) +
-                           '\n\ndata: [DONE]\n\n', 'text/event-stream')
-        else:
-            self.send_body({'id': 'test', 'object': 'chat.completion', 'model': MODEL,
-                            'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'hello'},
-                                         'finish_reason': 'stop'}],
-                            'usage': {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5}})
-
-    def send_body(self, body, content_type='application/json'):
-        data = (json.dumps(body) if isinstance(body, dict) else body).encode()
-        self.send_response(200)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+sys.path.insert(0, str(ROOT / 'tests/common'))
+from provider import Provider
+from contracts import check
+from evidence import save
 
 
 def run(*args):
@@ -79,9 +45,9 @@ def main():
             return response.headers, response.read().decode()
 
     name = 'sss-local-inference-' + uuid.uuid4().hex[:12]
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 8000), Provider)
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
-    worker.start()
+    server = Provider(ports=(8000, 0, 0), openai_authorization=None, model=MODEL)
+    server.start()
+    result = {'status': 'failed', 'profile': 'local-vllm', 'runtime': 'not run'}
     try:
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / 'praxis.yaml'
@@ -104,21 +70,18 @@ def main():
             assert json.loads(body)['data'][0]['id'] == MODEL, body
             payload = {'model': MODEL, 'messages': [{'role': 'user', 'content': 'hello'}], 'max_tokens': 16}
             _, body = request('/v1/chat/completions', payload)
-            assert json.loads(body)['choices'][0]['message']['content'] == 'hello', body
+            check('/v1/chat/completions', body, model=MODEL)
             payload = {**payload, 'stream': True, 'tools': [{'type': 'function', 'function': {
-                'name': 'bash', 'parameters': {'type': 'object', 'properties': {'command': {'type': 'string'}}}}}]}
+                'name': 'add', 'parameters': {'type': 'object', 'properties': {
+                    'a': {'type': 'integer'}, 'b': {'type': 'integer'}}}}}]}
             headers, body = request('/v1/chat/completions', payload)
             assert headers.get_content_type() == 'text/event-stream', headers
-            events = [line[6:] for line in body.splitlines() if line.startswith('data: ')]
-            assert events[-1] == '[DONE]', body
-            assert json.loads(events[0])['choices'][0]['delta']['tool_calls'] == [TOOL], body
-            assert SEEN[-1][2] == payload, SEEN
-            for path, headers, _ in SEEN:
-                lowered = {key.lower(): value for key, value in headers.items()}
-                assert path in ('/v1/models', '/v1/chat/completions'), path
-                assert not {'authorization', 'x-model', 'x-cluster'} & lowered.keys(), headers
-            server.shutdown()
-            server.server_close()
+            check('/v1/chat/completions', body, stream=True, tool=True, model=MODEL)
+            records = server.records
+            assert records[-1]['model'] == MODEL and records[-1]['stream'], records
+            assert all(record['credential_ok'] and record['classification_clean'] for record in records), records
+            assert all(record['model'] == MODEL for record in records if record['method'] == 'POST'), records
+            server.close()
             time.sleep(1)  # replenish the profile's request-rate budget
             try:
                 request('/v1/chat/completions', payload)
@@ -126,13 +89,17 @@ def main():
                 assert error.code == 502, error.code
             else:
                 raise AssertionError('unavailable local backend did not fail closed')
+            result['status'] = 'passed'
+            result['records'] = records
             print('Local Praxis: models, chat, SSE tool calls, header stripping and backend failure passed')
     finally:
-        server.shutdown()
-        server.server_close()
+        server.close()
+        save("local-vllm", result)
         subprocess.run([ENGINE, 'logs', name], check=False)
         subprocess.run([ENGINE, 'rm', '-f', name], check=False)
 
 
 if __name__ == '__main__':
+    if not __debug__ or os.environ.get('PYTHONOPTIMIZE'):
+        raise SystemExit('Run tests without Python -O/PYTHONOPTIMIZE')
     main()

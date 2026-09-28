@@ -30,3 +30,19 @@ These tests do not qualify real Qwen inference, GPU driver/CDI behavior, bootc
 boot/reboot, sandbox enforcement, or OS rollback. See the separate hardware
 results in [VLLM-VALIDATION.md](VLLM-VALIDATION.md). Green PR checks should not be
 interpreted as fresh hardware validation.
+
+## Shared test foundation
+
+PR #6 depends on [PR #5](https://github.com/redhat-et/secure-single-server/pull/5).
+Its current head (`f4d3dc4388c51d8a013f467a1715a692e214fe0e`) is merged into the
+feature branch. Keep subsequent changes from that PR by merging its latest
+head, rather than copying fixture code. Merge PR #5 before PR #6; if #5 is
+squash-merged, reconcile the feature branch with main before merging #6.
+
+The local inference check imports `tests/common/provider.py`,
+`tests/common/contracts.py` and `tests/common/evidence.py` from that foundation.
+It adds only the local profile's model name, absent-authorization contract,
+unchanged loopback configuration and unavailable-backend check. Cloud protocol,
+JWT/TLS, quota and Valkey cases run once in the shared matrix. Both native and
+container OpenShell schema runners use the same positive/negative controls,
+now covering the additional local policy (17 policies total).
