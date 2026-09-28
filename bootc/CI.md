@@ -33,11 +33,8 @@ interpreted as fresh hardware validation.
 
 ## Shared test foundation
 
-PR #6 depends on [PR #5](https://github.com/redhat-et/secure-single-server/pull/5).
-Its current head (`f4d3dc4388c51d8a013f467a1715a692e214fe0e`) is merged into the
-feature branch. Keep subsequent changes from that PR by merging its latest
-head, rather than copying fixture code. Merge PR #5 before PR #6; if #5 is
-squash-merged, reconcile the feature branch with main before merging #6.
+The inference checks extend the shared test foundation merged in
+[PR #5](https://github.com/redhat-et/secure-single-server/pull/5).
 
 The local inference check imports `tests/common/provider.py`,
 `tests/common/contracts.py` and `tests/common/evidence.py` from that foundation.
