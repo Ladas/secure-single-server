@@ -10,7 +10,8 @@ as_openshell() {
   runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
     XDG_RUNTIME_DIR="/run/user/${uid}" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
-    OPENSHELL_BIN=/usr/bin/openshell "$@"
+    OPENSHELL_BIN=/usr/bin/openshell \
+    OPENSHELL_TELEMETRY_ENABLED=false "$@"
 }
 
 pull_missing() {
