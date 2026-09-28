@@ -129,7 +129,8 @@ sudo sss-bootc activate praxis-openai-api-key-v1 praxis-anthropic-api-key-v1
 sudo sss-bootc status
 ```
 
-Both names are required by the shipped two-provider Praxis configuration. For
+Both names are required by the default two-provider Praxis configuration.
+The optional `sss-bootc inference vllm` profile requires no cloud secrets. For
 no-provider smoke tests use explicit dummy values; this verifies service health,
 not inference. Rotation uses new secret versions and another `activate` call.
 Only names are stored in `/etc/secure-single-server/secret-names`.
@@ -160,8 +161,8 @@ These commands run the existing harness scripts as `openshell-svc`. Their
 standalone policies permit provider endpoints. The
 [Praxis integration workflow](../docs/quickstarts/openshell-praxis/README.md)
 is separate and experimental. Codex and OpenClaw reject `--config`; OpenCode
-renders a provider config but host-alias routing and real inference remain
-unqualified. The pinned AWS sandbox did not resolve `host.openshell.internal`.
+supports the dedicated local vLLM route described below. The historical cloud
+integration results are separate from the local Qwen qualification.
 No SSH helper forwards provider keys. Standalone bindings must be explicit with
 `--provider NAME`; integrated mode rejects them. Successful boot/build checks do
 not prove a real model task works or that direct provider access is denied.
@@ -171,6 +172,14 @@ runtime state under `/sandbox/.local/share`, which the shipped read-only
 `review` profile denies; sandbox creation can succeed while the CLI fails.
 That profile needs a separate runtime-state policy design before it is usable
 with OpenCode. Do not broaden the whole review workspace to work around it.
+
+## Optional local inference
+
+Run [Qwen3-8B with containerized vLLM](VLLM.md) in CPU or single-NVIDIA-L4
+mode. It is disabled by default; GPU mode requires a driver/toolkit-equipped
+OS image. An optional local Praxis backend and experimental OpenCode
+configuration are included. Build with `NVIDIA_GPU=1` for the L4 OS image;
+see the vLLM guide for deployment and runtime evidence.
 
 ## Validation
 

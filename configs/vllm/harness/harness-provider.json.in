@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "praxis": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Praxis (sandboxed)",
+      "options": {"baseURL": "http://host.openshell.internal:@@PRAXIS_PORT@@/v1", "apiKey": "local-placeholder"},
+      "models": {"@@MODEL_ID@@": {"name": "Qwen3-8B (local)", "limit": {"context": 16384, "output": 2048}}}
+    }
+  }
+}

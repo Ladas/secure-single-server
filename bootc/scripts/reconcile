@@ -34,30 +34,39 @@ trap 'rm -rf "${tmp}"' EXIT
 gateway_install_config openshell-svc /var/lib/openshell-svc "${tmp}" "${workload}" no
 gateway_start as_openshell /usr/bin/openshell /var/lib/openshell-svc/.config/openshell/bootc-registered
 
-# Secrets are provisioned separately through stdin. Only their names live here.
-openai_secret=praxis-openai-api-key-v1
-anthropic_secret=praxis-anthropic-api-key-v1
-if [[ -f /etc/secure-single-server/secret-names ]]; then
-  read -r openai_secret anthropic_secret extra </etc/secure-single-server/secret-names
-  [[ -z "${extra}" ]] || die 'expected exactly two secret names'
-fi
-validate_secret_name "${openai_secret}"
-validate_secret_name "${anthropic_secret}"
+backend="$(inference_backend)"
 praxis_units="/etc/containers/systemd/users/$(service_uid)"
-if ! secret_exists "${openai_secret}" || ! secret_exists "${anthropic_secret}"; then
-  as_service systemctl --user stop praxis.service 2>/dev/null || true
-  note 'OpenShell ready; Praxis awaits provider secrets. See sss-bootc help.'
-  exit 0
+if [[ "${backend}" == vllm ]]; then
+  # No cloud secrets or cloud fallback for the local route. vLLM can still be
+  # loading; Praxis starts independently and reports upstream errors until ready.
+  install -o root -g "$(service_gid)" -m 0640 "${ROOT}/configs/vllm/praxis.yaml" \
+    /etc/praxis/shared-gateway.yaml
+  render_template "${ROOT}/configs/vllm/praxis.container.in" "${tmp}/praxis.container" \
+    PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}"
+else
+  # Secrets are provisioned separately through stdin. Only their names live here.
+  openai_secret=praxis-openai-api-key-v1
+  anthropic_secret=praxis-anthropic-api-key-v1
+  if [[ -f /etc/secure-single-server/secret-names ]]; then
+    read -r openai_secret anthropic_secret extra </etc/secure-single-server/secret-names
+    [[ -z "${extra}" ]] || die 'expected exactly two secret names'
+  fi
+  validate_secret_name "${openai_secret}"
+  validate_secret_name "${anthropic_secret}"
+  if ! secret_exists "${openai_secret}" || ! secret_exists "${anthropic_secret}"; then
+    as_service systemctl --user stop praxis.service 2>/dev/null || true
+    note 'OpenShell ready; Praxis awaits provider secrets. See sss-bootc help.'
+    exit 0
+  fi
+  install -o root -g "$(service_gid)" -m 0640 "${ROOT}/configs/all-in-one/shared-gateway.yaml" \
+    /etc/praxis/shared-gateway.yaml
+  render_template "${ROOT}/configs/common/quadlet/praxis.container.in" "${tmp}/praxis.container" \
+    PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}"
 fi
-
-install -o root -g "$(service_gid)" -m 0640 "${ROOT}/configs/all-in-one/shared-gateway.yaml" \
-  /etc/praxis/shared-gateway.yaml
 regex="$(selinux_path_regex /etc/praxis/shared-gateway.yaml)"
 semanage fcontext -a -t container_file_t "${regex}" 2>/dev/null || \
   semanage fcontext -m -t container_file_t "${regex}"
 restorecon -F /etc/praxis/shared-gateway.yaml
-render_template "${ROOT}/configs/common/quadlet/praxis.container.in" "${tmp}/praxis.container" \
-  PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}"
 sed '/^\[Install\]/,$d' "${tmp}/praxis.container" >"${tmp}/praxis-bootc.container"
 install -m 0644 "${tmp}/praxis-bootc.container" "${praxis_units}/praxis.container"
 install -m 0644 "${ROOT}/configs/common/quadlet/praxis.network" "${praxis_units}/praxis.network"

@@ -13,11 +13,13 @@ Run on an x86_64 Linux Podman builder, normally with sudo.
 RHEL_BOOTC_IMAGE must be a reviewed registry.redhat.io/rhel9/rhel-bootc@sha256:... reference.
 IMAGE_PREFIX defaults to localhost/secure-single-server.
 On an AWS PAYG RHEL builder set AWS_RHUI_REGION (for example us-east-1).
+Set NVIDIA_GPU=1 to include the NVIDIA 580 open driver and Container Toolkit.
 Build base before an individual harness; all builds base plus all three harnesses.
 EOF
   [[ "${1:-}" == --help ]] && exit 0
   exit 2
 fi
+[[ "${NVIDIA_GPU:-0}" == 0 || "${NVIDIA_GPU:-0}" == 1 ]] || die 'NVIDIA_GPU must be 0 or 1'
 target="$1"
 case "${target}" in base|codex|opencode|openclaw|all) ;; *) die "unknown target: ${target}" ;; esac
 prefix="${2:-localhost/secure-single-server}"
@@ -55,6 +57,7 @@ if [[ "${target}" == base || "${target}" == all ]]; then
       --volume /etc/dnf/plugins/amazon-id.conf:/etc/dnf/plugins/amazon-id.conf:ro)
   fi
   podman build "${repo_args[@]}" --arch amd64 --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
+    --build-arg "NVIDIA_GPU=${NVIDIA_GPU:-0}" \
     --build-arg "OPENSHELL_CLI_IMAGE=${ODH_CLI_IMAGE}" \
     -f "${context}/bootc/Containerfile" -t "${prefix}:base" "${context}"
 fi

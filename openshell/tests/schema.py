@@ -33,7 +33,8 @@ def validate_profiles(invoke, results):
         assert accepted(output), f'numeric-port control failed before gateway connection: {output[-1000:]}'
         policies = sorted((ROOT / 'openshell/harnesses').glob('*/profiles/*/policy.yaml'))
         policies += sorted((ROOT / 'configs/openshell-praxis/profiles').glob('*/policy.yaml'))
-        assert len(policies) == 16, f'expected all 16 policies, found {len(policies)}'
+        policies += sorted((ROOT / 'configs/vllm/harness/profiles').glob('*/policy.yaml'))
+        assert len(policies) == 17, f'expected all 17 policies, found {len(policies)}'
         for source in policies:
             output = validate(source.read_text().replace('@@PRAXIS_PORT@@', '18080'))
             passed = accepted(output)

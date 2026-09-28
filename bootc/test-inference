@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Real local-model traffic, including an OpenCode tool call. Run on a booted host.
+set -euo pipefail
+# shellcheck disable=SC1091
+source /usr/share/secure-single-server/bootc/scripts/common
+require_root
+cd /
+name="${1:?usage: sudo bootc/test-inference EXISTING_LOCAL_OPENCODE_SANDBOX}"
+[[ "${name}" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]] || die 'invalid sandbox name'
+[[ "$(inference_backend)" == vllm ]] || die 'select inference vllm first'
+"${ROOT}/bootc/scripts/inference-check"
+logs="$(mktemp -d)"
+trap 'rm -rf "${logs}"' EXIT
+# shellcheck disable=SC2016  # Expanded by the service-user shell.
+as_openshell bash -c 'source "$1/openshell/scripts/harness-lib.sh"; harness_ssh "$2" node --input-type=module' \
+  test "${ROOT}" "${name}" <<'JS'
+const base = 'http://host.openshell.internal:8080/v1';
+const response = await fetch(base + '/models', {signal: AbortSignal.timeout(30000)});
+if (!response.ok || !(await response.json()).data.some(m => m.id === 'Qwen/Qwen3-8B'))
+  throw new Error('Praxis model listing failed');
+console.log('Sandbox Praxis model listing passed');
+for (const url of ['http://host.openshell.internal:8000/v1/models', 'https://api.openai.com/v1/models']) {
+  try {
+    const r = await fetch(url, {signal: AbortSignal.timeout(10000)});
+    throw new Error('BYPASS REACHABLE ' + url + ' HTTP ' + r.status);
+  } catch (error) {
+    if (error.cause?.code !== 'EACCES') throw error;
+    console.log('Connection denied:', url);
+  }
+}
+JS
+# Check these records immediately, before a long CPU tool task can age them out.
+# Supervisor audit delivery to the gateway is asynchronous.
+for ((attempt=0; attempt<15; attempt++)); do
+  as_openshell openshell logs "${name}" --since 2m >"${logs}/denials.log"
+  if grep -Eq 'DENIED .*:8000 .*transparent_tcp_mapping_denied' "${logs}/denials.log" &&
+     grep -Eq 'DENIED .*api.openai.com:443 .*transparent_tcp_policy_denied' "${logs}/denials.log"; then
+    break
+  fi
+  sleep 2
+done
+grep -E 'ALLOWED|DENIED' "${logs}/denials.log"
+grep -Eq 'DENIED .*:8000 .*transparent_tcp_mapping_denied' "${logs}/denials.log"
+grep -Eq 'DENIED .*api.openai.com:443 .*transparent_tcp_policy_denied' "${logs}/denials.log"
+# A unique file independently proves execution even when the CLI drops short stdout.
+proof="/sandbox/sss-vllm-smoke-${RANDOM}-${RANDOM}"
+printf -v command 'timeout 1800 opencode run --model praxis/Qwen/Qwen3-8B --format json %q' \
+  "Use the bash tool to run echo hello > ${proof}, then confirm completion."
+# OpenCode streams model responses internally; JSON events expose tool execution.
+# shellcheck disable=SC2016  # Expanded by the service-user shell.
+as_openshell bash -c 'source "$1/openshell/scripts/harness-lib.sh"; harness_ssh "$2" "$3"' \
+  test "${ROOT}" "${name}" "${command}" | tee "${logs}/opencode.jsonl"
+# shellcheck disable=SC2016
+as_openshell bash -c 'source "$1/openshell/scripts/harness-lib.sh"; harness_ssh "$2" "cat $3"' \
+  test "${ROOT}" "${name}" "${proof}" | grep -Fx hello
+# shellcheck disable=SC2016
+as_openshell bash -c 'source "$1/openshell/scripts/harness-lib.sh"; harness_ssh "$2" "rm -- $3"' \
+  test "${ROOT}" "${name}" "${proof}"
+python3 - "${logs}/opencode.jsonl" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+assert not any(row.get('type') == 'error' for row in rows), rows
+assert any(row.get('type') == 'tool_use' and row.get('part', {}).get('tool') == 'bash'
+           and row['part'].get('state', {}).get('status') == 'completed'
+           and row['part']['state'].get('metadata', {}).get('exit') == 0 for row in rows), rows
+assert any(row.get('type') == 'text' and row.get('part', {}).get('text', '').strip()
+           for row in rows), rows
+print('OpenCode streamed completion and independently verified bash file creation passed')
+PY
+as_openshell openshell logs "${name}" --since 40m >"${logs}/policy.log"
+cat "${logs}/policy.log"
+grep -Eq 'ALLOWED /usr/local/bin/opencode.*host.openshell.internal:8080' "${logs}/policy.log"
+printf 'OpenCode → Praxis → vLLM and explicit bypass denial checks passed\n'

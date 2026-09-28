@@ -61,6 +61,25 @@ class ProviderTest(unittest.TestCase):
         self.assertFalse(self.fixture.records[0]["credential_ok"])
         self.assertNotIn(secret, json.dumps(self.fixture.records))
 
+    def test_local_model_requires_absent_authorization(self):
+        fixture = Provider(ports=(0, 0, 0), openai_authorization=None, model="Qwen/Qwen3-8B")
+        fixture.start()
+        self.addCleanup(fixture.close)
+        base = f"http://127.0.0.1:{fixture.ports[0]}"
+        with urllib.request.urlopen(base + "/v1/models", timeout=2) as response:
+            self.assertEqual(json.load(response)["data"][0]["id"], "Qwen/Qwen3-8B")
+        body = json.dumps({"model": "Qwen/Qwen3-8B"}).encode()
+        req = urllib.request.Request(base + "/v1/chat/completions", body,
+                                     {"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=2) as response:
+            check("/v1/chat/completions", response.read().decode(), model="Qwen/Qwen3-8B")
+        req.add_header("Authorization", "Bearer must-be-stripped")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(req, timeout=2)
+        self.assertEqual(caught.exception.code, 403)
+        self.assertFalse(fixture.records[-1]["credential_ok"])
+        self.assertNotIn("must-be-stripped", json.dumps(fixture.records))
+
     def test_tool_result_is_required_for_continuation(self):
         with self.request("/v1/chat/completions", {"model": "fixture", "tools": [{}]}) as response:
             call = json.load(response)["choices"][0]["message"]["tool_calls"][0]

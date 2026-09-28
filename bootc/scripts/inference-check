@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Actual inference checks; unlike test-host these intentionally generate tokens.
+set -euo pipefail
+# shellcheck disable=SC1091
+source /usr/share/secure-single-server/bootc/scripts/common
+require_root
+[[ "$(inference_backend)" == vllm ]] || die 'select inference vllm first'
+python3 - <<'PY'
+import json
+import urllib.request
+
+model = 'Qwen/Qwen3-8B'
+# Do not allow workstation/caller proxy environment to redirect local probes.
+client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+for name, base in [('vLLM', 'http://127.0.0.1:8000/v1'),
+                   ('Praxis', 'http://127.0.0.1:8080/v1')]:
+    with client.open(base + '/models', timeout=30) as response:
+        models = json.load(response)
+    assert model in [entry['id'] for entry in models['data']], (name, models)
+    data = json.dumps({'model': model, 'messages': [{'role': 'user', 'content': 'Reply with a short greeting.'}],
+                       'max_tokens': 64, 'temperature': 0.7,
+                       'chat_template_kwargs': {'enable_thinking': False}}).encode()
+    request = urllib.request.Request(base + '/chat/completions', data=data,
+                                    headers={'Content-Type': 'application/json'})
+    with client.open(request, timeout=600) as response:
+        completion = json.load(response)
+    assert completion['choices'][0]['message']['content'].strip(), (name, completion)
+    print(name + ': model listing and nonempty completion passed')
+print('Host path passed. This does not qualify sandbox routing, streaming, tools, or bypass denial.')
+PY

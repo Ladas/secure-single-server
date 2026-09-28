@@ -1,5 +1,8 @@
 # Bootc validation — 2026-09-25
 
+This is the historical cloud-profile report. For the updated OpenShell pins and
+local CPU/GPU Qwen route, see [2026-09-28 vLLM validation](VLLM-VALIDATION.md).
+
 Built with rootful Podman 5.8.2 on an AWS RHEL 9.8 x86_64 PAYG builder.
 Application services run rootless on the booted host. No real provider keys
 or paid model requests were used.

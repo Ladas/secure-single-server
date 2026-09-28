@@ -1,6 +1,7 @@
 # Scope and roadmap
 
-The goal is a standalone AI gateway on one administrator-managed RHEL server.
+The goal is a single-server AI agent environment on administrator-managed RHEL,
+combining controlled execution, model access, and shared inference usage.
 Users run useful coding tasks with approved models; administrators retain
 provider credentials, control inference usage, and protect host capacity and
 workspaces. The repository turns that goal into deployable configurations,
@@ -20,7 +21,7 @@ can be run today. Upstream issue status alone does not qualify a deployment.
 | 1. Shared gateway and durable quotas | Run Claude Code, Codex or OpenCode on RHEL without provider keys. Apply ordered model-specific and catch-all token rules; preserve allowances through restarts with private Valkey. | All-in-one profiles and harness recipes exist. Shipped quotas are shared catch-all allowances per API chain; model rules and full native RHEL/real-provider acceptance remain incomplete. Memory profiles are development-only. |
 | 2. Routing and continuity | Choose approved models automatically, fail over safely, and switch when a model allowance is exhausted. | Switchyard has an experimental Weak/Strong Chat Completions profile. Cross-API behavior, judge accounting, selected-model quotas and failover need further work. |
 | 3. Inference guardrails | Screen requests without changing harnesses, preserving screening across every route. | NeMo/Lakera deployment and end-to-end allow/block/modify acceptance are roadmap work. |
-| 4. Self-managed inference | Use a private vLLM model through the same gateway controls. | No managed vLLM deployment is supplied. Placement, hardware, connectivity and real-task acceptance remain to be selected and tested. |
+| 4. Self-managed inference | Use a private vLLM model through the same gateway controls. | The optional bootc deployment serves Qwen3-8B on CPU or a single NVIDIA L4. OpenCode → Praxis → vLLM passed real inference, tool, isolation and lifecycle checks on AWS; see the [local validation](../bootc/VLLM-VALIDATION.md). Other harness adapters and hardware remain unqualified. |
 | 5. Individual access and quotas | Authenticate callers and enforce user, model and organisation/team allowances together. | Remote HTTPS with administrator-issued JWTs exists. Personal/hierarchical quotas, identity-provider integration and renewal/revocation workflows are not qualified by that profile. |
 | 6. Retained sandboxed work | Start a harness, disconnect, reconnect or hand off work, with defined workspace retention and access/resource controls. | OpenShell creation and Codex/OpenCode CLI execution have AWS evidence. Retained processes, reboot recovery, collaboration, individual authorization and aggregate resource/storage enforcement remain qualification targets. |
 | 7. Usage visibility | Monitor consumption across gateway servers. | External usage export and its delivery contract are roadmap work. |

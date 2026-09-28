@@ -135,7 +135,11 @@ def events(path, result):
 
 
 class Provider:
-    def __init__(self, ports=(18080, 18081, 19000), host="127.0.0.1", control_host="127.0.0.1"):
+    def __init__(self, ports=(18080, 18081, 19000), host="127.0.0.1", control_host="127.0.0.1",
+                 openai_authorization="Bearer synthetic-openai", model="fixture"):
+        # None requires the local profile to remove Authorization completely.
+        self.openai_authorization = openai_authorization
+        self.model = model
         self.records = []
         self.mode = "ok"
         self.delay = 1.0
@@ -159,7 +163,7 @@ class Provider:
                         return
                     self.record({})
                     if self.path == "/v1/models":
-                        self.reply(200, {"object": "list", "data": [{"id": "fixture", "object": "model"}]})
+                        self.reply(200, {"object": "list", "data": [{"id": fixture.model, "object": "model"}]})
                     else:
                         self.reply(404, {"error": "unsupported path"})
 
@@ -175,7 +179,7 @@ class Provider:
                     anthropic = self.server.provider_index == 1
                     credential_ok = (self.headers.get("x-api-key") == "synthetic-anthropic"
                                      and self.headers.get("Authorization") is None) if anthropic else (
-                                     self.headers.get("Authorization") == "Bearer synthetic-openai")
+                                     self.headers.get("Authorization") == fixture.openai_authorization)
                     clean = not any(self.headers.get(key) for key in
                                     ("X-Model", "X-Cluster", "X-Tier", "X-Selected-Model", "X-Route"))
                     with fixture.lock:

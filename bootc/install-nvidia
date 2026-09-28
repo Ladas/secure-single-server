@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Build-time only: compile an open NVIDIA driver for the image kernel.
+set -euo pipefail
+curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo \
+  -o /etc/yum.repos.d/cuda-rhel9.repo
+curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+  -o /etc/yum.repos.d/nvidia-container-toolkit.repo
+# Build against the kernel packaged in the image, not uname -r on the builder.
+mapfile -t kernels < <(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n')
+[[ "${#kernels[@]}" == 1 ]] || { echo 'expected one kernel in GPU OS image' >&2; exit 1; }
+dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+dnf module enable -y nvidia-driver:580-open
+dnf install -y "kernel-devel-${kernels[0]}" kernel-headers gcc make elfutils-libelf-devel \
+  dkms nvidia-driver-cuda kmod-nvidia-open-dkms nvidia-container-toolkit
+dkms autoinstall -k "${kernels[0]}"
+depmod -a "${kernels[0]}"
+modinfo -k "${kernels[0]}" nvidia >/dev/null
+printf 'nvidia\nnvidia_uvm\n' >/usr/lib/modules-load.d/sss-nvidia.conf
+# DKMS generates a local signing key during compilation. Never ship that key
+# or build state in an OS image; modules are already installed under /usr/lib.
+rm -rf /var/lib/dkms/*
+systemctl mask dkms.service

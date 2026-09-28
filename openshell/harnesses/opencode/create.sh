@@ -48,7 +48,8 @@ src, dest, port, model = sys.argv[1:]
 data = json.load(open(src))
 provider = data['provider']['praxis']
 provider['options']['baseURL'] = f'http://host.openshell.internal:{port}/v1'
-provider['models'] = {model: {'name': 'Administrator-approved model'}}
+model_config = provider['models']['@@MODEL_ID@@']
+provider['models'] = {model: model_config}
 data['model'] = 'praxis/' + model
 with open(dest, 'w') as out:
     json.dump(data, out)

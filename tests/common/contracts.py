@@ -2,7 +2,7 @@
 import json
 
 
-def check(path, body, stream=False, tool=False, continued=False):
+def check(path, body, stream=False, tool=False, continued=False, model="fixture"):
     expected_text = "5" if continued else "mock answer"
     if not stream:
         result = json.loads(body)
@@ -49,7 +49,7 @@ def check(path, body, stream=False, tool=False, continued=False):
             else:
                 block["text"] = "".join(delta["text"] for delta in deltas)
             result["content"] = [block]
-    assert result["model"] == "fixture"
+    assert result["model"] == model
     usage = result["usage"]
     if path == "/v1/chat/completions":
         assert usage == {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}

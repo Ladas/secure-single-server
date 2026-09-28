@@ -41,3 +41,13 @@ harness_image() {
     *) die "unknown bootc harness: $1" ;;
   esac
 }
+
+# Backend selection is data, never sourced as shell code.
+inference_backend() {
+  local backend=cloud
+  if [[ -f /etc/secure-single-server/inference-backend ]]; then
+    backend="$(cat /etc/secure-single-server/inference-backend)"
+  fi
+  case "${backend}" in cloud|vllm) ;; *) die 'invalid inference backend; expected cloud or vllm' ;; esac
+  printf '%s\n' "${backend}"
+}
