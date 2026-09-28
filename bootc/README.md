@@ -192,6 +192,8 @@ shellcheck -x bootc/build bootc/test-images bootc/test-host bootc/scripts/*
 sudo bootc/test-images
 # On the booted host, after provisioning dummy or real secrets:
 sudo bootc/test-host codex
+# Record sandbox kernel qualification (Landlock LSM and seccomp listener mode):
+sudo bootc/test-kernel READY_SANDBOX_NAME
 ```
 
 The Python tests exercise build validation, parent-image selection and context

@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Record OpenShell sandbox kernel qualification on a booted host.
+# Usage: sudo bootc/test-kernel READY_SANDBOX_NAME
+set -euo pipefail
+# shellcheck disable=SC1091
+source /usr/share/secure-single-server/bootc/scripts/common
+require_root
+cd /
+name="${1:?usage: sudo bootc/test-kernel READY_SANDBOX_NAME}"
+[[ "${name}" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]] || die 'invalid sandbox name'
+
+phase="$(as_openshell openshell sandbox list --output json | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+print(next((item["phase"] for item in data["sandboxes"] if item["name"] == sys.argv[1]), "Missing"))
+' "${name}")"
+[[ "${phase}" == Ready ]] || die "sandbox ${name} is ${phase}, not Ready"
+
+kernel="$(uname -r)"
+if tr ',' '\n' </sys/kernel/security/lsm | grep -qx landlock; then
+  landlock_lsm=enabled
+else
+  landlock_lsm=disabled
+fi
+printf 'kernel_release=%s\nlandlock_lsm=%s\n' "${kernel}" "${landlock_lsm}"
+printf 'landlock_note=Ready sandbox proves Landlock ABI v3+ (sandbox fails closed below v3)\n'
+
+# Exercise accept/getpeername write-back inside the mediated sandbox boundary.
+# Python socket.accept() supplies a peer-address buffer; Node exposes
+# remoteAddress through getpeername after accept. Either path detects the
+# documented legacy_read_only fallback on kernels without WAIT_KILLABLE_RECV.
+probe="$(mktemp)"
+trap 'rm -f "${probe}"' EXIT
+cat >"${probe}" <<'JS'
+const net = require('net');
+const server = net.createServer();
+const finish = (result) => { console.log('ACCEPT_PEER_RESULT=' + result); process.exit(0); };
+server.on('connection', (socket) => {
+  try {
+    const peer = socket.remoteAddress;
+    socket.end();
+    finish(peer ? 'ok:' + peer : 'ok:empty-peer');
+  } catch (error) {
+    finish('errno:' + (error.code || error.errno || 'unknown'));
+  }
+});
+server.on('error', (error) => finish('errno:' + (error.code || error.errno || 'unknown')));
+server.listen(0, '127.0.0.1', () => {
+  const client = net.connect(server.address().port, '127.0.0.1');
+  client.on('error', () => {});
+});
+setTimeout(() => finish('timeout'), 10000);
+JS
+
+# shellcheck disable=SC2016
+result="$(as_openshell bash -c 'source "$1/openshell/scripts/harness-lib.sh"; harness_ssh "$2" node --input-type=module' \
+  test "${ROOT}" "${name}" <"${probe}")"
+printf '%s\n' "${result}"
+case "${result}" in
+  *ACCEPT_PEER_RESULT=ok:*)
+    seccomp_mode=functional_killable
+    ;;
+  *ACCEPT_PEER_RESULT=errno:EOPNOTSUPP*)
+    seccomp_mode=legacy_read_only
+    ;;
+  *)
+    die "unexpected sandbox accept/getpeername result: ${result}"
+    ;;
+esac
+printf 'seccomp_listener_mode=%s\n' "${seccomp_mode}"
+if [[ "${seccomp_mode}" == legacy_read_only ]]; then
+  printf 'legacy_note=getpeername/accept-with-peer/sendmmsg write-back operations fail closed with EOPNOTSUPP\n'
+fi
+printf 'kernel-qualification: sandbox=%s ready; kernel=%s; landlock_lsm=%s; seccomp=%s\n' \
+  "${name}" "${kernel}" "${landlock_lsm}" "${seccomp_mode}"
