@@ -4,6 +4,9 @@ OpenShell adds a policy-controlled execution environment around a harness and it
 tools. Profiles describe filesystem access and network destinations; Praxis can
 add shared model access and quotas, while bootc packages the host setup.
 
+If you are new to the architecture, start with the
+[why-this-exists walkthrough](../../docs/quickstarts/architecture-walkthrough/README.md).
+
 This repository consumes pinned OpenShell control-plane and preinstalled harness
 images. The current deployment target is a disposable, trusted single-operator
 RHEL 9 x86_64 host with rootless Podman. Bootc builds one OS image per harness.

@@ -1,10 +1,20 @@
 # Secure single-server AI agent environment
 
-Run AI coding agents on one administrator-managed RHEL server with controlled
-tool execution, model access, and shared inference usage. Users work through a
-coding harness; administrators choose the execution policies and approved
-models, keep cloud-provider credentials out of harnesses, and manage the host
-as a repeatable deployment.
+AI coding agents become useful when they can read a workspace, run tools, and
+call a model. Those are also the powers that make them risky and expensive to
+operate: tools can touch unrelated data, model requests can bypass the approved
+path, provider keys can spread across harness homes, and one long task can
+consume a shared model.
+
+This repository shows how to run those agents on one administrator-managed RHEL
+server without giving them that unrestricted power. The harness keeps the
+developer experience. OpenShell constrains tools and network access. Praxis owns
+model routing and shared usage. vLLM supplies an approved local model. bootc
+makes the host reproducible and rollback-capable.
+
+Start with the [architecture value walkthrough](docs/quickstarts/architecture-walkthrough/README.md).
+It follows the validated **OpenCode → Praxis → vLLM** path, shows the commands
+that prove each boundary, and states what is not yet qualified.
 
 The environment brings together **harnesses, OpenShell, Praxis, and local or
 cloud inference**. bootc packages the host setup into an updatable OS image.
@@ -113,6 +123,7 @@ acceptance. To contribute or validate a new combination, use the
 
 This repository supplies deployment configuration, lifecycle scripts, harness
 recipes, and acceptance tests. It consumes [Praxis experimental](https://github.com/praxis-proxy/experimental),
-[OpenShell](https://github.com/opendatahub-io/openshell), and
+[OpenShell](https://github.com/NVIDIA/OpenShell), and
 [vLLM](https://github.com/vllm-project/vllm); it does not implement those runtimes
-or the harnesses themselves.
+or the harnesses themselves. The older [Praxis Ruby framework](https://github.com/praxis/praxis)
+is a separate project and is not the gateway used here.
