@@ -50,13 +50,15 @@ if [[ -n "$SSH_KEY" ]]; then
   SSH_OPTIONS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 fi
 ssh "${SSH_OPTIONS[@]}" "$RHEL_HOST" \
-  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests'
+  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests ~/secure-single-server-deploy/tests/rhel'
 scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/common \
   "$RHEL_HOST:~/secure-single-server-deploy/configs/"
 scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/all-in-one \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/"
 scp "${SSH_OPTIONS[@]}" -p tests/shared-gateway-host.sh \
   "$RHEL_HOST:~/secure-single-server-deploy/tests/"
+scp "${SSH_OPTIONS[@]}" -p tests/rhel/harness-versions.json \
+  "$RHEL_HOST:~/secure-single-server-deploy/tests/rhel/"
 ```
 
 SSH may ask you to confirm the server's host key or unlock your private key.
@@ -150,7 +152,8 @@ Praxis publishes only `127.0.0.1:8080` and `127.0.0.1:8081`. Valkey port
 `6379` and Praxis admin port `9901` are not published. Token-quota data is kept
 in the `praxis-valkey-data` volume with AOF persistence.
 
-Continue with the [user workflow](users.md).
+Create an ordinary login with [account setup](accounts.md), then follow the
+[user workflow](users.md).
 
 ## Change from another profile
 

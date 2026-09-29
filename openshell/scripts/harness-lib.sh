@@ -63,17 +63,20 @@ _wait_ready() {  # <sandbox>
 # Single-phase create: harness is pre-installed in <image_ref>.
 harness_create() {  # <name> <image_ref> <policy_file>
   local name="$1" image="$2" policy="$3" provider="${4:-}"
-  local -a provider_args=()
   if [[ -n "${provider}" ]]; then
     [[ "${provider}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || die "invalid provider name"
-    provider_args=(--provider "${provider}")
   fi
   require_command ssh
   [[ -f "${policy}" ]] || die "policy file not found: ${policy}"
   validate_sandbox_resources
   note "Creating sandbox ${name} from ${image##*/}"
-  _os sandbox create --detach --no-auto-providers --name "${name}" --from "${image}" --policy "${policy}" \
-    --cpu "${OPENSHELL_SANDBOX_CPU}" --memory "${OPENSHELL_SANDBOX_MEMORY}" "${provider_args[@]}"
+  # Keep the array nonempty for Bash 3.2 with nounset enabled.
+  local -a create_args=(--detach --no-auto-providers --name "${name}" --from "${image}" --policy "${policy}"
+    --cpu "${OPENSHELL_SANDBOX_CPU}" --memory "${OPENSHELL_SANDBOX_MEMORY}")
+  if [[ -n "${provider}" ]]; then
+    create_args+=(--provider "${provider}")
+  fi
+  _os sandbox create "${create_args[@]}"
   _wait_ready "${name}"
   note "Sandbox ${name} ready"
 }

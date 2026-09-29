@@ -82,11 +82,14 @@ as_service() {
   uid="$(service_uid)"
   home="$(service_home)"
   [[ -n "${home}" ]] || die "could not resolve ${SERVICE_USER} home"
-  runuser -u "${SERVICE_USER}" -- env \
-    HOME="${home}" \
-    XDG_RUNTIME_DIR="/run/user/${uid}" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
-    "$@"
+  (
+    cd "${home}" || die "could not enter ${SERVICE_USER} home"
+    runuser -u "${SERVICE_USER}" -- env \
+      HOME="${home}" \
+      XDG_RUNTIME_DIR="/run/user/${uid}" \
+      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+      "$@"
+  )
 }
 
 validate_secret_name() {
@@ -175,6 +178,7 @@ validate_owned_path() {
   local path="$1" uid
   uid="$(service_uid)"
   case "${path}" in
+    "${CONFIG_DIR}/providers.json") ;;
     "${CONFIG_DIR}/gateway.scenario"|"${CONFIG_DIR}/policy.yaml"|"${CONFIG_DIR}/jwt-public.pem"|"${CONFIG_DIR}/tls.pem"|"${CONFIG_DIR}/tls-key.pem") ;;
     "${CONFIG_DIR}/shared-gateway.yaml"|"${CONFIG_DIR}/shared-gateway.profile"|"${CONFIG_DIR}/valkey.conf"|"/etc/containers/systemd/users/${uid}/praxis.container"|"/etc/containers/systemd/users/${uid}/praxis.network"|"/etc/containers/systemd/users/${uid}/praxis-valkey.container"|"/etc/containers/systemd/users/${uid}/praxis-valkey.volume") ;;
     *) die "manifest contains an unmanaged path: ${path}" ;;

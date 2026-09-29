@@ -50,13 +50,15 @@ if [[ -n "$SSH_KEY" ]]; then
   SSH_OPTIONS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 fi
 ssh "${SSH_OPTIONS[@]}" "$RHEL_HOST" \
-  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests'
+  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests ~/secure-single-server-deploy/tests/rhel'
 scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/common \
   "$RHEL_HOST:~/secure-single-server-deploy/configs/"
 scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/all-in-one \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/"
 scp "${SSH_OPTIONS[@]}" -p tests/shared-gateway-host.sh \
   "$RHEL_HOST:~/secure-single-server-deploy/tests/"
+scp "${SSH_OPTIONS[@]}" -p tests/rhel/harness-versions.json \
+  "$RHEL_HOST:~/secure-single-server-deploy/tests/rhel/"
 ```
 
 SSH may ask you to confirm the server's host key or unlock your private key.
@@ -160,7 +162,8 @@ same catch-all token allowance. The judge's tokens are outside that allowance.
 Judge failure is closed, and failure of the selected target does not try the
 other target.
 
-For the direct endpoints, use the [user workflow](users.md).
+Create an ordinary login with [account setup](accounts.md), then use the
+[user workflow](users.md) for direct endpoints or the Switchyard Chat listener.
 Point a Chat Completions client at `http://127.0.0.1:8082/v1` to use
 Switchyard. Responses clients such as Codex remain on port `8080`.
 

@@ -1,206 +1,139 @@
-# User workflow
+# User setup and usage
 
-The administrator must install one of the persistent profiles before
-users follow this workflow. Each user signs in with a separate OS account and
-runs an approved harness on the RHEL server. The administrator supplies the
-login, accepted model IDs, and any required harness version. Users do not need
-the deployment bundle, Praxis configuration, or provider credentials.
+The administrator [creates your login](accounts.md), installs Praxis and
+configures the available providers. Sign in as your own ordinary account.
+Every command here runs without sudo. Provider keys stay in Praxis; clients
+use a non-secret placeholder.
 
-## Connect to the server
+## 1. Connect
 
-On your laptop, start Bash so the interactive prompts work on both macOS and
-Linux:
+Skip this step if already logged in. From your workstation, use the login
+provided by the administrator and your configured SSH key/agent:
 
 ```console
-bash
+printf 'Your RHEL login (user@host): '
+IFS= read -r RHEL_USER_HOST
+ssh -o ForwardAgent=no "$RHEL_USER_HOST"
 ```
 
-Enter your settings: paste the block below, answer each prompt, and press
-Enter. Use your own server account (such as `alice@hostname`) or an SSH alias.
-Enter an absolute private-key path without quotes, or leave it blank to use
-your SSH configuration or agent. The private key stays on your laptop.
+The remaining commands run on RHEL as that user.
+
+## 2. Install the approved harnesses
+
+The account helper publishes the tested version list and `praxis-harness`.
+Install the CLIs into your own home, once per account:
 
 ```console
-{
-  read -r -p 'RHEL user login: ' RHEL_HOST
-  read -r -p 'SSH private-key path (Enter for SSH defaults): ' SSH_KEY
-}
-```
-
-Copy and run unchanged to open a Bash session on RHEL:
-
-```console
-SSH_OPTIONS=()
-if [[ -n "$SSH_KEY" ]]; then
-  SSH_OPTIONS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
-fi
-ssh -t "${SSH_OPTIONS[@]}" "$RHEL_HOST" 'bash -l'
-```
-
-All remaining commands run under your ordinary RHEL account. If you already
-have a Session Manager session for that account, start `bash` there instead.
-
-## Prepare your user session
-
-The host needs `curl`, `tar`, and `gzip`; OpenCode configuration below also
-uses `jq`. Ask the administrator to install any missing packages. The harness
-installers run without `sudo` and store binaries in your home directory.
-They install current releases; skip installation when the administrator has
-already supplied an approved version.
-
-Copy and run unchanged after login to make user-installed commands available:
-
-```console
-export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"
-```
-
-Choose one harness below and run it from the project directory you want to
-work on. Enter settings only in the labeled prompt blocks; the remaining
-blocks can be copied unchanged.
-
-| Harness API | Base URL |
-| --- | --- |
-| OpenAI Responses, including Codex | `http://127.0.0.1:8080/v1` |
-| OpenAI Chat Completions | `http://127.0.0.1:8080/v1` |
-| Native Anthropic Messages | `http://127.0.0.1:8081` |
-| Switchyard Chat Completions, when installed | `http://127.0.0.1:8082/v1` |
-
-The client supplies a non-secret placeholder where it requires an API key.
-Praxis removes that value and injects the provider credential only into the
-selected upstream request.
-
-## Claude Code
-
-Install once under your user account using the
-[official installer](https://code.claude.com/docs/en/setup):
-
-```console
-curl -fsSL https://claude.ai/install.sh | bash
+python3 - <<'PYCLIENT'
+import json, pathlib, subprocess
+versions = json.loads(pathlib.Path("/usr/local/share/praxis/harness-versions.json").read_text())
+subprocess.run(["npm", "install", "--global", "--prefix", str(pathlib.Path.home() / ".local"),
+                *[f"{name}@{version}" for name, version in versions.items()]], check=True)
+PYCLIENT
+export PATH="$HOME/.local/bin:$PATH"
+codex --version
+opencode --version
 claude --version
 ```
 
-Enter your settings (the model ID supplied by your administrator):
+Repeat the PATH export in a new shell. The administrator installs missing host
+packages; do not use sudo for npm or a harness. Open your project directory
+before starting a client:
 
 ```console
-read -r -p 'Accepted Anthropic model ID: ' MODEL
+mkdir -p ~/projects/praxis-example
+cd ~/projects/praxis-example
+git init -q
 ```
 
-Copy and run unchanged to use the native Anthropic listener:
+## 3. Choose an enabled provider
+
+### Qwen through local vLLM
+
+When installed by the administrator, Qwen needs no cloud credentials. Start
+with the qualified OpenCode path:
 
 ```console
-unset ANTHROPIC_API_KEY
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8081
-export ANTHROPIC_AUTH_TOKEN=local-placeholder
-claude --model "$MODEL"
+praxis-harness opencode --provider vllm
 ```
 
-The authentication token is a non-secret placeholder; Praxis removes it
-before injecting the protected provider credential.
-The administrator must have configured an Anthropic key; the OpenAI key used
-by the other two workflows does not enable this listener's provider calls.
+The launcher selects `qwen3-8b` through Praxis's `/vllm/v1` route. CPU/GPU
+OpenCode tool smoke tests passed. Codex and Claude Code currently fail against
+the pinned vLLM backend; their reproduction commands and exact results are in
+the [compatibility matrix](../../testing/compatibility.md) and
+[testing guide](../../testing/harnesses.md#qwen).
 
-## Codex
+### OpenAI
 
-Install once under your user account using the
-[official installer](https://learn.chatgpt.com/docs/codex/cli), following any
-installer prompts:
+The administrator must [enable OpenAI](../../testing/rhel-real.md#3-add-openai-to-existing-praxis)
+and provide a model ID available to that account:
 
 ```console
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
-codex --version
+printf 'Approved OpenAI model ID: '
+IFS= read -r OPENAI_MODEL
 ```
 
-Enter your settings (the model ID supplied by your administrator):
+Choose either client:
 
 ```console
-read -r -p 'Accepted OpenAI Responses model ID: ' MODEL
+praxis-harness codex --provider openai --model "$OPENAI_MODEL"
 ```
 
-Copy and run unchanged. The [custom-provider
-settings](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers)
-apply to this invocation:
-
 ```console
-export PRAXIS_PLACEHOLDER_KEY=local-placeholder
-codex \
-  -c 'model_provider="praxis"' \
-  -c 'model_providers.praxis.name="Praxis"' \
-  -c 'model_providers.praxis.base_url="http://127.0.0.1:8080/v1"' \
-  -c 'model_providers.praxis.env_key="PRAXIS_PLACEHOLDER_KEY"' \
-  -c 'model_providers.praxis.wire_api="responses"' \
-  --model "$MODEL"
+praxis-harness opencode --provider openai --model "$OPENAI_MODEL"
 ```
 
-Codex uses port `8080`; the Switchyard listener is Chat Completions only. The
-same provider settings may instead be placed in the user's
-`~/.codex/config.toml`.
+### Anthropic
 
-## OpenCode
-
-Install once under your user account using the
-[official installer](https://opencode.ai/docs/):
+The administrator can [enable Anthropic independently](../../testing/rhel-real.md#4-add-anthropic-independently).
+Choose an approved model, then either client:
 
 ```console
-curl -fsSL https://opencode.ai/install | bash
-opencode --version
+printf 'Approved Anthropic model ID: '
+IFS= read -r ANTHROPIC_MODEL
 ```
 
-Enter your settings (an accepted Chat Completions model ID):
-
 ```console
-read -r -p 'Accepted Chat Completions model ID: ' MODEL
+praxis-harness claude --provider anthropic --model "$ANTHROPIC_MODEL"
 ```
 
-Copy and run unchanged. `jq` inserts the model ID into the
-[runtime configuration](https://opencode.ai/docs/config/) without editing
-project files:
-
 ```console
-export OPENCODE_CONFIG_CONTENT="$(jq -n --arg model "$MODEL" '{
-  model: ("praxis/" + $model),
-  provider: {
-    praxis: {
-      npm: "@ai-sdk/openai-compatible",
-      name: "Praxis",
-      options: {
-        baseURL: "http://127.0.0.1:8080/v1",
-        apiKey: "local-placeholder"
-      },
-      models: {
-        ($model): {name: "Approved Praxis model"}
-      }
-    }
-  }
-}')"
-opencode
+praxis-harness opencode --provider anthropic --model "$ANTHROPIC_MODEL"
 ```
 
-An administrator-managed OpenCode configuration may take precedence over
-these user settings. Follow the administrator's model selection in that case.
+Cloud routes passed mock tests; real account/model acceptance remains a
+[manual check](../../testing/harnesses.md). Interactive clients keep their
+normal tool approvals. Cloud calls use the administrator's provider account.
+The launcher configures each native API; it does not enable API translation.
 
-## Continue after an SSH disconnect
+For an installed Switchyard profile, OpenCode can use its Chat listener by
+adding `--url http://127.0.0.1:8082` to the OpenAI command. The administrator
+controls judge/Weak/Strong routing; Codex Responses and Claude Messages cannot
+use that Chat-only listener.
 
-Use one of these workflows:
+## 4. Optional sandbox execution
 
-| Workflow | What happens after disconnect | How to continue |
-| --- | --- | --- |
-| Normal harness session | The process may end | SSH again, start the harness, and use its resume command, such as `/resume` where supported |
-| `tmux` | The same process and terminal continue | SSH again and attach to the session |
-| Later OpenShell phase | A managed sandbox retains the harness | Reconnect to the sandbox; no `tmux` is needed |
+Use [OpenShell setup and usage](../../testing/openshell-manual.md) after the
+administrator installs the addon. Run its client commands as this same ordinary
+user. Sandbox/provider coverage is separate from direct-host coverage; see
+[the execution matrix](../../testing/compatibility.md#execution-modes).
 
-For `tmux`:
+## Continue after disconnecting
+
+Normal CLI processes may end when SSH disconnects; use the CLI's resume
+facility where available. For a terminal that stays attached to its process,
+start the harness inside tmux:
 
 ```console
-command -v tmux
 tmux new-session -s coding-task
 ```
 
-Start the harness inside that session. Detach with `Ctrl-b`, then `d`.
-After reconnecting over SSH, attach to the running session:
+Detach with Ctrl-b, then d. After reconnecting:
 
 ```console
 tmux attach-session -t coding-task
 ```
 
-A minimal RHEL installation may not include `tmux`; the administrator can
-install the `tmux` package.
+The administrator can install tmux if absent. OpenShell sandbox lifetime does
+not by itself guarantee that an interactive CLI session survives disconnects
+or that a deleted sandbox's workspace is retained.

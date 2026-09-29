@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# NVIDIA 580 open driver + CDI on mutable RHEL, preserving DKMS for kernel updates.
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/common/lib.sh
+source "${ROOT}/scripts/common/lib.sh"
+require_root
+[[ "$#" == 0 ]] || die 'usage: sudo scripts/vllm/prepare-gpu'
+# shellcheck disable=SC1091
+source /etc/os-release
+[[ "${ID}" == rhel && "${VERSION_ID}" == 9.* && "$(uname -m)" == x86_64 ]] || die 'RHEL 9 x86_64 required'
+[[ "$(getenforce)" == Enforcing ]] || die 'SELinux must remain enforcing'
+curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo \
+  -o /etc/yum.repos.d/cuda-rhel9.repo
+curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+  -o /etc/yum.repos.d/nvidia-container-toolkit.repo
+dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+dnf install -y "kernel-devel-$(uname -r)" kernel-headers gcc make elfutils-libelf-devel dkms
+dnf module enable -y nvidia-driver:580-open
+dnf install -y nvidia-driver-cuda kmod-nvidia-open-dkms nvidia-container-toolkit
+# DKMS dependencies can install a newer kernel than the running one. Build
+# every installed kernel with headers, including the one selected at reboot.
+for build in /lib/modules/*/build; do
+  [[ -d "${build}" ]] || continue
+  kernel="${build%/build}"
+  kernel="${kernel##*/}"
+  dkms autoinstall -k "${kernel}"
+  depmod -a "${kernel}"
+done
+printf 'nvidia\nnvidia_uvm\n' >/etc/modules-load.d/praxis-nvidia.conf
+modprobe nvidia
+modprobe nvidia_uvm
+systemctl restart nvidia-cdi-refresh.service
+nvidia-smi
+nvidia-ctk cdi list
+note 'NVIDIA driver and CDI installed. Reboot before final lifecycle qualification.'

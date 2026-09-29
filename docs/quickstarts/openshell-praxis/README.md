@@ -10,8 +10,9 @@ complete model path.
 
 See the [supported matrix and qualification limits](users.md), [add-on installer](install.md),
 [bootc deployment](../../../bootc/README.md), and [threat model](../../../openshell/docs/threat-model.md).
-Codex/OpenClaw Praxis configuration is currently unsupported. OpenCode configuration
-is experimental until host-alias routing, actual inference and tool tasks pass.
+Codex/OpenClaw Praxis configuration is currently unsupported. OpenCode/Qwen has
+real CPU/GPU evidence on bootc; mutable RHEL qualification is separate. For the
+existing AWS all-in-one VM, use [administrator setup and ordinary-user commands](../../testing/openshell-manual.md).
 
 Development profiles also permit selected GitHub/package/documentation traffic;
 they are not restricted to Praxis for all egress. Loopback management trusts local

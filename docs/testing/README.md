@@ -1,99 +1,73 @@
-# Development and non-production testing
+# Testing
 
-Use these instructions to validate a change before touching a shared RHEL
-server. They are repository developer instructions, not deployment
-quickstarts.
+## AWS RHEL workflow
 
-## Choose the smallest useful environment
+Use two VMs, with hardware chosen independently for each role:
 
-| Environment | What it proves | What it does not prove |
-| --- | --- | --- |
-| macOS static checks | Scripts parse, configuration renders, links resolve, and unsafe listener patterns are absent | Container startup or RHEL integration |
-| Fedora CoreOS Podman machine | Pinned images start on the Mac's native architecture; Praxis profiles and Valkey persistence work in containers | RHEL packages, SELinux labels, user systemd, logout, or reboot |
-| Disposable Podman container | A developer can inspect configuration and make provider calls without installing a service | Locked service account, boot startup, recovery, or protected administrator ownership |
-| Local RHEL 9 VM | Complete installer, rootless Podman, SELinux, user systemd, account separation, logout, and reboot | Final AWS networking, IAM, or target-instance behavior |
-| Full Fedora VM | Both installers with an explicit development override; systemd/SELinux behavior | RHEL package and host qualification |
-| Two AWS RHEL VMs | All-in-one and remote HTTPS/JWT under separate networking and state | Other architectures or untested harness/model combinations |
+1. [Deploy all-in-one and remote-gateway](aws.md): choose CPU, GPU or no vLLM;
+   plan and deploy each VM separately.
+2. [Run mock smoke tests](rhel-smoke.md): install services, exercise native
+   harnesses with synthetic credentials, then check reboot behavior.
+3. [Install and test real Qwen](rhel-real.md): remove mocks, start private vLLM,
+   and optionally add OpenAI and Anthropic to the same Praxis installation.
+4. [Create an ordinary SSH login](../quickstarts/all-in-one/accounts.md), then
+   [use the harnesses interactively](harnesses.md): copyable commands for
+   OpenCode, Codex and Claude Code, including backend compatibility limits.
 
-## Fast local checks
+The [compatibility and test matrix](compatibility.md) records what passed,
+what remains untested, known failures and where fixes belong. The
+[vLLM debug plan](vllm-debugging.md) covers CPU/GPU isolation and candidate
+Praxis/backend updates.
 
-For one entry point covering static checks, existing image regressions and all
-four mocked-provider profiles, use the [mocked-provider CI guide](mocked-provider.md):
+Optional [manual OpenShell testing](openshell-manual.md) reuses all-in-one after
+its baseline passes, with administrator setup and ordinary-user commands.
+[AWS operations](aws-operations.md) covers custom hardware, recovery and cleanup.
+[vLLM administration](vllm.md) covers installation without the smoke runner.
+
+## Local development checks
+
+Run the offline regression suite from the repository root:
+
+```console
+python3 -B tests/mocked-provider.py --suite offline
+```
+
+It requires Python 3.9+, Bash, Git, OpenSSL, `jq`, `rg`, Ruby with Psych and
+ShellCheck. Install zsh to check both supported workstation shells.
+
+With Podman running, execute the container regressions and mock API contracts:
 
 ```console
 python3 tests/mocked-provider.py --engine podman
 ```
 
-OpenShell harness and pinned-schema regressions run in a separate hosted job;
-sandbox runtime uses the manual disposable-RHEL gate described below. The
-[coverage map](mocked-provider.md#roadmap-coverage) distinguishes current
-contracts from the roadmap's remaining acceptance targets.
+The [mocked-provider guide](mocked-provider.md) describes suite selection and
+coverage. Container tests check startup, credentials, quotas and API contracts;
+RHEL tests additionally check packages, SELinux, rootless user services and
+reboot behavior. Neither replaces real model/tool acceptance.
 
-Static checks require Bash, Git, `jq`, `rg` (ripgrep), and Ruby with Psych.
-The credential, AWS and remote image tests also need Python 3.9+ and OpenSSL.
-AWS session tests cover Bash and, when installed, zsh; CI installs both shells.
-Install ShellCheck too (0.11.0 matches CI); the script prints its version and
-warns if linting is skipped because it is missing. CI pins the official Linux
-binaries by version and SHA-256 for both architectures.
+Other environments:
 
-From the repository root on macOS with the Podman machine running:
+- [Fedora CoreOS Podman machine](fedora-coreos.md): the macOS image test loop.
+- [Disposable Podman container](podman.md): manual provider calls.
+- [Local RHEL VM](rhel-vm.md): the full host test without AWS.
+- [Full Fedora VM](fedora-vm.md): development with the explicit Fedora override.
 
-```console
-tests/shared-gateway-static.sh
-CONTAINER_ENGINE=podman tests/shared-gateway-image.sh
-CONTAINER_ENGINE=podman tests/shared-gateway-valkey-image.sh
-python3 tests/remote-gateway/credentials.py
-python3 tests/remote-gateway/security.py
-python3 tests/aws/plan.py
-python3 tests/aws/session.py
-CONTAINER_ENGINE=podman python3 tests/remote-gateway/image.py
-CONTAINER_ENGINE=podman python3 tests/remote-gateway/image.py --valkey
-```
+## Architecture and CI
 
-Continue with one of these instructions:
+The pinned Praxis and Valkey images include amd64 and arm64. Container tests
+compare the image architecture with the engine host; emulation does not qualify
+native deployment. The mutable vLLM workflow requires RHEL 9 x86_64.
 
-- [Fedora CoreOS Podman machine](fedora-coreos.md) for the normal Mac image
-  and configuration loop;
-- [disposable Podman container](podman.md) for manual provider calls; or
-- [local RHEL 9 VM](rhel-vm.md) for the full pre-production host gate.
-
-For an existing local Fedora VM, follow [full Fedora development](fedora-vm.md).
-Test **all-in-one and remote gateway** separately, each with memory and Valkey.
-Then use the [AWS two-VM guide](aws.md). The cloud helper does nothing unless
-invoked; `plan` and `verify` are read-only, while `apply` requires confirmation.
-
-Do not use the Fedora CoreOS or disposable-container path as evidence that the
-persistent RHEL deployment is accepted. The RHEL VM is the minimum complete
-host-integration test; the target RHEL environment remains the final gate.
-
-## Architecture qualification
-
-Both pinned image indexes include `linux/amd64` and `linux/arm64`. The
-installer maps host `x86_64` to `amd64` and `aarch64` to `arm64`. Container
-tests compare the image with the engine server, including a remote Podman VM;
-an emulated image does not count as native qualification.
-
-The [CI workflow](../../.github/workflows/validate.yml) runs static checks,
-Praxis startup, Valkey ACL/persistence and shared mocked-provider JSON/SSE/tool,
-credential and quota contracts for all-in-one and remote profiles on native amd64 and arm64
-Linux runners, using dummy credentials only. CI does not run the RHEL installer
-or make paid provider calls. Check the PR's actual job results after pushing.
-
-| Gate | arm64 | amd64 |
-| --- | --- | --- |
-| Image available in both pinned indexes | Present | Present |
-| Native image tests | Mac M4 Podman; CI job | Native CI job |
-| RHEL 9 installer, SELinux, account isolation, logout, reboot | Pending: local RHEL VM | Pending: AWS RHEL VM |
-| In-memory and Valkey, all three harnesses with real providers | Pending | Pending |
-
-After the no-key checks, follow [harness acceptance](harnesses.md) on the local
-RHEL VM, then repeat on AWS RHEL. This round covers **in-memory and Valkey**;
-real-provider Switchyard acceptance is a separate next phase. A successful
-arm64 run does not complete the amd64 column.
+[CI](../../.github/workflows/validate.yml) runs static checks and container
+contracts on native amd64 and arm64 Linux runners with synthetic credentials.
+It does not run the RHEL installer or paid provider calls. Qualify each intended
+RHEL architecture, profile and harness/model combination separately.
 
 ## OpenShell and bootc
 
-OpenShell and bootc currently target RHEL 9 x86_64. Start with offline checks:
+These workflows target RHEL 9 x86_64. Run their offline checks on Linux with
+Bash 4+ (the macOS system Bash 3.2 cannot run all bootc/static checks):
 
 ```console
 bash openshell/tests/openshell-static.sh
@@ -102,14 +76,11 @@ python3 bootc/tests/build.py
 shellcheck -x bootc/build bootc/test-images bootc/test-host bootc/scripts/*
 ```
 
-OpenShell static CI runs in UBI 9. Its runtime job requires manual dispatch,
-`OPENSHELL_SELF_HOSTED=true`, and a disposable runner labeled
-`self-hosted/Linux/X64/rhel9/openshell-disposable`. It uses one installer-owned
-fixture for native schema and controlled policy checks; a skipped job is not
-runtime evidence. Combined Praxis inference needs a separately configured fixture.
+The OpenShell runtime CI job requires manual dispatch, `OPENSHELL_SELF_HOSTED=true`
+and a disposable runner labeled `self-hosted/Linux/X64/rhel9/openshell-disposable`.
+A skipped job provides no runtime evidence. For combined Praxis inference, use
+[the optional OpenShell smoke step](rhel-smoke.md#optional-openshell).
 
-Follow the [bootc guide](../../bootc/README.md) for native image builds and booted
-host checks. The [AWS validation record](../../bootc/VALIDATION.md) covers completed
-mutable lifecycle and bootc tests, with remaining inference/network gaps. These
-results are separate from the full Praxis architecture matrix above and do not
-qualify real-provider tasks or every profile.
+Follow the [bootc guide](../../bootc/README.md) for image builds and booted host
+checks. Bootc and OpenShell lifecycle tests do not qualify all provider/harness
+combinations.

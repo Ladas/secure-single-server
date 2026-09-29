@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Mutable RHEL addon. Private rootless network; no host inference port or cloud keys.
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/common/lib.sh
+source "${ROOT}/scripts/common/lib.sh"
+# shellcheck source=configs/vllm/images.env
+source "${ROOT}/configs/vllm/images.env"
+
+render() {
+  local image="${VLLM_CPU_IMAGE}" extra=''
+  if [[ "$1" == gpu ]]; then image="${VLLM_GPU_IMAGE}"; extra='--gpu-memory-utilization 0.90'; fi
+  cat <<UNIT
+# Managed by scripts/vllm/install
+[Unit]
+Description=Private Qwen3-8B vLLM ($1)
+After=network-online.target
+Wants=network-online.target
+[Container]
+Image=${image}
+Pull=never
+ContainerName=praxis-vllm
+Network=praxis.network
+NetworkAlias=praxis-vllm
+User=1001
+Group=1001
+UserNS=keep-id:uid=1001,gid=1001
+Volume=%h/vllm-cache:/cache:Z
+Volume=/etc/praxis-vllm/chat-template.jinja:/etc/vllm-chat-template.jinja:ro
+Environment=HOME=/cache HF_HOME=/cache/huggingface VLLM_CACHE_ROOT=/cache/vllm
+Environment=VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1
+NoNewPrivileges=true
+DropCapability=all
+ShmSize=4g
+UNIT
+  if [[ "$1" == gpu ]]; then
+    printf 'AddDevice=nvidia.com/gpu=0\nSecurityLabelDisable=true\n'
+  else
+    printf 'Environment=VLLM_CPU_KVCACHE_SPACE=4 VLLM_CPU_OMP_THREADS_BIND=nobind\n'
+  fi
+  cat <<UNIT
+Exec=${VLLM_MODEL} --revision ${VLLM_REVISION} --served-model-name qwen3-8b --host 0.0.0.0 --port 8000 --dtype bfloat16 --tensor-parallel-size 1 --max-model-len 16384 --max-num-seqs 1 --enforce-eager --enable-auto-tool-choice --tool-call-parser hermes --reasoning-parser qwen3 --chat-template /etc/vllm-chat-template.jinja --default-chat-template-kwargs '{"enable_thinking":false}' ${extra}
+[Service]
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=1800
+TimeoutStopSec=120
+[Install]
+WantedBy=default.target
+UNIT
+}
+
+if [[ "${1:-}" == --help || "$#" == 0 ]]; then
+  printf 'Usage: sudo scripts/vllm/install cpu|gpu\n       scripts/vllm/install --render cpu|gpu\n'
+  exit 0
+fi
+mode="${!#}"
+case "${mode}" in cpu|gpu) ;; *) die 'expected cpu or gpu' ;; esac
+if [[ "$#" == 2 && "$1" == --render ]]; then render "${mode}"; exit 0; fi
+[[ "$#" == 1 ]] || die 'usage: sudo scripts/vllm/install cpu|gpu'
+require_root
+[[ "$(uname -m)" == x86_64 ]] || die 'vLLM requires x86_64'
+# shellcheck disable=SC1091
+source /etc/os-release
+[[ "${ID}" == rhel && "${VERSION_ID}" == 9.* ]] || die 'mutable RHEL 9 is required'
+[[ "$(getenforce)" == Enforcing ]] || die 'SELinux must remain enforcing'
+verify_managed_manifest
+exec 8>/run/lock/praxis-vllm.lock
+flock -n 8 || die 'another vLLM install is running'
+image="${VLLM_CPU_IMAGE}"
+if [[ "${mode}" == gpu ]]; then
+  require_command nvidia-smi
+  require_command nvidia-ctk
+  gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader)" ||
+    die "NVIDIA driver is unavailable for kernel $(uname -r); rerun scripts/vllm/prepare-gpu"
+  [[ "${gpu_name}" == 'NVIDIA L4' ]] || die 'GPU profile requires exactly one NVIDIA L4'
+  image="${VLLM_GPU_IMAGE}"
+  # Toolkit refresh follows driver upgrades and reboots; do not leave a stale second CDI spec.
+  systemctl restart nvidia-cdi-refresh.service
+  nvidia-ctk cdi list | grep -q 'nvidia.com/gpu=0' || die 'NVIDIA CDI device is unavailable'
+else
+  grep -qw avx512f /proc/cpuinfo || die 'CPU profile requires AVX-512'
+  awk '/MemTotal/ {exit ($2 < 32000000)}' /proc/meminfo || die 'CPU inference requires at least 32 GB RAM; 64 GiB recommended'
+fi
+uid="$(service_uid)"
+gid="$(service_gid)"
+unit="/etc/containers/systemd/users/${uid}/praxis-vllm.container"
+state=/etc/praxis-vllm
+if [[ -e "${unit}" ]]; then
+  [[ -f "${state}/manifest" ]] || die 'existing vLLM unit has no managed manifest'
+  [[ "$(sha256_file "${unit}")" == "$(cat "${state}/manifest")" ]] || die 'vLLM unit drifted; inspect before replacing'
+  if [[ -f "${state}/template.sha256" ]]; then
+    [[ "$(sha256_file "${state}/chat-template.jinja")" == "$(cat "${state}/template.sha256")" ]] ||
+      die 'vLLM template drifted; inspect before replacing'
+  fi
+elif as_service podman container exists praxis-vllm; then
+  die 'an unrelated container already uses praxis-vllm'
+fi
+validate_digest_image "${image}"
+if ! as_service podman image exists "${image}"; then as_service podman pull "${image}"; fi
+require_linux_image_platform vLLM "$(as_service podman image inspect "${image}" --format '{{.Os}}')" \
+  "$(as_service podman image inspect "${image}" --format '{{.Architecture}}')" amd64
+as_service mkdir -p "$(service_home)/vllm-cache"
+install -d -o root -g "${gid}" -m 0750 "${state}"
+install -o root -g "${gid}" -m 0640 "${ROOT}/configs/vllm/qwen3-no-thinking.jinja" "${state}/chat-template.jinja"
+if ! semanage fcontext -a -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$' 2>/dev/null; then
+  semanage fcontext -m -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$'
+fi
+restorecon -F "${state}/chat-template.jinja"
+sha256_file "${state}/chat-template.jinja" >"${state}/template.sha256"
+temporary="$(mktemp)"
+trap 'rm -f "${temporary}"' EXIT
+render "${mode}" >"${temporary}"
+install -o root -g "${gid}" -m 0640 "${temporary}" "${unit}"
+sha256_file "${unit}" >"${state}/manifest"
+printf '%s\n' "${mode}" >"${state}/mode"
+as_service systemctl --user daemon-reload
+as_service systemctl --user restart praxis-vllm.service
+for (( attempt=0; attempt<360; attempt++ )); do
+  if as_service podman exec praxis-vllm python3 -c \
+    'import json,urllib.request; r=json.load(urllib.request.urlopen("http://127.0.0.1:8000/v1/models", timeout=3)); assert any(m["id"] == "qwen3-8b" for m in r["data"])' 2>/dev/null; then
+    [[ -z "$(as_service podman port praxis-vllm)" ]] || die 'vLLM unexpectedly publishes a host port'
+    note "vLLM ${mode} ready: qwen3-8b, private container port 8000; no host publication"
+    exit 0
+  fi
+  if (( attempt % 6 == 0 )); then note 'waiting for vLLM model download/startup; inspect praxis-vllm.service journal for progress'; fi
+  sleep 5
+done
+die 'vLLM did not become ready in 30 minutes; inspect the service journal; cache is retained'

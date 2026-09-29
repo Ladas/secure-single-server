@@ -18,9 +18,11 @@ import uuid
 
 OWNER = "309956199498"
 MANAGED = "secure-single-server-test"
+SCENARIOS = ("all-in-one", "remote-gateway", "openshell-praxis")
+CONFIG_KEYS = {"scenario", "inference", "arch", "instance_type", "volume_gib", "ami_id", "ssh_access", "https_access"}
 READS = {"get-caller-identity", "describe-instance-types", "describe-images", "describe-subnets",
          "describe-route-tables", "describe-instances", "describe-security-groups", "describe-volumes",
-         "describe-key-pairs"}
+         "describe-key-pairs", "describe-instance-type-offerings"}
 WRITES = {"import-key-pair", "create-security-group", "authorize-security-group-ingress", "run-instances"}
 
 
@@ -51,13 +53,29 @@ class Aws:
         return json.loads(result.stdout or "{}")
 
 
-def ingress(scenario, cidr):
-    network = ipaddress.ip_network(cidr, strict=True)
-    if network.version != 4 or network.prefixlen != 32:
-        raise ValueError("allowed-cidr must be one explicit IPv4 /32, never a public subnet")
+def ingress(scenario, cidr, ssh_access="restricted", https_access="restricted"):
+    if scenario not in SCENARIOS:
+        raise ValueError("unknown VM scenario: " + scenario)
+    if ssh_access not in ("restricted", "public"):
+        raise ValueError("ssh_access must be restricted or public")
+    if https_access not in ("restricted", "public"):
+        raise ValueError("https_access must be restricted or public")
+    if https_access == "public" and scenario != "remote-gateway":
+        raise ValueError("public HTTPS is only available for remote-gateway")
+    needs_cidr = ssh_access == "restricted" or (scenario == "remote-gateway" and https_access == "restricted")
+    if needs_cidr and not cidr:
+        raise ValueError("--allowed-cidr is required for restricted SSH or HTTPS")
+    if cidr:
+        network = ipaddress.ip_network(cidr, strict=True)
+        if network.version != 4 or network.prefixlen != 32:
+            raise ValueError("allowed-cidr must be one IPv4 /32; use --ssh-access/--https-access public for public access")
+        cidr = str(network)
+    ports = [(22, ssh_access)]
+    if scenario == "remote-gateway":
+        ports.append((8443, https_access))
     return [{"IpProtocol": "tcp", "FromPort": port, "ToPort": port,
-             "IpRanges": [{"CidrIp": str(network)}]} for port in
-            ([22] if scenario == "all-in-one" else [22, 8443])]
+             "IpRanges": [{"CidrIp": "0.0.0.0/0" if access == "public" else cidr}]}
+            for port, access in ports]
 
 
 def validate_image(image, architecture):
@@ -112,13 +130,86 @@ def check_identity(aws, account):
     return identity
 
 
+def configure(args):
+    """Data-only config, then explicit CLI overrides; never source shell code."""
+    settings = {}
+    if args.config:
+        settings = json.loads(args.config.read_text())
+        if not isinstance(settings, dict) or set(settings) - CONFIG_KEYS:
+            raise ValueError("VM config must be an object containing only: " + ", ".join(sorted(CONFIG_KEYS)))
+        for key, value in settings.items():
+            expected = int if key == "volume_gib" else str
+            if type(value) is not expected:
+                raise ValueError("invalid VM config type for " + key)
+    for key in CONFIG_KEYS:
+        value = getattr(args, key)
+        if value is not None:
+            settings[key] = value
+    inference = settings.setdefault("inference", "none")
+    arch = settings.setdefault("arch", "amd64")
+    if settings.setdefault("ssh_access", "restricted") not in ("restricted", "public"):
+        raise ValueError("ssh_access must be restricted or public")
+    if settings.setdefault("https_access", "restricted") not in ("restricted", "public"):
+        raise ValueError("https_access must be restricted or public")
+    if settings["https_access"] == "public" and settings.get("scenario") != "remote-gateway":
+        raise ValueError("public HTTPS is only available for remote-gateway")
+    if inference not in ("none", "cpu", "gpu") or arch not in ("amd64", "arm64"):
+        raise ValueError("inference must be none/cpu/gpu and arch must be amd64/arm64")
+    if settings.get("scenario") not in SCENARIOS:
+        raise ValueError("set scenario to all-in-one, remote-gateway or openshell-praxis")
+    if inference != "none" and arch != "amd64":
+        raise ValueError("the pinned vLLM CPU/GPU profiles require amd64")
+    minimum = {"none": 50, "cpu": 100, "gpu": 200}[inference]
+    settings.setdefault("volume_gib", minimum)
+    if not minimum <= settings["volume_gib"] <= 16384:
+        raise ValueError(f"{inference} inference requires a {minimum}-16384 GiB root disk")
+    settings.setdefault("instance_type", {"cpu": "m7i.4xlarge", "gpu": "g6.2xlarge"}.get(
+        inference, "m7g.2xlarge" if arch == "arm64" else "m7i.2xlarge"))
+    if not re.fullmatch(r"[a-z0-9-]+\.[a-z0-9-]+", settings["instance_type"]):
+        raise ValueError("invalid instance_type")
+    if "ami_id" in settings and not re.fullmatch(r"ami-[0-9a-f]+", settings["ami_id"]):
+        raise ValueError("invalid ami_id")
+    for key, value in settings.items():
+        setattr(args, key, value)
+
+
+def validate_machine(machine, architecture, inference):
+    if (machine["MemoryInfo"]["SizeInMiB"] < 32768
+            or architecture not in machine["ProcessorInfo"]["SupportedArchitectures"]):
+        raise ValueError("instance must have at least 32 GiB RAM and match --arch")
+    if inference == "gpu":
+        gpus = machine.get("GpuInfo", {}).get("Gpus", [])
+        if (len(gpus) != 1 or gpus[0].get("Name") != "L4"
+                or gpus[0].get("Manufacturer", "").lower() != "nvidia"
+                or gpus[0].get("Count") != 1 or gpus[0].get("GpuPartitionSize", 1) != 1
+                or gpus[0].get("MemoryInfo", {}).get("SizeInMiB", 0) < 22000):
+            raise ValueError("the pinned vLLM GPU profile requires exactly one full NVIDIA L4; choose g6.2xlarge or a compatible size")
+
+
+def check_offering(aws, instance_type, zone):
+    offerings = aws.call("ec2", "describe-instance-type-offerings", location_type="availability-zone",
+                         filters=filters(**{"instance-type": instance_type, "location": zone}))
+    if not offerings["InstanceTypeOfferings"]:
+        raise ValueError(f"{instance_type} is not offered in {zone}; choose another approved public subnet or instance type")
+
+
 def plan(aws, args):
+    try:
+        key = args.public_key.read_text()
+    except OSError as error:
+        raise ValueError(f"Missing or unreadable public key: {args.public_key}. "
+                         "Run aws_test_key before aws_test_plan, or supply an existing --public-key.") from error
+    if "PRIVATE KEY" in key or len(key.strip().splitlines()) != 1:
+        raise ValueError("provide one OpenSSH public key, never the private key")
+    subprocess.run(["ssh-keygen", "-lf", str(args.public_key)], check=True, capture_output=True)
+    if key.split()[0] not in ("ssh-ed25519", "ssh-rsa"):
+        raise ValueError("EC2 key import supports an Ed25519 or RSA public key")
+    rules = ingress(args.scenario, args.allowed_cidr, args.ssh_access, args.https_access)
     identity = check_identity(aws, args.account_id)
     instance_type = args.instance_type or ("m7g.2xlarge" if args.arch == "arm64" else "m7i.2xlarge")
     machine = aws.call("ec2", "describe-instance-types", instance_types=[instance_type])["InstanceTypes"][0]
     architecture = "arm64" if args.arch == "arm64" else "x86_64"
-    if machine["MemoryInfo"]["SizeInMiB"] < 32768 or architecture not in machine["ProcessorInfo"]["SupportedArchitectures"]:
-        raise ValueError("instance must have at least 32 GiB RAM and match --arch")
+    validate_machine(machine, architecture, args.inference)
     image_filters = filters(name=f"RHEL-9.*_HVM-*-{architecture}-*-Hourly2-GP3",
                             architecture=architecture, state="available")
     images = aws.call("ec2", "describe-images", owners=[OWNER], filters=image_filters)["Images"]
@@ -131,6 +222,7 @@ def plan(aws, args):
     subnet = aws.call("ec2", "describe-subnets", subnet_ids=[args.subnet_id])["Subnets"][0]
     if subnet["State"] != "available":
         raise ValueError("subnet is not available")
+    check_offering(aws, instance_type, subnet["AvailabilityZone"])
     tables = aws.call("ec2", "describe-route-tables",
                       filters=filters(**{"association.subnet-id": args.subnet_id}))["RouteTables"]
     if not tables:
@@ -152,15 +244,12 @@ def plan(aws, args):
     keys = aws.call("ec2", "describe-key-pairs", filters=filters(**{"key-name": args.prefix}))["KeyPairs"]
     if keys:
         raise ValueError("SSH key-pair name already exists; inspect it and choose a fresh resource prefix")
-    key = args.public_key.read_text()
-    if "PRIVATE KEY" in key or len(key.strip().splitlines()) != 1:
-        raise ValueError("provide one OpenSSH public key, never the private key")
-    subprocess.run(["ssh-keygen", "-lf", str(args.public_key)], check=True, capture_output=True)
-    if key.split()[0] not in ("ssh-ed25519", "ssh-rsa"):
-        raise ValueError("EC2 key import supports an Ed25519 or RSA public key")
-    rules = ingress(args.scenario, args.allowed_cidr)
     return {"AccountId": identity["Account"], "PrincipalArn": identity["Arn"], "Region": args.region,
-            "Prefix": args.prefix, "Scenario": args.scenario, "InstanceType": instance_type,
+            "Prefix": args.prefix, "Scenario": args.scenario, "Inference": args.inference,
+            "SshAccess": args.ssh_access,
+            "HttpsAccess": args.https_access if args.scenario == "remote-gateway" else "disabled",
+            "InstanceType": instance_type, "MemoryGiB": machine["MemoryInfo"]["SizeInMiB"] / 1024,
+            "GpuInfo": machine.get("GpuInfo"), "AvailabilityZone": subnet["AvailabilityZone"],
             "Architecture": architecture, "ImageId": image["ImageId"], "ImageName": image["Name"],
             "RootDeviceName": image["RootDeviceName"], "SubnetId": args.subnet_id, "VpcId": subnet["VpcId"],
             "Ingress": rules, "VolumeGiB": args.volume_gib, "StateFile": str(args.state_file)}
@@ -172,7 +261,7 @@ def apply_plan(aws, args, proposal):
     print("Recovery journal:", args.state_file, flush=True)
     owned = tags(args.prefix, args.scenario)
     group = aws.call("ec2", "create-security-group", group_name=args.prefix, vpc_id=proposal["VpcId"],
-                     description="Disposable secure-single-server VM; explicit administrator IPv4 only",
+                     description="Disposable secure-single-server VM; ingress as recorded in launch plan",
                      tag_specifications=[{"ResourceType": "security-group", "Tags": owned}])["GroupId"]
     print("Created security group:", group, flush=True)
     state.update(SecurityGroupId=group, ApplyStatus="security-group-created")
@@ -242,6 +331,10 @@ def verify(aws, args):
         raise ValueError("unexpected root-disk encryption, size or deletion policy")
     print(json.dumps({"InstanceId": instance["InstanceId"], "State": instance["State"]["Name"],
                       "PublicIpAddress": instance.get("PublicIpAddress"), "Scenario": state["Scenario"],
+                      "Inference": state.get("Inference", "none"), "InstanceType": state["InstanceType"],
+                      "SshAccess": state.get("SshAccess", "restricted"),
+                      "HttpsAccess": state.get("HttpsAccess", "restricted" if state["Scenario"] == "remote-gateway" else "disabled"),
+                      "VolumeGiB": volume["Size"],
                       "Result": "AWS configuration verified; SSH, host firewall and gateway tests remain separate"}, indent=2))
 
 
@@ -252,15 +345,21 @@ def main():
     parser.add_argument("--account-id", required=True)
     parser.add_argument("--profile")
     parser.add_argument("--state-file", type=Path, required=True)
-    parser.add_argument("--scenario", choices=["all-in-one", "remote-gateway"])
+    parser.add_argument("--config", type=Path, help="JSON VM settings; explicit flags override its values")
+    parser.add_argument("--scenario", choices=SCENARIOS)
+    parser.add_argument("--inference", choices=["none", "cpu", "gpu"], help="hardware profile, not an application install")
     parser.add_argument("--prefix")
     parser.add_argument("--subnet-id")
     parser.add_argument("--public-key", type=Path)
     parser.add_argument("--allowed-cidr")
-    parser.add_argument("--arch", choices=["amd64", "arm64"], default="amd64")
+    parser.add_argument("--ssh-access", choices=["restricted", "public"],
+                        help="restricted (default): SSH from --allowed-cidr; public: SSH from any IPv4")
+    parser.add_argument("--https-access", choices=["restricted", "public"],
+                        help="remote-gateway only: restricted (default) from --allowed-cidr; public from any IPv4")
+    parser.add_argument("--arch", choices=["amd64", "arm64"])
     parser.add_argument("--instance-type")
     parser.add_argument("--ami-id")
-    parser.add_argument("--volume-gib", type=int, default=50)
+    parser.add_argument("--volume-gib", type=int)
     args = parser.parse_args()
     if not re.fullmatch(r"\d{12}", args.account_id):
         raise ValueError("account-id must be the expected 12-digit account, obtained independently")
@@ -273,8 +372,12 @@ def main():
     if args.mode == "verify":
         verify(aws, args)
         return
-    if not all([args.scenario, args.prefix, args.subnet_id, args.public_key, args.allowed_cidr]):
-        raise ValueError("plan/apply need --scenario, --prefix, --subnet-id, --public-key and --allowed-cidr")
+    if not args.config:
+        raise ValueError("plan/apply require --config; reload shell helpers with 'source scripts/aws/session.sh', "
+                         "then use aws_test_plan NAME CONFIG --scenario ROLE (one VM per call)")
+    configure(args)
+    if not all([args.scenario, args.prefix, args.subnet_id, args.public_key]):
+        raise ValueError("plan/apply need a scenario, --prefix, --subnet-id and --public-key")
     if not re.fullmatch(r"[a-z][a-z0-9-]{2,39}", args.prefix) or args.volume_gib < 50:
         raise ValueError("prefix must be 3-40 lowercase letters/digits/hyphens; disk must be at least 50 GiB")
     if args.state_file.exists() or args.state_file.is_symlink():
@@ -283,6 +386,21 @@ def main():
     print(json.dumps(proposal, indent=2))
     print("Plan: one on-demand VM, encrypted root disk, imported PUBLIC key and security group."
           " Default security-group IPv4 egress is unrestricted. No IAM/SSM or application install.")
+    if args.ssh_access == "public":
+        print("Public SSH selected: anyone on the IPv4 Internet can reach port 22."
+              " SSH authentication still applies.")
+    if args.scenario == "remote-gateway":
+        if args.https_access == "public":
+            print("Public HTTPS selected: anyone on the IPv4 Internet can reach port 8443."
+                  " Install the HTTPS/JWT gateway before serving requests; valid caller JWTs remain required.")
+        else:
+            print("HTTPS 8443 remains restricted to", args.allowed_cidr)
+    if args.inference == "cpu":
+        print("CPU inference: verify AVX-512 on the host before installing the pinned vLLM image."
+              " 64 GiB RAM is recommended; inference will be slower than GPU.")
+    elif args.inference == "gpu":
+        print("GPU inference: install and verify the NVIDIA driver and container toolkit on RHEL before vLLM."
+              " AWS hardware verification does not prove driver/model readiness.")
     if args.mode == "plan":
         print("Read-only plan complete: no AWS resource or local state file was changed.")
         return

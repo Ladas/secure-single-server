@@ -55,6 +55,7 @@ or sandbox workspaces.
 
 | Workflow | Where the harness and tools run | Guide |
 | --- | --- | --- |
+| AWS RHEL with Qwen and optional cloud providers | Ordinary user accounts on all-in-one, or remote clients; CPU/GPU selected independently | [Deploy and test](docs/testing/aws.md), then [user setup](docs/quickstarts/all-in-one/users.md) |
 | Sandboxed agents with local inference | OpenShell on a bootc-managed server; Praxis routes to CPU or NVIDIA L4 vLLM | [Local Qwen3-8B example](bootc/VLLM.md) |
 | Sandboxed harness exploration | OpenShell on the server, with harness-specific policies and provider setup | [OpenShell recipes](openshell/docs/README.md) |
 | Shared host with a cloud gateway | Harnesses run directly under OS accounts on RHEL; Praxis owns provider credentials | [All-in-one gateway](docs/quickstarts/all-in-one/README.md) |
@@ -76,6 +77,11 @@ inference, streamed responses, independently verified tool execution, explicit
 bypass denials, cached reboot, and disable/re-enable behavior. The
 [local inference report](bootc/VLLM-VALIDATION.md) records exact pins and limits,
 including the GPU instance's cleanup issue.
+
+The mutable AWS workflow also passed native mocked Qwen/OpenAI/Anthropic
+tests and real Qwen/OpenCode tool smoke on GPU all-in-one and CPU remote-gateway.
+See the [compatibility matrix](docs/testing/compatibility.md) for exact pins,
+the remaining Codex/Claude vLLM failures, and separate OpenShell results.
 
 Earlier AWS testing also exercised bootc builds, Codex/OpenCode boot and CLI
 execution, OS upgrades, a harness switch, and rollback. See the

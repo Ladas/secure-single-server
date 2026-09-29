@@ -7,7 +7,7 @@ every harness can complete a task through Praxis.
 | --- | --- |
 | Codex + Praxis | Unsupported; `--config` fails before creating anything |
 | OpenClaw + Praxis | Unsupported; `--config` fails before creating anything |
-| OpenCode + Praxis dev | Experimental config rendering; inference/tool-task qualification required |
+| OpenCode + Praxis dev | Real Qwen CPU/GPU qualified on bootc; mutable RHEL qualification remains separate |
 | OpenCode review | CLI data-directory permission limitation; outside supported recipes |
 
 For OpenCode experiments, run as the OpenShell service account with the explicit
@@ -19,6 +19,11 @@ openshell/harnesses/opencode/create.sh --profile dev --config configs/openshell-
 ```
 
 `PRAXIS_PORT` defaults to 8080 and must be an integer from 1 through 65535.
+`PRAXIS_API_PREFIX` defaults to empty for the cloud/bootc route; set `/vllm`
+for Qwen installed by the mutable RHEL workflow. For administrator setup followed
+by an ordinary SSH user's client session, use the
+[manual RHEL guide](../../testing/openshell-manual.md). See the
+[execution matrix](../../testing/compatibility.md#execution-modes) for exact scope.
 The script renders the numeric policy port and JSON model safely, selects the
 Praxis model, and uploads config to `~/.config/opencode/opencode.json`. The actual
 binary paths, alias route, tools and streaming must pass native qualification

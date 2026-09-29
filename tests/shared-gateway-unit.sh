@@ -7,6 +7,16 @@ REPO_DIR="$(cd -- "${TEST_DIR}/.." && pwd)"
 # shellcheck source=scripts/common/lib.sh
 source "${REPO_DIR}/scripts/common/lib.sh"
 
+# The admin bundle is private; rootless Podman cannot inherit its directory.
+(
+  service_uid() { printf '1234\n'; }
+  service_home() { printf '/tmp\n'; }
+  runuser() { shift 3; "$@"; }
+  before="$PWD"
+  [[ "$(as_service pwd)" == /tmp ]] || die 'service command inherited administrator working directory'
+  [[ "$PWD" == "$before" ]] || die 'service helper changed administrator working directory'
+)
+
 expect_failure() {
   if ( "$@" ) >/dev/null 2>&1; then
     printf 'error: expected rejection from %s\n' "$1" >&2

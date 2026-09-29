@@ -102,9 +102,9 @@ def events(path, result):
         yield response_event("response.output_item.added", output_index=0, item=initial)
         if tool:
             yield response_event("response.function_call_arguments.delta", output_index=0,
-                                 item_id=item["id"], delta=ARGUMENTS)
+                                 item_id=item["id"], delta=item["arguments"])
             yield response_event("response.function_call_arguments.done", output_index=0,
-                                 item_id=item["id"], arguments=ARGUMENTS)
+                                 item_id=item["id"], arguments=item["arguments"])
         else:
             part = item["content"][0]
             common = {"output_index": 0, "item_id": item["id"], "content_index": 0}
@@ -123,7 +123,7 @@ def events(path, result):
         tool = block["type"] == "tool_use"
         empty = {**block, **({"input": {}} if tool else {"text": ""})}
         yield frame({"type": "content_block_start", "index": 0, "content_block": empty}, "content_block_start")
-        delta = {"type": "input_json_delta", "partial_json": ARGUMENTS} if tool else {
+        delta = {"type": "input_json_delta", "partial_json": json.dumps(block["input"])} if tool else {
                  "type": "text_delta", "text": block["text"]}
         yield frame({"type": "content_block_delta", "index": 0, "delta": delta}, "content_block_delta")
         yield frame({"type": "content_block_stop", "index": 0}, "content_block_stop")
@@ -136,10 +136,11 @@ def events(path, result):
 
 class Provider:
     def __init__(self, ports=(18080, 18081, 19000), host="127.0.0.1", control_host="127.0.0.1",
-                 openai_authorization="Bearer synthetic-openai", model="fixture"):
+                 openai_authorization="Bearer synthetic-openai", model="fixture", local=False):
         # None requires the local profile to remove Authorization completely.
         self.openai_authorization = openai_authorization
         self.model = model
+        self.local = local
         self.records = []
         self.mode = "ok"
         self.delay = 1.0
@@ -176,10 +177,11 @@ class Provider:
                     self.wfile.write(data)
 
                 def record(self, body):
-                    anthropic = self.server.provider_index == 1
-                    credential_ok = (self.headers.get("x-api-key") == "synthetic-anthropic"
+                    anthropic = self.path.startswith("/v1/messages") if fixture.local else self.server.provider_index == 1
+                    credential_ok = (self.headers.get("x-api-key") is None and self.headers.get("Authorization") is None) if fixture.local else (
+                                     (self.headers.get("x-api-key") == "synthetic-anthropic"
                                      and self.headers.get("Authorization") is None) if anthropic else (
-                                     self.headers.get("Authorization") == fixture.openai_authorization)
+                                     self.headers.get("Authorization") == fixture.openai_authorization))
                     clean = not any(self.headers.get(key) for key in
                                     ("X-Model", "X-Cluster", "X-Tier", "X-Selected-Model", "X-Route"))
                     with fixture.lock:
@@ -190,6 +192,7 @@ class Provider:
                     return credential_ok and clean
 
                 def do_POST(self):
+                    self.path = self.path.split("?", 1)[0]
                     try:
                         self.post()
                     except (BrokenPipeError, ConnectionResetError):
@@ -197,7 +200,7 @@ class Provider:
 
                 def post(self):
                     length = int(self.headers.get("Content-Length", "0"))
-                    if length > 65536:
+                    if length > 2 * 1024 * 1024:
                         return self.reply(413, {"error": "fixture request too large"})
                     body = json.loads(self.rfile.read(length) or b"{}")
                     if self.server.provider_index == 2:
@@ -209,12 +212,14 @@ class Provider:
                             if body.get("reset"):
                                 fixture.records.clear()
                         return self.reply(200, {"ok": True})
-                    anthropic = self.server.provider_index == 1
+                    anthropic = self.path.startswith("/v1/messages") if fixture.local else self.server.provider_index == 1
                     valid = self.record(body)
                     with fixture.lock:
                         mode, delay = fixture.mode, fixture.delay
                     if not valid:
                         return self.reply(403, {"error": "credential or classification mismatch"})
+                    if fixture.local and body.get("model") != fixture.model:
+                        return self.reply(404, {"error": "unknown local model"})
                     if self.path == "/v1/messages/count_tokens" and anthropic:
                         return self.reply(200, {"input_tokens": 2})
                     if self.path not in PATHS or (self.path == "/v1/messages") != anthropic:

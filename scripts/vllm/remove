@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Remove only the managed inference service; retain downloaded model weights.
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/common/lib.sh
+source "${ROOT}/scripts/common/lib.sh"
+require_root
+[[ "$#" == 0 ]] || die 'usage: sudo scripts/vllm/remove'
+exec 8>/run/lock/praxis-vllm.lock
+flock -n 8 || die 'another vLLM operation is running'
+state=/etc/praxis-vllm
+unit="/etc/containers/systemd/users/$(service_uid)/praxis-vllm.container"
+[[ -f "${unit}" && -f "${state}/manifest" ]] || die 'managed vLLM install not found'
+[[ "$(sha256_file "${unit}")" == "$(cat "${state}/manifest")" ]] || die 'vLLM unit drifted; refusing removal'
+if [[ -f "${state}/template.sha256" ]]; then
+  [[ "$(sha256_file "${state}/chat-template.jinja")" == "$(cat "${state}/template.sha256")" ]] ||
+    die 'vLLM template drifted; refusing removal'
+fi
+as_service systemctl --user stop praxis-vllm.service
+rm -f "${unit}" "${state}/manifest" "${state}/mode" "${state}/chat-template.jinja" "${state}/template.sha256"
+semanage fcontext -d '^/etc/praxis-vllm/chat-template\.jinja$' >/dev/null 2>&1 || true
+as_service systemctl --user daemon-reload
+note 'removed vLLM service; retained model cache and image; the Praxis /vllm route now fails closed'

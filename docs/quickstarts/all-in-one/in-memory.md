@@ -50,13 +50,15 @@ if [[ -n "$SSH_KEY" ]]; then
   SSH_OPTIONS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 fi
 ssh "${SSH_OPTIONS[@]}" "$RHEL_HOST" \
-  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests'
+  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests ~/secure-single-server-deploy/tests/rhel'
 scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/common \
   "$RHEL_HOST:~/secure-single-server-deploy/configs/"
 scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/all-in-one \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/"
 scp "${SSH_OPTIONS[@]}" -p tests/shared-gateway-host.sh \
   "$RHEL_HOST:~/secure-single-server-deploy/tests/"
+scp "${SSH_OPTIONS[@]}" -p tests/rhel/harness-versions.json \
+  "$RHEL_HOST:~/secure-single-server-deploy/tests/rhel/"
 ```
 
 SSH may ask you to confirm the server's host key or unlock your private key.
@@ -152,7 +154,8 @@ Expected listeners are:
 Admin port `9901` remains inside the container. The provider secrets and
 configuration are unavailable to ordinary server users.
 
-Continue with the [user workflow](users.md).
+Create an ordinary login with [account setup](accounts.md), then follow the
+[user workflow](users.md).
 
 ## Operate the service
 
