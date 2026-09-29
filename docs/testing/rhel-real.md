@@ -29,8 +29,8 @@ python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
 This removes mocks and synthetic cloud secrets, preserves TLS/JWT and Valkey
 data, and starts pinned Qwen3-8B as `qwen3-8b`. vLLM has no published host port.
 Downloads and CPU startup take several minutes. No cloud key is required.
-Qwen thinking is enabled. The [matrix](compatibility.md) separates current
-thinking-enabled results from older baselines and candidate-image experiments.
+Qwen thinking is enabled. The [matrix](compatibility.md) records the current
+tested stack and results for each setup and harness.
 
 ## 2. Test real inference
 
@@ -42,8 +42,8 @@ python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
 ```
 
 To test reboot recovery, change `real-test` to `real-lifecycle`. To test all
-three CLIs, omit `--harness opencode`. All three passed on GPU vLLM 0.30;
-CPU and protocol limits are recorded in the [compatibility matrix](compatibility.md).
+three CLIs, omit `--harness opencode`. All three passed on all-in-one CPU/GPU
+vLLM 0.30; limits are recorded in the [compatibility matrix](compatibility.md).
 Every failure returns nonzero. Logs are under `.state/rhel-USER-HOST/` on your
 workstation and `/var/lib/praxis-rhel-smoke/` on the VM. Real-test JSON records
 the deployed image versions, parser/model settings and configuration hashes.

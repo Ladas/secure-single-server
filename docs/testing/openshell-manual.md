@@ -1,7 +1,7 @@
 # OpenShell acceptance on all-in-one
 
 Run after [direct harness acceptance](harnesses.md). Keep real Qwen installed.
-The [matrix](compatibility.md#all-in-one) separates CPU/GPU, service-operator
+The [matrix](compatibility.md#openshell) separates CPU/GPU, service-operator
 checks and ordinary-user access. Bootc results do not qualify mutable RHEL.
 
 ## 1. Run installation, inference and policy probes

@@ -20,7 +20,13 @@ The remaining commands run on RHEL as that user.
 
 ## 2. Install the approved harnesses
 
-The account helper publishes the tested version list and `praxis-harness`.
+The [account helper](../../../scripts/common/harness_user.py) installs
+`/usr/local/bin/praxis-harness`, a copy of the
+[Python launcher](../../../scripts/common/harness.py), and the tested version list.
+The launcher sets the Praxis URL, provider, model and client limits, then starts
+the chosen CLI with its normal interactive tool approvals. Run
+`praxis-harness --help` to see its options.
+
 Install the CLIs into your own home, once per account:
 
 ```console

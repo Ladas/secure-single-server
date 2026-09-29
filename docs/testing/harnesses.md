@@ -75,7 +75,8 @@ or a task launched with `--model` does not prove either menu interaction.
 Repeat for each enabled cloud provider and remote-client configuration. A menu
 entry does not establish that the administrator's provider account can use it.
 For OpenShell, run inside the sandbox and record the service-operator versus
-personal-user access mode. [Current results](compatibility.md#model-listing-and-model-selectors).
+personal-user access mode. Results are grouped by setup in the
+[compatibility matrix](compatibility.md).
 
 Provider configuration references: [Codex model catalog](https://learn.chatgpt.com/docs/config-file/config-reference),
 [OpenCode custom providers](https://opencode.ai/docs/providers#custom-provider),

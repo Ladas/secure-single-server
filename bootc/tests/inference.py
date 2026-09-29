@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 class InferenceTests(unittest.TestCase):
     def test_local_route_is_loopback_only_and_has_no_cloud_fallback(self):
         config = yaml.safe_load((ROOT / 'configs/vllm/praxis.yaml').read_text())
-        self.assertEqual(config['insecure_options'], {'allow_private_endpoints': True})
+        self.assertEqual(config['insecure_options'], {'allow_private_endpoints': True,
+                                                    'allow_private_upstreams': True})
         self.assertEqual(config['listeners'], [{'name': 'openai', 'address': '127.0.0.1:8080',
                                                'filter_chains': ['openai']}])
         self.assertEqual(config['admin']['address'], '127.0.0.1:9901')
@@ -57,13 +58,16 @@ class InferenceTests(unittest.TestCase):
         renderer = source.split("<<'RENDER'\n", 1)[1].split('\nRENDER', 1)[0]
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'provider.json'
+            # Bootc uses an empty API prefix; mutable RHEL Qwen uses /vllm.
             result = subprocess.run(['python3', '-',
                                      str(ROOT / 'configs/vllm/harness/harness-provider.json.in'),
-                                     str(output), '8080', 'Qwen/Qwen3-8B'],
+                                     str(output), '8080', 'Qwen/Qwen3-8B', ''],
                                     input=renderer, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             config = json.loads(output.read_text())
             self.assertEqual(config['model'], 'praxis/Qwen/Qwen3-8B')
+            self.assertEqual(config['provider']['praxis']['options']['baseURL'],
+                             'http://host.openshell.internal:8080/v1')
             self.assertEqual(config['provider']['praxis']['models']['Qwen/Qwen3-8B']['limit'],
                              {'context': 16384, 'output': 2048})
 

@@ -2,7 +2,7 @@
 
 This page tracks bugs with **vLLM 0.30.0**, Qwen3-8B thinking enabled and the
 published **Praxis PR #40 image**. It does not qualify API translation.
-Results, exact pins, performance and older comparisons belong in the
+Results, exact pins and performance belong in the
 [compatibility matrix](compatibility.md).
 
 [vLLM 0.30.0](https://github.com/vllm-project/vllm/releases/tag/v0.30.0) is an
@@ -11,9 +11,8 @@ official release with separate CPU/GPU images. Praxis uses
 whose source label matches [PR #40](https://github.com/praxis-proxy/experimental/pull/40),
 revision `019aa849a219e5c881d69e4a40a1fc190bd6c404`.
 
-All three direct harness tasks now pass through Praxis on both CPU and GPU.
-The earlier CPU Codex task failure did not reproduce in this run; a single pass
-does not attribute that change to the image or establish general reliability.
+All three direct harness tasks pass through Praxis on both all-in-one CPU and
+GPU. These smoke results do not establish general coding reliability.
 
 ## Responses tool IDs change between stream and final response
 
