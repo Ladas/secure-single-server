@@ -1,12 +1,12 @@
 # Compatibility and test matrix
 
-Results cover the [current tested stack](#tested-stack) only. Every acceptance
-path goes through Praxis. **Direct** means an ordinary OS user outside OpenShell;
-OpenClaw is included only in OpenShell.
+Results cover the [current tested stack](#tested-stack), except the retained mock
+passes noted below. Every acceptance path goes through Praxis. **Direct** means
+an ordinary OS user outside OpenShell; OpenClaw is included only in OpenShell.
 
 | Section / columns | Test procedure and recorded coverage |
 | --- | --- |
-| All-in-one: Mock | [Native mock smoke](rhel-smoke.md#1-install-and-test); not run with the current Praxis image |
+| All-in-one: Mock | [Native mock smoke](rhel-smoke.md#1-install-and-test): recorded tool queries passed; native rerun with the current Praxis image is pending |
 | All-in-one: Real CPU / Real GPU | [Real Qwen runner](rhel-real.md#2-test-real-inference): API checks and native file/test tasks on each VM; [interactive model selectors](harnesses.md#model-selector-checks) checked separately |
 | All-in-one: Real OpenAI / Real Anthropic | [Provider setup](rhel-real.md#3-add-openai-to-existing-praxis), then [manual tool task](harnesses.md#acceptance-task) and [selector checks](harnesses.md#model-selector-checks); not run |
 | Remote-gateway: all columns | [External client setup](harnesses.md#remote-gateway-client), then the same manual task and selector checks; not run |
@@ -28,15 +28,19 @@ on this stack. **Blocked [n]** = a prerequisite is missing; reasons follow the t
 
 Harnesses run as ordinary users on the same RHEL VM as Praxis and vLLM.
 
+**Mock tool-query passes** retain the last native results on both hosts,
+recorded before the Praxis image update. They have not been repeated with
+the current image; model-selector checks are separate.
+
 **Qwen3-8B / vLLM**
 
 | Harness | Check | Mock | Real CPU | Real GPU |
 | --- | --- | --- | --- | --- |
-| Codex | Tool query | Not run | Passed | Passed |
+| Codex | Tool query | Passed | Passed | Passed |
 | Codex | `/model` | Not run | Failed [1] | Failed [1] |
-| Claude Code | Tool query | Not run | Passed | Passed |
+| Claude Code | Tool query | Passed | Passed | Passed |
 | Claude Code | `/model` | Not run | Passed [2] | Passed [2] |
-| OpenCode | Tool query | Not run | Passed | Passed |
+| OpenCode | Tool query | Passed | Passed | Passed |
 | OpenCode | `/models` | Not run | Passed [2] | Passed [2] |
 
 1. Codex shows its built-in OpenAI catalog; Qwen is absent. Explicit
@@ -53,11 +57,11 @@ See the [current bug and fix candidate](vllm-debugging.md#responses-tool-ids-cha
 
 | Harness | Check | Mock | Real OpenAI |
 | --- | --- | --- | --- |
-| Codex | Tool query | Not run | Not run |
+| Codex | Tool query | Passed | Not run |
 | Codex | `/model` | Not run | Not run |
 | Claude Code | Tool query | Not run [1] | Not run [1] |
 | Claude Code | `/model` | Not run [1] | Not run [1] |
-| OpenCode | Tool query | Not run | Not run |
+| OpenCode | Tool query | Passed | Not run |
 | OpenCode | `/models` | Not run | Not run |
 
 1. Claude → OpenAI needs API translation/integration; the current launcher
@@ -69,9 +73,9 @@ See the [current bug and fix candidate](vllm-debugging.md#responses-tool-ids-cha
 | --- | --- | --- | --- |
 | Codex | Tool query | Not run [1] | Not run [1] |
 | Codex | `/model` | Not run [1] | Not run [1] |
-| Claude Code | Tool query | Not run | Not run |
+| Claude Code | Tool query | Passed | Not run |
 | Claude Code | `/model` | Not run | Not run |
-| OpenCode | Tool query | Not run | Not run |
+| OpenCode | Tool query | Passed | Not run |
 | OpenCode | `/models` | Not run | Not run |
 
 1. Codex → Anthropic needs API translation/integration; the current launcher
