@@ -34,6 +34,11 @@ if [[ -n "${HARNESS_CONFIG_DIR}" ]]; then
   NAME="${NAME:-opencode-${PROFILE}}"
   PRAXIS_PORT="${PRAXIS_PORT:-8080}"
   validate_praxis_port
+  PRAXIS_API_PREFIX="${PRAXIS_API_PREFIX:-}"
+  case "${PRAXIS_API_PREFIX}" in
+    ''|/vllm) ;;
+    *) die 'PRAXIS_API_PREFIX must be empty (cloud/bootc) or /vllm (mutable Qwen)' ;;
+  esac
   : "${OPENSHELL_MODEL_ID:?set OPENSHELL_MODEL_ID to the administrator-approved model id}"
   # Render @@PRAXIS_PORT@@ in the policy (mirrors tests/openshell-praxis/smoke.sh).
   POL="$(mktemp)"; PROV="$(mktemp)"
@@ -42,13 +47,17 @@ if [[ -n "${HARNESS_CONFIG_DIR}" ]]; then
   cleanup() { rm -f "${POL}" "${PROV}"; }
   trap cleanup EXIT
   sed "s#@@PRAXIS_PORT@@#${PRAXIS_PORT}#g" "${POLICY_SRC}" > "${POL}"
-  python3 - "${PROVIDER_SRC}" "${PROV}" "${PRAXIS_PORT}" "${OPENSHELL_MODEL_ID}" <<'RENDER'
+  python3 - "${PROVIDER_SRC}" "${PROV}" "${PRAXIS_PORT}" "${OPENSHELL_MODEL_ID}" "${PRAXIS_API_PREFIX}" <<'RENDER'
 import json, sys
-src, dest, port, model = sys.argv[1:]
+src, dest, port, model, prefix = sys.argv[1:]
 data = json.load(open(src))
 provider = data['provider']['praxis']
-provider['options']['baseURL'] = f'http://host.openshell.internal:{port}/v1'
+provider['options']['baseURL'] = f'http://host.openshell.internal:{port}{prefix}/v1'
 model_config = provider['models']['@@MODEL_ID@@']
+if prefix == '/vllm':
+    model_config['limit'] = {'context': 16384, 'output': 4096}
+    model_config['reasoning'] = True
+    model_config['interleaved'] = {'field': 'reasoning'}
 provider['models'] = {model: model_config}
 data['model'] = 'praxis/' + model
 with open(dest, 'w') as out:

@@ -8,7 +8,7 @@ REPO_DIR="$(cd -- "${TEST_DIR}/.." && pwd)"
 readonly REPO_DIR
 # shellcheck source=scripts/common/lib.sh
 source "${REPO_DIR}/scripts/common/lib.sh"
-readonly IMAGE="${PRAXIS_IMAGE:-quay.io/opendatahub/praxis-experimental@sha256:a3006352106c2264427faa79b57cf7b49287f3f9bfffe9b2eef869d3429988e8}"
+readonly IMAGE="${PRAXIS_IMAGE:-quay.io/opendatahub/praxis-experimental@sha256:227d421e963c477038a884dc51ec880c5d0afa30098ae31028ecf85e963e40d5}"
 
 engine="${CONTAINER_ENGINE:-}"
 if [[ -z "${engine}" ]]; then

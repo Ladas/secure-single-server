@@ -15,6 +15,9 @@ fi
 [[ "$#" -eq 0 ]] || die "usage: sudo scripts/common/uninstall [--purge-valkey-data]"
 
 require_root
+require_command flock
+exec 9>/run/lock/praxis-gateway.lock
+flock -n 9 || die 'another gateway installation/provider change is running'
 for command in podman runuser semanage systemctl; do
   require_command "${command}"
 done

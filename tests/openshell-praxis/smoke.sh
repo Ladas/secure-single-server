@@ -18,11 +18,12 @@ const c=JSON.parse(fs.readFileSync(process.env.HOME+'/.config/opencode/opencode.
 const p=c.provider.praxis;
 const response=await fetch(p.options.baseURL+'/chat/completions', {
  method:'POST',headers:{'Content-Type':'application/json'},
- body:JSON.stringify({model:Object.keys(p.models)[0],messages:[{role:'user',content:'Reply OK'}],max_tokens:8}),
- signal:AbortSignal.timeout(30000)});
+ body:JSON.stringify({model:Object.keys(p.models)[0],messages:[{role:'user',content:'Reply OK'}],max_tokens:4096}),
+ signal:AbortSignal.timeout(1800000)});
 if(!response.ok) throw new Error('Praxis inference failed: HTTP '+response.status);
 const data=await response.json();
-if(!data.choices?.length) throw new Error('Missing completion');
+if(!data.choices?.[0]?.message?.content?.trim()) throw new Error('Missing final answer text');
+if(data.choices[0].finish_reason !== 'stop') throw new Error('Incomplete answer');
 console.log('Praxis inference: OK');
 JS
 # Separate controlled fixture proves network denial; inference alone does not.

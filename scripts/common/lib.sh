@@ -12,7 +12,7 @@ readonly SCENARIO_FILE="${CONFIG_DIR}/gateway.scenario"
 readonly MANIFEST_FILE="${CONFIG_DIR}/shared-gateway.manifest"
 # Consumed by the installer that sources this library.
 # shellcheck disable=SC2034
-readonly DEFAULT_PRAXIS_IMAGE="quay.io/opendatahub/praxis-experimental@sha256:a3006352106c2264427faa79b57cf7b49287f3f9bfffe9b2eef869d3429988e8"
+readonly DEFAULT_PRAXIS_IMAGE="quay.io/opendatahub/praxis-experimental@sha256:227d421e963c477038a884dc51ec880c5d0afa30098ae31028ecf85e963e40d5"
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -29,6 +29,16 @@ require_root() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+gateway_lock_path() {
+  local owner="$1"
+  [[ "${owner}" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid service account: ${owner}"
+  if [[ "${owner}" == praxis-svc ]]; then
+    printf '/run/lock/praxis-gateway.lock\n'
+  else
+    printf '/run/lock/praxis-gateway-%s.lock\n' "${owner}"
+  fi
 }
 
 oci_architecture() {
@@ -82,11 +92,14 @@ as_service() {
   uid="$(service_uid)"
   home="$(service_home)"
   [[ -n "${home}" ]] || die "could not resolve ${SERVICE_USER} home"
-  runuser -u "${SERVICE_USER}" -- env \
-    HOME="${home}" \
-    XDG_RUNTIME_DIR="/run/user/${uid}" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
-    "$@"
+  (
+    cd "${home}" || die "could not enter ${SERVICE_USER} home"
+    runuser -u "${SERVICE_USER}" -- env \
+      HOME="${home}" \
+      XDG_RUNTIME_DIR="/run/user/${uid}" \
+      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+      "$@"
+  )
 }
 
 validate_secret_name() {
@@ -175,6 +188,7 @@ validate_owned_path() {
   local path="$1" uid
   uid="$(service_uid)"
   case "${path}" in
+    "${CONFIG_DIR}/providers.json") ;;
     "${CONFIG_DIR}/gateway.scenario"|"${CONFIG_DIR}/policy.yaml"|"${CONFIG_DIR}/jwt-public.pem"|"${CONFIG_DIR}/tls.pem"|"${CONFIG_DIR}/tls-key.pem") ;;
     "${CONFIG_DIR}/shared-gateway.yaml"|"${CONFIG_DIR}/shared-gateway.profile"|"${CONFIG_DIR}/valkey.conf"|"/etc/containers/systemd/users/${uid}/praxis.container"|"/etc/containers/systemd/users/${uid}/praxis.network"|"/etc/containers/systemd/users/${uid}/praxis-valkey.container"|"/etc/containers/systemd/users/${uid}/praxis-valkey.volume") ;;
     *) die "manifest contains an unmanaged path: ${path}" ;;

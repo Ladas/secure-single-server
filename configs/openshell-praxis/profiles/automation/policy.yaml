@@ -9,12 +9,12 @@ network_policies:
     name: praxis-gateway
     endpoints:
       - {host: host.openshell.internal, port: @@PRAXIS_PORT@@, protocol: rest, access: read-write, enforcement: enforce}
-    binaries: [{path: /usr/sbin/node}]
+    binaries: [{path: /usr/bin/node-26}, {path: /usr/local/bin/opencode}]
   github_api:
     name: github-api
     endpoints: [{host: api.github.com, port: 443, protocol: rest, enforcement: enforce, access: read-only}]
-    binaries: [{path: /usr/sbin/node}, {path: /usr/sbin/git}]
+    binaries: [{path: /usr/bin/node-26}, {path: /usr/bin/git}]
   npm_registry:
     name: npm-registry
     endpoints: [{host: registry.npmjs.org, port: 443, enforcement: enforce}]
-    binaries: [{path: /usr/sbin/node}, {path: /usr/sbin/npm}]
+    binaries: [{path: /usr/bin/node-26}, {path: /usr/bin/npm}]

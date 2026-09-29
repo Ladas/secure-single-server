@@ -19,7 +19,7 @@ an Intel Mac.
 Run these commands in the repository checkout on the Mac. Podman sends the
 container work to its Fedora CoreOS VM; do not clone the repository into that
 VM. Start at the root of the checkout/worktree you are reviewing (not a second
-copy on `main`). See [static-check prerequisites](README.md#fast-local-checks).
+copy on `main`). See [static-check prerequisites](README.md#local-development-checks).
 
 ```console
 tests/shared-gateway-static.sh
