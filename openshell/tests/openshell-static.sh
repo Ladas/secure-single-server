@@ -45,6 +45,41 @@ grep -q '\[openshell.gateway.gateway_jwt\]' "${gt}" || fail "gateway.toml missin
 grep -q 'supervisor_image *= *"@@ODH_SUPERVISOR_IMAGE@@"' "${gt}" || fail "supervisor image placeholder missing"
 grep -q 'default_image *= *"@@ODH_OPENCODE_IMAGE@@"' "${gt}" || fail "default_image must be an aipcc workload image (@@ODH_OPENCODE_IMAGE@@)"
 
+# 4b. Harness creation applies bounded per-sandbox CPU and memory limits.
+hl="${OS_DIR}/scripts/harness-lib.sh"
+validate_with_resources() {  # <cpu> <memory>
+  OPENSHELL_SANDBOX_CPU="$1" OPENSHELL_SANDBOX_MEMORY="$2" \
+    bash -c 'source "$1"; validate_sandbox_resources' _ "${hl}"
+}
+# shellcheck disable=SC2016
+grep -q ': "${OPENSHELL_SANDBOX_CPU:=2}"' "${hl}" || fail "harness CPU default missing"
+# shellcheck disable=SC2016
+grep -q ': "${OPENSHELL_SANDBOX_MEMORY:=4Gi}"' "${hl}" || fail "harness memory default missing"
+# shellcheck disable=SC2016
+grep -q -- '--cpu "${OPENSHELL_SANDBOX_CPU}"' "${hl}" || fail "sandbox create must pass --cpu"
+# shellcheck disable=SC2016
+grep -q -- '--memory "${OPENSHELL_SANDBOX_MEMORY}"' "${hl}" || fail "sandbox create must pass --memory"
+
+# 4c. Zero and malformed resource values are rejected before sandbox create.
+for bad_cpu in 0 0.0 0m -1 2x .5; do
+  if validate_with_resources "${bad_cpu}" 4Gi >/dev/null 2>&1; then
+    fail "invalid OPENSHELL_SANDBOX_CPU accepted: ${bad_cpu}"
+  fi
+done
+for bad_memory in 0 0Gi -4Gi 4Xi Gi; do
+  if validate_with_resources 2 "${bad_memory}" >/dev/null 2>&1; then
+    fail "invalid OPENSHELL_SANDBOX_MEMORY accepted: ${bad_memory}"
+  fi
+done
+for good_cpu in 1 2 0.5 500m; do
+  validate_with_resources "${good_cpu}" 4Gi >/dev/null 2>&1 \
+    || fail "valid OPENSHELL_SANDBOX_CPU rejected: ${good_cpu}"
+done
+for good_memory in 512Mi 4Gi 8G 1024B; do
+  validate_with_resources 2 "${good_memory}" >/dev/null 2>&1 \
+    || fail "valid OPENSHELL_SANDBOX_MEMORY rejected: ${good_memory}"
+done
+
 # 5. Structural checks only; schema.py validates with the pinned native CLI.
 if command -v python3 >/dev/null 2>&1; then
   while IFS= read -r p; do
