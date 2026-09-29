@@ -24,7 +24,7 @@ from contracts import check
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = os.environ.get("CONTAINER_ENGINE", "podman")
 IMAGE = os.environ.get("PRAXIS_IMAGE", "quay.io/opendatahub/praxis-experimental@sha256:"
-                       "a3006352106c2264427faa79b57cf7b49287f3f9bfffe9b2eef869d3429988e8")
+                       "227d421e963c477038a884dc51ec880c5d0afa30098ae31028ecf85e963e40d5")
 TOOL = ROOT / "scripts/remote-gateway/credentials"
 VALKEY_IMAGE = "docker.io/valkey/valkey@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2"
 MOCK_IMAGE = "docker.io/library/python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
@@ -178,7 +178,7 @@ class Gateway:
                         cluster["endpoints"] = ["127.0.0.1:" + ("18080" if cluster["name"] == "openai" else "18081")]
                         cluster.pop("tls", None)
                         cluster.pop("http", None)
-        config["insecure_options"] = {"allow_private_endpoints": True}
+        config["insecure_options"] = {"allow_private_endpoints": True, "allow_private_upstreams": True}
         target = self.work / "gateway.json"
         target.write_text(json.dumps(config))
         files["shared-gateway.yaml"] = target

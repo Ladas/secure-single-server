@@ -46,7 +46,14 @@ class CredentialsTest(unittest.TestCase):
     def test_lab_tls(self):
         with tempfile.TemporaryDirectory() as directory:
             tls = Path(directory) / "tls"
-            self.call("lab-tls", "--directory", tls, "--hostname", "127.0.0.1")
+            self.call("lab-tls", "--directory", tls, "--hostname", "127.0.0.1",
+                      "--alt-hostname", "localhost")
+            certificate = subprocess.run(["openssl", "x509", "-in", str(tls / "server.pem"),
+                                          "-noout", "-text"],
+                                         check=True, capture_output=True, text=True).stdout
+            self.assertIn("IP Address:127.0.0.1", certificate)
+            self.assertIn("DNS:localhost", certificate)
+            self.assertTrue((tls / "ca.srl").is_file(), "CA serial must stay inside the private TLS directory")
             self.call("check-tls", "--cert", tls / "server.pem", "--key", tls / "server-key.pem")
             self.call("check-tls", "--cert", tls / "server.pem", "--key", tls / "ca-key.pem", ok=False)
             (tls / "server-key.pem").chmod(0o644)
@@ -54,6 +61,8 @@ class CredentialsTest(unittest.TestCase):
             self.call("lab-tls", "--directory", tls, "--hostname", "localhost", ok=False)
             self.call("lab-tls", "--directory", Path(directory) / "bad",
                       "--hostname", "example.com\nDNS:evil", ok=False)
+            self.call("lab-tls", "--directory", Path(directory) / "bad-alt",
+                      "--hostname", "localhost", "--alt-hostname", "good.example,DNS:evil", ok=False)
             self.assertEqual((tls / "ca-key.pem").stat().st_mode & 0o777, 0o600)
 
 

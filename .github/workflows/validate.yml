@@ -33,7 +33,7 @@ jobs:
       - name: Install static-check tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq ripgrep ruby zsh python3-yaml
+          sudo apt-get install -y curl jq ripgrep ruby zsh python3-yaml python3-jinja2
       - name: Install pinned ShellCheck
         env:
           # Update both matrix checksums when changing this version.

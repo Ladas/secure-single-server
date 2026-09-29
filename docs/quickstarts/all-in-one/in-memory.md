@@ -45,18 +45,16 @@ Copy and run unchanged to transfer the configuration, administrator scripts,
 and RHEL host check to a private staging directory:
 
 ```console
-SSH_OPTIONS=()
+SSH_OPTIONS=(-o ForwardAgent=no)
 if [[ -n "$SSH_KEY" ]]; then
-  SSH_OPTIONS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
+  SSH_OPTIONS+=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 fi
 ssh "${SSH_OPTIONS[@]}" "$RHEL_HOST" \
-  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests'
+  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts'
 scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/common \
   "$RHEL_HOST:~/secure-single-server-deploy/configs/"
 scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/all-in-one \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/"
-scp "${SSH_OPTIONS[@]}" -p tests/shared-gateway-host.sh \
-  "$RHEL_HOST:~/secure-single-server-deploy/tests/"
 ```
 
 SSH may ask you to confirm the server's host key or unlock your private key.
@@ -75,7 +73,7 @@ cd ~/secure-single-server-deploy
 ## 2. Install host packages
 
 ```console
-sudo dnf install -y podman openssl policycoreutils-python-utils jq tar gzip
+sudo dnf install -y podman python3 python3-pyyaml openssl policycoreutils-python-utils jq tar gzip
 ```
 
 ## 3. Prepare the service account
@@ -90,7 +88,7 @@ subordinate IDs, private home, and systemd lingering.
 
 ## 4. Create provider secrets
 
-Use dedicated test credentials on a test host. OpenAI is used by Codex and
+Use dedicated provider credentials for this gateway. OpenAI is used by Codex and
 OpenCode; Claude Code also requires an Anthropic key. Do not paste keys into
 commands, files, chat, or harness accounts. Run this in a private, unrecorded
 administrator terminal; `sudo` I/O recording must not capture secret input.
@@ -152,7 +150,8 @@ Expected listeners are:
 Admin port `9901` remains inside the container. The provider secrets and
 configuration are unavailable to ordinary server users.
 
-Continue with the [user workflow](users.md).
+Create an ordinary login with [account setup](accounts.md), then follow the
+[user workflow](users.md).
 
 ## Operate the service
 

@@ -11,11 +11,12 @@ complete model path.
 See the [supported matrix and qualification limits](users.md), [add-on installer](install.md),
 [bootc deployment](../../../bootc/README.md), and [threat model](../../../openshell/docs/threat-model.md).
 Codex/OpenClaw Praxis configuration is currently unsupported. OpenCode configuration
-is experimental until host-alias routing, actual inference and tool tasks pass.
+remains experimental; qualification depends on the host, provider and tool task.
 
 Development profiles also permit selected GitHub/package/documentation traffic;
-they are not restricted to Praxis for all egress. Loopback management trusts local
-host users, and is not a multi-tenant authorization boundary.
+they are not restricted to Praxis for all egress. Loopback management requires
+TLS/mTLS for the service operator; individual user/workspace authorization is
+not implemented.
 
 For local Qwen3-8B on bootc, see the [vLLM/Praxis workflow](../../../bootc/VLLM.md).
 It includes CPU/GPU serving, a loopback Praxis upstream, and an OpenCode dev

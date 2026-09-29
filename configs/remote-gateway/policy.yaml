@@ -1,4 +1,6 @@
 # Offline JWT validation. Only the public verification key is deployed.
+engine_settings:
+  dispatch: hooks
 plugins:
   - name: caller-identity
     kind: identity/jwt

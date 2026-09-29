@@ -65,6 +65,14 @@ need subject-keyed state before that identity can receive an individual limit.
 
 ## Administrator setup
 
+For local Qwen with optional cloud providers, follow
+[vLLM installation](../common/vllm.md). Existing installations can add
+[OpenAI and Anthropic independently](../common/providers.md).
+Then [create ordinary user logins](accounts.md); give users the
+[setup and usage guide](users.md).
+
+For a cloud-only gateway, use the profiles below.
+
 Choose one mutually exclusive profile. Use Valkey for persistent daily token
 quotas; memory and Switchyard profiles are development/evaluation paths.
 
@@ -94,7 +102,8 @@ credential upstream.
 | Native Anthropic Messages | `http://127.0.0.1:8081` |
 | Switchyard Chat Completions, when installed | `http://127.0.0.1:8082/v1` |
 
-Follow the [user workflow](users.md) for harness setup and
+The administrator [creates each account](accounts.md). Follow the
+[user workflow](users.md) for harness setup and
 the supported SSH-disconnect options.
 
 ## Switchyard behavior
@@ -130,8 +139,9 @@ Switchyard gaps to fill are:
    allowance.
 5. Caller JWT validation alone does not provide per-user request or token
    limits.
-6. A local vLLM service is not deployed by these profiles. OpenShell integration
-   has a separate [experimental add-on](../openshell-praxis/README.md).
+6. Qwen installation is a separate [vLLM setup](../common/vllm.md).
+   CPU tasks can take several minutes; prefer GPU for interactive work.
+   OpenShell integration has a separate [experimental add-on](../openshell-praxis/README.md).
 
 ## Additional details
 
@@ -143,11 +153,8 @@ named volume using AOF with `appendfsync everysec`. A sudden failure may lose
 about the last second of writes. Valkey does not store request-rate buckets or
 Switchyard routing decisions.
 
-A future local-model service may use a maintained ODH, RHOAI, or upstream vLLM
-image when the exact image runs standalone, matches the server architecture
-and accelerator, and passes model, tools, streaming, accounting, security,
-lifecycle, performance, and real coding-task acceptance. Gaudi is Intel AI
-accelerator hardware. The current deployment quickstarts do not install vLLM.
+The local-model workflow pins separate upstream vLLM CPU/GPU images and Qwen3-8B
+weights. Follow [user setup](users.md) for harness selection and context limits.
 
 For sandboxed harnesses, see the [OpenShell add-on](../openshell-praxis/README.md)
 or [bootc deployment](../../../bootc/README.md). Neither qualifies retained

@@ -1,11 +1,12 @@
 # Experimental OpenShell add-on installation
 
-Use a disposable, trusted single-operator RHEL 9 x86_64 host with the dependencies
-and checkout described in the [RHEL guide](../../testing/rhel-vm.md). Install
+Use a disposable, trusted single-operator RHEL 9 x86_64 host with a reviewed
+checkout available on the VM. Install
 [Praxis all-in-one](../all-in-one/README.md) first. Commands below run on that VM
 from the repository root. Bootc hosts instead use [bootc reconciliation](../../../bootc/README.md).
 
 ```bash
+sudo dnf install -y curl python3 podman policycoreutils openssh-clients
 sudo scripts/common/status
 sudo cat /etc/praxis/gateway.scenario   # remains all-in-one
 sudo scripts/openshell-praxis/install --owner openshell-svc
@@ -30,8 +31,9 @@ remains its independent managed lifecycle; drift checks stay enabled.
 Praxis listens on loopback 8080 (OpenAI inference) and 8081 (Anthropic inference).
 Its admin health is private inside the container; use `scripts/common/status`,
 not a host health URL. OpenShell uses loopback 8090 (management) and 8091 (health).
-Unauthenticated local management trusts every host user and is not a multi-tenant
-boundary. Do not publish the management endpoint to untrusted users.
+Management requires TLS/mTLS using the registered service-operator identity;
+individual user/workspace authorization is not implemented. Keep its keys
+private and its port on loopback. The health endpoint remains HTTP.
 
 Host-alias reachability and real inference are qualification requirements, not
 established by gateway health. See [integration status](users.md).

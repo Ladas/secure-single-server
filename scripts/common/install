@@ -28,6 +28,8 @@ development_fedora=0
 tls_cert=""
 tls_key=""
 jwt_public_key=""
+providers=0
+vllm=0
 
 usage() {
   cat <<'EOF'
@@ -50,6 +52,8 @@ Options:
   --jwt-public-key PATH                 Remote: RSA public verification key only.
   --development-fedora                  Allow mutable Fedora for development.
   --praxis-image IMAGE@sha256:DIGEST  Override the reviewed Praxis digest.
+  --providers                       Enable only the supplied cloud secrets.
+  --vllm                            Also route /vllm to the private vLLM service.
   --replace                          Replace a same-profile managed install.
 EOF
 }
@@ -63,6 +67,8 @@ while (( "$#" )); do
     --jwt-public-key) jwt_public_key="${2:-}"; shift 2 ;;
     --development-fedora) development_fedora=1; shift ;;
     --profile) profile="${2:-}"; shift 2 ;;
+    --providers) providers=1; shift ;;
+    --vllm) providers=1; vllm=1; shift ;;
     --praxis-image) praxis_image="${2:-}"; shift 2 ;;
     --valkey-image) valkey_image="${2:-}"; shift 2 ;;
     --openai-secret) openai_secret="${2:-}"; shift 2 ;;
@@ -81,6 +87,9 @@ while (( "$#" )); do
 done
 
 require_root
+require_command flock
+exec 9>"$(gateway_lock_path "${SERVICE_USER}")"
+flock -n 9 || die 'another gateway installation/provider change is running'
 for command in awk chmod chown cmp getenforce getent grep head install loginctl podman restorecon runuser sed semanage sha256sum sleep sort ss stat systemctl useradd usermod; do
   require_command "${command}"
 done
@@ -227,10 +236,21 @@ case "${profile}" in
 esac
 
 validate_digest_image "${praxis_image}"
-[[ -n "${openai_secret}" ]] || die "--openai-secret is required"
-[[ -n "${anthropic_secret}" ]] || die "--anthropic-secret is required"
-require_secret "${openai_secret}"
-require_secret "${anthropic_secret}"
+if (( providers == 0 )); then
+  [[ -n "${openai_secret}" ]] || die "--openai-secret is required"
+  [[ -n "${anthropic_secret}" ]] || die "--anthropic-secret is required"
+elif [[ "${profile}" == switchyard ]]; then
+  die "optional providers require memory or valkey"
+else
+  require_command python3
+  python3 -c 'import yaml' || die "install python3-pyyaml first"
+  [[ "${vllm}" == 1 || -n "${openai_secret}${anthropic_secret}" ]] || die "enable at least one provider"
+fi
+[[ -z "${openai_secret}" ]] || require_secret "${openai_secret}"
+[[ -z "${anthropic_secret}" ]] || require_secret "${anthropic_secret}"
+if [[ -f "${CONFIG_DIR}/providers.json" && "${providers}" == 0 ]]; then
+  die "managed providers exist; use scripts/common/providers to preserve their configuration"
+fi
 
 if [[ -f "${PROFILE_FILE}" ]]; then
   installed_scenario="all-in-one"
@@ -348,6 +368,12 @@ if [[ "${scenario}" == remote-gateway ]]; then
   mv "${tmp_dir}/remote.container" "${tmp_dir}/praxis.container"
 fi
 
+if (( providers == 1 )); then
+  provider_args=(--directory "${tmp_dir}" --openai-secret "${openai_secret}" --anthropic-secret "${anthropic_secret}")
+  (( vllm == 0 )) || provider_args+=(--vllm)
+  python3 "${SCRIPT_DIR}/provider_config.py" "${provider_args[@]}"
+fi
+
 cp "${REPO_DIR}/configs/common/quadlet/praxis.network" "${tmp_dir}/praxis.network"
 
 install_managed() {
@@ -365,6 +391,9 @@ quadlet_dir="/etc/containers/systemd/users/${uid}"
 install_managed "${tmp_dir}/shared-gateway.yaml" "${CONFIG_DIR}/shared-gateway.yaml" 0640 root "${gid}"
 install_managed "${tmp_dir}/praxis.network" "${quadlet_dir}/praxis.network" 0640 root "${gid}"
 install_managed "${tmp_dir}/praxis.container" "${quadlet_dir}/praxis.container" 0640 root "${gid}"
+if (( providers == 1 )); then
+  install_managed "${tmp_dir}/providers.json" "${CONFIG_DIR}/providers.json" 0640 root "${gid}"
+fi
 
 install_container_file_label() {
   local path="$1" regex
@@ -416,6 +445,9 @@ managed_paths=(
   "${quadlet_dir}/praxis.container"
   "${quadlet_dir}/praxis.network"
 )
+if (( providers == 1 )); then
+  managed_paths+=("${CONFIG_DIR}/providers.json")
+fi
 if [[ "${scenario}" == remote-gateway ]]; then
   managed_paths+=("${remote_paths[@]}")
 fi

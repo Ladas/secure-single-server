@@ -9,4 +9,4 @@ network_policies:
     name: praxis-gateway
     endpoints:
       - {host: host.openshell.internal, port: @@PRAXIS_PORT@@, protocol: rest, access: read-write, enforcement: enforce}
-    binaries: [{path: /usr/sbin/node}]
+    binaries: [{path: /usr/bin/node-26}, {path: /usr/local/bin/opencode}]

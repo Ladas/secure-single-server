@@ -27,7 +27,7 @@ while IFS= read -r -d '' file; do
 done < <(find scripts tests -type f -name '*.sh' -print | sort | mapfile_compat)
 while IFS= read -r -d '' file; do
   shell_files+=("${file}")
-done < <(find scripts/common scripts/all-in-one scripts/remote-gateway -type f ! -name '*.sh' ! -name credentials -print | sort | mapfile_compat)
+done < <(find scripts/common scripts/all-in-one scripts/remote-gateway scripts/vllm -type f ! -name '*.sh' ! -name '*.py' ! -name '*.pyc' ! -name credentials -print | sort | mapfile_compat)
 
 for file in "${shell_files[@]}"; do
   bash -n "${file}"

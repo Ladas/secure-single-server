@@ -9,6 +9,12 @@ from contracts import check
 
 
 class ProviderTest(unittest.TestCase):
+    def test_anthropic_beta_query(self):
+        with self.request("/v1/messages?beta=true", {"model": "fixture",
+                "messages": [{"role": "user", "content": "hello"}]}, provider=1) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.load(response)["type"], "message")
+
     def setUp(self):
         self.fixture = Provider(ports=(0, 0, 0))
         self.fixture.start()

@@ -20,12 +20,14 @@ class HarnessTest(unittest.TestCase):
         self.env = dict(os.environ, PATH=f"{self.work}:{os.environ['PATH']}",
                         OPENSHELL_BIN=str(self.work / "openshell"),
                         CAPTURE=str(self.work / "capture"), PRAXIS_PORT="18080",
+                        PRAXIS_API_PREFIX="", OPENSHELL_SANDBOX_CPU="2", OPENSHELL_SANDBOX_MEMORY="4Gi",
                         OPENSHELL_MODEL_ID='fixture"quoted')
         for name, source in {
             "openshell": '''#!/usr/bin/env python3
 import json, os, pathlib, sys
 args = sys.argv[1:]
 if args[:2] == ["sandbox", "create"]:
+    pathlib.Path(os.environ["CAPTURE"] + ".args").write_text(json.dumps(args))
     p = pathlib.Path(args[args.index("--policy") + 1])
     pathlib.Path(os.environ["CAPTURE"]).write_text(p.read_text())
 if args[:2] == ["sandbox", "list"]:
@@ -75,6 +77,8 @@ if args[:2] == ["sandbox", "list"]:
             endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
             self.assertIs(type(endpoint["port"]), int)
             self.assertEqual(endpoint["port"], 18080)
+            self.assertEqual({b["path"] for b in policy["network_policies"]["praxis_gateway"]["binaries"]},
+                             {"/usr/bin/node-26", "/usr/local/bin/opencode"})
             config = json.loads((self.work / "capture.provider").read_text())
             model = self.env["OPENSHELL_MODEL_ID"]
             self.assertEqual(config["model"], f"praxis/{model}")
@@ -88,6 +92,36 @@ if args[:2] == ["sandbox", "list"]:
                 self.env["PRAXIS_PORT"] = port
                 error = self.create("opencode", "dev", integrated=True, success=False)
                 self.assertIn("PRAXIS_PORT must be an integer", error)
+
+    def test_qwen_route_prefix_is_rendered_without_changing_host_policy(self):
+        self.env["PRAXIS_API_PREFIX"] = "/vllm"
+        policy = self.create("opencode", "dev", integrated=True)
+        config = json.loads((self.work / "capture.provider").read_text())
+        self.assertEqual(config["provider"]["praxis"]["options"]["baseURL"],
+                         "http://host.openshell.internal:18080/vllm/v1")
+        self.assertEqual(config["provider"]["praxis"]["models"][self.env["OPENSHELL_MODEL_ID"]]["limit"],
+                         {"context": 16384, "output": 4096})
+        model = config["provider"]["praxis"]["models"][self.env["OPENSHELL_MODEL_ID"]]
+        self.assertTrue(model["reasoning"])
+        self.assertEqual(model["interleaved"], {"field": "reasoning"})
+        endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
+        self.assertEqual(endpoint["host"], "host.openshell.internal")
+        self.assertEqual(endpoint["port"], 18080)
+
+    def test_resource_limits_reach_every_harness_create(self):
+        for cpu, memory in (("2", "4Gi"), ("500m", "512Mi")):
+            self.env.update(OPENSHELL_SANDBOX_CPU=cpu, OPENSHELL_SANDBOX_MEMORY=memory)
+            for harness in ("opencode", "codex", "openclaw"):
+                self.create(harness, "dev")
+                args = json.loads((self.work / "capture.args").read_text())
+                self.assertEqual(args[args.index("--cpu") + 1], cpu)
+                self.assertEqual(args[args.index("--memory") + 1], memory)
+                self.assertIn("--no-auto-providers", args)
+
+    def test_arbitrary_api_prefix_is_rejected_before_creation(self):
+        for prefix in ("/v1", "//example.org", "/vllm?secret=bad", "/../", "vllm"):
+            self.env["PRAXIS_API_PREFIX"] = prefix
+            self.assertIn("PRAXIS_API_PREFIX", self.create("opencode", "dev", integrated=True, success=False))
 
     def test_unsupported_integrated_harnesses_reject_config(self):
         for harness in ("codex", "openclaw"):
