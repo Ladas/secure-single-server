@@ -6,10 +6,17 @@ bind_address        = "127.0.0.1:8090"
 health_bind_address = "127.0.0.1:8091"
 log_level           = "info"
 compute_driver      = "podman"
-disable_tls         = true
 
 [openshell.gateway.auth]
-allow_unauthenticated_users = true
+allow_unauthenticated_users = false
+
+[openshell.gateway.tls]
+cert_path      = "/var/lib/openshell/tls/server/tls.crt"
+key_path       = "/var/lib/openshell/tls/server/tls.key"
+client_ca_path = "/var/lib/openshell/tls/ca.crt"
+
+[openshell.gateway.mtls_auth]
+enabled = true
 
 [openshell.gateway.gateway_jwt]
 signing_key_path = "/var/lib/openshell/tls/jwt/signing.pem"
@@ -23,5 +30,4 @@ socket_path       = "/run/podman/podman.sock"
 default_image     = "@@ODH_OPENCODE_IMAGE@@"
 supervisor_image  = "@@ODH_SUPERVISOR_IMAGE@@"
 image_pull_policy = "if_not_present"
-grpc_endpoint     = "http://127.0.0.1:8090"
 enable_bind_mounts = true

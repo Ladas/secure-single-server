@@ -41,6 +41,12 @@ gateway_install_config owner "$TEST_TMP/home" "$TEST_TMP" 'example/harness@sha25
             config = (self.td / 'home/.config/openshell/gateway.toml').read_text()
             unit = (self.td / 'units/openshell-gateway.container').read_text()
             self.assertIn('default_image     = "example/harness@sha256:abc"', config)
+            self.assertIn('[openshell.gateway.tls]', config)
+            self.assertIn('client_ca_path = "/var/lib/openshell/tls/ca.crt"', config)
+            self.assertIn('allow_unauthenticated_users = false', config)
+            self.assertIn('[openshell.gateway.mtls_auth]', config)
+            self.assertNotIn('disable_tls', config)
+            self.assertNotIn('grpc_endpoint', config)
             self.assertNotIn('@@', config + unit)
             self.assertEqual('[Install]' in unit, autostart == 'yes')
             self.assertIn('Exec=--bind-address 127.0.0.1 --port 8090', unit)
@@ -51,17 +57,40 @@ gateway_install_config owner "$TEST_TMP/home" "$TEST_TMP" 'example/harness@sha25
 
     def test_restart_retains_cli_registration(self):
         result = self.run_shell('''
-runner() { printf '%s\n' "$*" >>"$TEST_TMP/calls"; [[ "$1" != touch ]] || touch "$2"; }
+runner() {
+  printf '%s\n' "$*" >>"$TEST_TMP/calls"
+  [[ "$1" != tee ]] || { cat >"$2"; return; }
+}
 curl() { return 0; }
 gateway_start runner /native/openshell "$TEST_TMP/registered"
 gateway_start runner /native/openshell "$TEST_TMP/registered"
 ''')
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = (self.td / 'calls').read_text()
+        self.assertEqual(calls.count('gateway remove'), 1)
         self.assertEqual(calls.count('gateway add'), 1)
+        self.assertIn('gateway add https://127.0.0.1:8090 --local --name local', calls)
+        self.assertIn('OPENSHELL_LOCAL_TLS_DIR=/var/lib/openshell/tls', calls)
         self.assertEqual(calls.count('gateway select'), 1)
         self.assertEqual(calls.count('sandbox list'), 2)
         self.assertEqual(calls.count('restart openshell-gateway.service'), 2)
+
+    def test_tls_registration_migration_replaces_legacy_marker(self):
+        marker = self.td / 'registered'
+        marker.write_text('')
+        result = self.run_shell('''
+runner() {
+  printf '%s\n' "$*" >>"$TEST_TMP/calls"
+  [[ "$1" != tee ]] || { cat >"$2"; return; }
+}
+curl() { return 0; }
+gateway_start runner /native/openshell "$TEST_TMP/registered"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(marker.read_text(), '2\n')
+        calls = (self.td / 'calls').read_text()
+        self.assertIn('gateway remove local', calls)
+        self.assertIn('gateway add https://127.0.0.1:8090 --local --name local', calls)
 
     def test_failed_health_does_not_register_cli(self):
         result = self.run_shell('''
