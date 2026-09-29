@@ -2,30 +2,25 @@
 
 The administrator installs services and adds provider credentials. Harnesses
 run in a separate ordinary account. The smoke runner already creates
-`praxis-smoke` for automation; create `praxis-user` for your interactive work.
-Use this after [real Qwen setup](../../testing/rhel-real.md) or a standard
-all-in-one profile. No provider key is copied to the user.
+`praxis-smoke` for automation; use `praxis-user` for your interactive work.
+If you created it during [AWS setup](../../testing/aws.md#5-create-the-all-in-one-user-login),
+skip to [login](#2-user-log-in). Otherwise use the steps below after
+[real Qwen setup](../../testing/rhel-real.md) or a standard all-in-one profile.
+No provider key is copied to the user.
 
 ## 1. Administrator: create the login
 
-On your workstation, choose the AWS all-in-one VM:
-
-```console
-TEST_HOST="$ALL_IN_ONE_HOST"
-```
-
-Or use the administrator login from a standard deployment quickstart:
-
-```console
-TEST_HOST="$RHEL_HOST"
-```
+On your workstation, select the all-in-one VM using
+`aws_test_verify all-in-one-gpu` or `aws_test_verify all-in-one-cpu` from the
+[AWS guide](../../testing/aws.md#4-select-one-vm-for-testing). For a standard
+quickstart, keep its `RHEL_HOST` and `SSH_KEY` instead.
 
 Transfer only your public key. These examples use the deployment's `SSH_KEY`
 path; each person should supply their own key for their account:
 
 ```console
-scp -i "$SSH_KEY" "${SSH_KEY}.pub" "$TEST_HOST:~/praxis-user.pub"
-ssh -i "$SSH_KEY" "$TEST_HOST"
+scp -i "$SSH_KEY" "${SSH_KEY}.pub" "$RHEL_HOST:~/praxis-user.pub"
+ssh -i "$SSH_KEY" "$RHEL_HOST"
 ```
 
 In the administrator session:
@@ -50,7 +45,7 @@ The original administrator login remains available for service operations.
 On your workstation:
 
 ```console
-ssh -o ForwardAgent=no -i "$SSH_KEY" "praxis-user@${TEST_HOST#*@}"
+ssh -o ForwardAgent=no -i "$SSH_KEY" "praxis-user@${RHEL_HOST#*@}"
 ```
 
 Continue with [user setup and usage](users.md) to install the pinned CLIs and

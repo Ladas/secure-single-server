@@ -19,22 +19,19 @@ These are vLLM implementations of compatible APIs, not requests to OpenAI or
 Anthropic. CPU and GPU expose the same API family but use separate image pins.
 The current Praxis configuration strips `/vllm` and forwards the native API;
 it does not enable translation filters. Backend port 8000 remains private.
-See vLLM's [API documentation](https://docs.vllm.ai/en/v0.19.0/serving/openai_compatible_server/#supported-apis)
-and [Claude integration](https://docs.vllm.ai/en/v0.19.0/serving/integrations/claude_code/).
+See vLLM's [API documentation](https://docs.vllm.ai/en/v0.30.0/serving/online_serving/openai_compatible_server/)
+and [Claude integration](https://docs.vllm.ai/en/v0.30.0/serving/integrations/claude_code/).
 
 ## 1. Separate hardware from gateway configuration
 
-| Test VM | Purpose |
+| Test VMs | Comparison |
 | --- | --- |
-| Existing GPU all-in-one | GPU baseline, local Praxis listeners |
-| Existing CPU remote-gateway | CPU baseline, HTTPS/JWT gateway |
-| Additional CPU all-in-one | Compare CPU/GPU with the same scenario; compare local/remote scenarios on the same CPU preset |
+| `all-in-one-cpu` and `all-in-one-gpu` | CPU/GPU with the same local gateway scenario; qualify these first |
+| `remote-gateway-cpu` and `remote-gateway-gpu` | Repeat through HTTPS/JWT after all-in-one qualification |
 
-The additional CPU VM improves isolation but is not required to start direct
-CPU/GPU reproductions on the existing hosts. A GPU remote-gateway can complete
-the four-way matrix later if a scenario-specific failure remains.
-[Additional-VM commands](aws-operations.md#deploy-additional-variants-of-a-scenario)
-reuse the existing helper without changing either original VM's variables.
+Use the [AWS deployment blocks](aws.md#3-deploy-the-vms-you-need). New installs
+use thinking enabled; the prior non-thinking results remain a separate baseline.
+Do not disable thinking to claim acceptance of the requested configuration.
 
 Keep model revision, chat template, parser, thinking mode, context length,
 sampling and CLI versions fixed. Record CPU and GPU image digests separately;
@@ -48,8 +45,10 @@ Extend the test tooling before changing pins:
 1. Save per-run scenario, inference mode, instance type, actual Praxis/vLLM
    image IDs and source labels, vLLM/Python dependency versions, model revision,
    template hash, server arguments, CLI versions and gateway config hash.
-   Existing host logs and bundle hashes are useful but do not yet provide this
-   complete structured record.
+   Real-test result JSON now records deployed image references/IDs, source
+   labels, backend package versions, model/parser/thinking settings, kernel
+   and template/gateway hashes. Keep the workstation AWS journal for instance
+   type and the CLI version output beside this record.
 2. Capture a synthetic native CLI request and its response stream at the client
    and backend boundaries. Remove JWT/provider credentials. Record status,
    ordered SSE events, tool IDs/arguments, terminal event, usage and traceback.
@@ -61,9 +60,11 @@ Extend the test tooling before changing pins:
    split argument deltas, tool-result continuation, then the full CLI request.
    Add the reproducer as a regression before fixing its responsible component.
 
-The earlier direct reproductions were on GPU. Repeat them on CPU before
-attributing a common source defect to both builds. Compare captured requests,
-not only similar task descriptions.
+Thinking-enabled controls now cover both backends: captured Claude requests on
+CPU/GPU, a captured GPU Codex stream/continuation and a reduced CPU reasoning
+continuation. Full CPU Codex stream replay remains useful for confirming the
+argument-aggregation defect there. Compare captured requests, not only similar
+task descriptions.
 
 ## 3. Test candidate fixes one change at a time
 
@@ -77,11 +78,74 @@ not only similar task descriptions.
 | An older compatible CLI pin as a diagnostic control | Images and server settings | Which client request change introduced the incompatibility? |
 
 Do not change Praxis, vLLM and the CLI simultaneously. Retain baseline digests
-and configuration for rollback. The current installer supports
-`--praxis-image IMAGE@sha256:DIGEST`; the SSH runner does not yet expose that
-option. Add tested candidate overrides and provenance before automating the
-image comparison. vLLM candidates likewise need explicit CPU/GPU digest
-selection, preserving the default pins until qualification passes.
+and configuration for rollback. The SSH runner accepts `--vllm-image` only
+with `real-setup` and requires an immutable digest. The Praxis installer accepts
+`--praxis-image IMAGE@sha256:DIGEST`; that override is not yet exposed by the SSH
+runner.
+
+### Qwen launcher settings
+
+The server uses `enable_thinking=true`, `qwen3` reasoning parsing and `hermes`
+tool parsing. The launcher adds Qwen-specific settings:
+
+- OpenCode: declare reasoning support and preserve the `reasoning` field on
+  tool continuations; emit reasoning events in noninteractive test logs.
+- Codex: advertise the installed 16k context, compact before exhausting it and
+  display the raw reasoning events returned by Qwen. The pinned CLI has no
+  separate maximum-output-token option; the server bounds remaining context.
+- Claude: use 16k context and 4096 output tokens, including thinking. Its
+  unknown-model default requested 32,000 output tokens and was rejected by the
+  16k backend. This is a launcher fix, independent of the system-role defect.
+
+Cloud models keep their own settings. Thinking consumes the output budget;
+an exhausted budget without final text is a failure. These lab limits do not
+provide cloud-sized context or identical reasoning controls. Follow Qwen's
+[thinking-mode sampling guidance](https://huggingface.co/Qwen/Qwen3-8B#best-practices);
+do not force greedy decoding to make runs appear deterministic.
+The runner allows CPU tasks more time without changing these model settings;
+see the [measured limits](compatibility.md#cpugpu-limits-and-measured-performance).
+
+### CPU Codex task failures
+
+The 0.30 backend accepts the native API, but the CPU Codex task remains failed:
+
+- Original client defaults: no successful tool task before the 30-minute timeout.
+- Corrected 16k context and compaction: valid shell calls repeatedly requested
+  `require_escalated`, which the noninteractive policy refused.
+- Additional permission guidance: calls used `use_default`, but Qwen called
+  `apply_patch` even though the request did not advertise that tool, then
+  repeatedly ran a zero-test suite without creating the required files.
+
+The two diagnostic loops were stopped with evidence retained. The extra guidance
+is not shipped in the launcher because it did not qualify the task. GPU Codex
+passed three runs, but this difference does not prove a CPU implementation defect.
+
+Next, replay the same captured request on both backends, recording rendered
+tools, sampling settings and output. Compare model decisions separately from
+SSE parsing. Test one client/model-instruction change at a time; require generated
+files, nonempty tests and independent checks. Keep the enforced sandbox and
+thinking enabled. Use the passing CPU OpenCode/Claude paths for manual testing
+while Codex remains unqualified.
+
+### Compare a vLLM candidate
+
+The defaults are the tested v0.30 CPU/GPU digests. To compare another version,
+obtain a published immutable image for the selected backend (`vllm-openai-cpu`
+or `vllm-openai`, linux/amd64). Record its release/source revision first:
+
+```console
+printf 'Candidate image (NAME@sha256:DIGEST) for %s: ' "$RHEL_INFERENCE"
+IFS= read -r CANDIDATE_VLLM_IMAGE &&
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --phase real-setup --inference "$RHEL_INFERENCE" \
+  --vllm-image "$CANDIDATE_VLLM_IMAGE" &&
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --phase real-test
+```
+
+Run comparisons before adding real cloud credentials. Model, thinking mode,
+Praxis and CLI pins stay fixed. To restore the repository's baseline image,
+repeat `real-setup` without `--vllm-image`, then rerun `real-test`.
 
 ### Praxis image and translation
 
@@ -100,8 +164,10 @@ explicit translation configurations:
 - Codex: client Responses → Praxis `responses_to_chat_completions` → vLLM Chat
   Completions, with Responses SSE translated back to the client. Start from the
   [v0.4.1 example](https://github.com/praxis-proxy/ai/blob/b9d6016764888e02dc049ec088496b10b7e886c1/examples/configs/openai/responses/responses-to-chat-completions.yaml).
-  Verify stream-filter order, deadlines and terminal usage. Keep reasoning
-  dialect disabled initially: v0.4.1's vLLM reasoning dialect rejects streaming.
+  Verify stream-filter order, deadlines and terminal usage. The v0.4.1 vLLM
+  reasoning dialect rejects streaming. This is a translation gap to qualify or
+  fix; preserve model thinking and verify reasoning events instead of silently
+  disabling reasoning to obtain a passing result.
   If the CLI uses stored continuation, configure an image-supported response
   store with appropriate ownership; do not silently discard history or copy
   the example's single-tenant SQLite assumptions into a shared gateway.
@@ -119,18 +185,61 @@ terminal usage for streaming Chat clients that omit `include_usage`.
 
 ### vLLM candidates
 
-For Codex, reduce the `ResponseFunctionToolCallItem(arguments=None)` failure
-and inspect vLLM's Responses event construction and pinned OpenAI/Pydantic
-schemas. Test fragmented arguments, one/parallel calls and terminal completion.
-Do not replace missing arguments with an arbitrary value just to avoid a crash.
+Static review of vLLM **v0.19.0** identifies a concrete Codex failure candidate:
+[Hermes emits a tool-name delta before its arguments](https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/tool_parsers/hermes_tool_parser.py),
+while [Responses event construction](https://github.com/vllm-project/vllm/blob/v0.19.0/vllm/entrypoints/openai/responses/serving.py)
+passes that first delta's nullable arguments to `ResponseFunctionToolCallItem`.
+This matches the recorded `arguments=None` traceback. It is a source-level
+lead, not a tested patch. Reduce it to a regression, then check accumulated
+arguments, split deltas, reasoning, continuation and terminal completion.
+Changing thinking mode may change which delta arrives first; that alone would
+not establish a complete streaming fix.
 
-For Claude, our validation error matches the failure reported in
-[vLLM #44000](https://github.com/vllm-project/vllm/issues/44000).
+With thinking enabled, CPU/GPU native Codex runs reach a continuation
+that v0.19.0 rejects because its reasoning item lacks `id`. A reduced private
+backend replay reproduces that rejection. This matches
+[vLLM #33089](https://github.com/vllm-project/vllm/issues/33089);
+[v0.30.0's input preprocessing](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/entrypoints/openai/responses/protocol.py)
+generates missing reasoning IDs.
+
+The GPU's captured first request also reproduces malformed arguments directly
+against vLLM: multiple tool calls' JSON argument objects are concatenated into
+one completed call. In v0.19.0, `serving.py` joins argument deltas from all prior
+delta messages without selecting the tool index. This matches
+[vLLM #39426](https://github.com/vllm-project/vllm/issues/39426). Fixing only
+continuation validation cannot qualify tool execution; compare each call's
+deltas, final arguments, ID and result independently.
+
+The v0.30 GPU backend completes native Codex tasks, but its captured stream
+still changes tool `id` and `call_id` between `response.output_item.done` and
+`response.completed`. Per-tool deltas and arguments match. Its
+[final response builder](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/entrypoints/openai/responses/serving.py)
+reparses the full output instead of reusing streamed items (an existing TODO).
+Private replay of the same request reproduced this without Praxis. Add a
+regression that requires stable IDs in the completed response and reuse the
+accumulated stream objects.
+[vLLM #44676](https://github.com/vllm-project/vllm/issues/44676) records similar
+ID drift as a secondary finding; its main thinking-budget issue concerns a
+different model/configuration. Do not claim that all OpenAI Responses semantics
+are qualified because Codex's smoke task passes.
+
+For Claude, the error matches [vLLM #44000](https://github.com/vllm-project/vllm/issues/44000).
 [PR #44283](https://github.com/vllm-project/vllm/pull/44283) adds system-role
-acceptance, but [#48874](https://github.com/vllm-project/vllm/issues/48874)
-reports subsequent problems with message placement. Identify a release that
-contains the required fixes and has both CPU/GPU builds; then verify prompt
-semantics and tool execution. Merely turning HTTP 400 into HTTP 200 is insufficient.
+acceptance; [PR #44602](https://github.com/vllm-project/vllm/pull/44602) preserves
+inline placement. [#48874](https://github.com/vllm-project/vllm/issues/48874)
+reports later prompt/tool problems. Identify a release containing the needed
+changes with both CPU/GPU builds, then test prompt semantics and real tool
+execution. HTTP 200 alone is insufficient.
+
+For source investigation, clone upstream and reproduce against the pinned tag
+before comparing a candidate revision:
+
+```console
+git clone --depth 1 --branch v0.19.0 https://github.com/vllm-project/vllm.git ../vllm
+```
+
+If the checkout already exists, inspect its status and revision instead of
+cloning over it. Follow its development instructions before running tests.
 
 ## 4. Put the fix in the owning repository
 

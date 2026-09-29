@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Qualify the installed RHEL gateway using private fixtures and real coding CLIs."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import pwd
+import platform
 import shutil
 import signal
 import ssl
@@ -18,7 +20,7 @@ from host import ROOT, STATE, capture, run, service, service_output
 sys.path.insert(0, str(ROOT / "tests/common"))
 from contracts import check
 sys.path.insert(0, str(ROOT / "scripts/common"))
-from harness import configuration
+from harness import configuration, QWEN_CONTEXT, QWEN_OUTPUT
 
 USER = "praxis-smoke"
 MARKER = "PRAXIS_SMOKE_TOOL_OK"
@@ -44,6 +46,38 @@ Run python3 -m unittest -v using the shell tool. If it fails, read the files,
 fix them and rerun the tests. Report completion only after a successful test
 run. Do not install packages, access credentials or modify other projects.
 '''
+
+
+def harness_timeout(real, mode=Path("/etc/praxis-vllm/mode")):
+    if not real:
+        return 180
+    inference = mode.read_text().strip()
+    if inference not in ("cpu", "gpu"):
+        raise ValueError("unknown installed inference mode")
+    return 3600 if inference == "cpu" else 1800
+
+
+def runtime_metadata(inference=Path("/etc/praxis-vllm"), gateway=Path("/etc/praxis")):
+    """Record actual deployed versions without environment or configuration contents."""
+    containers = json.loads(service_output("podman", "inspect", "praxis-shared-gateway", "praxis-vllm"))
+    images, settings = {}, {}
+    flags = ("--revision", "--served-model-name", "--dtype", "--max-model-len",
+             "--max-num-seqs", "--tool-call-parser", "--reasoning-parser",
+             "--default-chat-template-kwargs", "--gpu-memory-utilization")
+    for container in containers:
+        name = container["Name"].lstrip("/")
+        config = container["Config"]
+        images[name] = {"reference": container["ImageName"], "id": container["Image"],
+                       "revision": (config.get("Labels") or {}).get("org.opencontainers.image.revision")}
+        if name == "praxis-vllm":
+            command = config.get("Cmd") or []
+            settings = {flag: command[command.index(flag) + 1] for flag in flags if flag in command}
+    packages = service_output("podman", "exec", "praxis-vllm", "python3", "-c",
+        'import importlib.metadata as m,json; print(json.dumps({p:m.version(p) for p in ("vllm","torch","openai","pydantic")}))')
+    return {"inference": (inference / "mode").read_text().strip(), "kernel": platform.release(),
+            "images": images, "settings": settings, "packages": json.loads(packages),
+            "template_sha256": hashlib.sha256((inference / "chat-template.jinja").read_bytes()).hexdigest(),
+            "gateway_sha256": hashlib.sha256((gateway / "shared-gateway.yaml").read_bytes()).hexdigest()}
 
 
 def ran_tests(name, output):
@@ -76,6 +110,71 @@ def ran_tests(name, output):
     return False
 
 
+def check_real_answer(path, body, stream):
+    """Require final answer text, completion and usage, excluding reasoning."""
+    values = []
+    if stream:
+        chunks = [line[5:].strip() for line in body.splitlines() if line.startswith("data:")]
+        assert chunks, "no real SSE events"
+        values = [json.loads(chunk) for chunk in chunks if chunk != "[DONE]"]
+        assert values, "no real SSE payloads"
+    else:
+        result = json.loads(body)
+    if path == "/v1/chat/completions":
+        if stream:
+            assert chunks[-1] == "[DONE]", "missing Chat stream terminator"
+            choices = [choice for value in values for choice in value.get("choices", [])]
+            text = "".join(choice.get("delta", {}).get("content") or "" for choice in choices)
+            assert choices and choices[-1].get("finish_reason") == "stop", "incomplete Chat answer"
+            usage = values[-1].get("usage") or {}
+        else:
+            choice = result["choices"][0]
+            text = choice["message"].get("content") or ""
+            assert choice.get("finish_reason") == "stop", "incomplete Chat answer"
+            usage = result.get("usage") or {}
+        counts = (usage.get("prompt_tokens"), usage.get("completion_tokens"))
+    elif path == "/v1/responses":
+        if stream:
+            assert values[-1].get("type") == "response.completed", "missing Responses terminator"
+            result = values[-1]["response"]
+        assert result.get("status") == "completed", "incomplete Responses answer"
+        text = "".join(part.get("text", "") for item in result.get("output", [])
+                       if item.get("type") == "message" for part in item.get("content", [])
+                       if part.get("type") == "output_text")
+        if stream:
+            deltas = "".join(value.get("delta", "") for value in values
+                             if value.get("type") == "response.output_text.delta")
+            assert deltas == text, "Responses deltas differ from the completed answer"
+        usage = result.get("usage") or {}
+        counts = (usage.get("input_tokens"), usage.get("output_tokens"))
+    else:
+        assert path == "/v1/messages", "unknown real API"
+        if stream:
+            assert values[-1].get("type") == "message_stop", "missing Messages terminator"
+            text, usage, stop = "", {}, None
+            for value in values:
+                if value.get("type") == "message_start":
+                    usage.update(value.get("message", {}).get("usage") or {})
+                elif value.get("type") == "content_block_start":
+                    block = value.get("content_block", {})
+                    if block.get("type") == "text":
+                        text += block.get("text", "")
+                elif value.get("type") == "content_block_delta":
+                    delta = value.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        text += delta.get("text", "")
+                elif value.get("type") == "message_delta":
+                    usage.update(value.get("usage") or {})
+                    stop = value.get("delta", {}).get("stop_reason")
+        else:
+            text = "".join(part.get("text", "") for part in result.get("content", []) if part.get("type") == "text")
+            usage, stop = result.get("usage") or {}, result.get("stop_reason")
+        assert stop == "end_turn", "incomplete Messages answer"
+        counts = (usage.get("input_tokens"), usage.get("output_tokens"))
+    assert "ready" in text.lower(), "final answer is missing ready (reasoning does not count)"
+    assert all(type(count) is int and count > 0 for count in counts), "missing real token usage"
+
+
 class InstalledGateway:
     def __init__(self, args):
         self.args = args
@@ -84,6 +183,7 @@ class InstalledGateway:
         self.base = "http://127.0.0.1:8080"
         self.provider = getattr(args, "provider", "cloud")
         self.real = getattr(args, "real", False)
+        self.timings = {}
         self.prefix = "/vllm" if self.provider == "vllm" else ""
         self.model = "qwen3-8b" if self.provider == "vllm" else "fixture"
         handlers = [urllib.request.ProxyHandler({})]
@@ -151,18 +251,14 @@ class InstalledGateway:
                 print(f"RUN: real Qwen {path}, stream={stream}", flush=True)
                 request = {"model": self.model, "stream": stream}
                 if path == "/v1/responses":
-                    request.update(input="Reply with the word ready.", max_output_tokens=32)
+                    request.update(input="Reply with the word ready.", max_output_tokens=2048)
                 else:
-                    request.update(messages=[{"role": "user", "content": "Reply with the word ready."}], max_tokens=32)
+                    request.update(messages=[{"role": "user", "content": "Reply with the word ready."}], max_tokens=2048)
                     if stream and path == "/v1/chat/completions":
                         request["stream_options"] = {"include_usage": True}
                 status, body = self.request(path, request)
                 assert status == 200, f"real {path}: HTTP {status}: {body[:500]}"
-                assert "usage" in body and "ready" in body.lower(), f"real {path} missing text/usage: {body[:500]}"
-                if stream:
-                    end = {"/v1/responses": "response.completed", "/v1/messages": "message_stop",
-                           "/v1/chat/completions": "[DONE]"}[path]
-                    assert end in body, f"incomplete real {path} stream"
+                check_real_answer(path, body, stream)
                 print(f"PASS: real Qwen {path}, stream={stream}, final usage received", flush=True)
         status, _ = self.request("/v1/chat/completions", {"model": "unknown-local-model", "messages": []})
         assert status == 404, "unknown local model did not fail closed"
@@ -263,11 +359,15 @@ def harnesses(gateway, install=True, selected=None):
             environment.update(NODE_EXTRA_CA_CERTS=str(ca), SSL_CERT_FILE=str(ca))
         gateway.control("ok", reset=True)
         timed_out = False
+        deadline = harness_timeout(gateway.real)
+        started = time.monotonic()
         try:
-            result = user_command(*command, directory=directory, environment=environment, timeout=1800 if gateway.real else 180)
+            result = user_command(*command, directory=directory, environment=environment, timeout=deadline)
         except subprocess.TimeoutExpired as error:
             timed_out = True
             result = subprocess.CompletedProcess(command, 124, error.output or "", error.stderr or "")
+        gateway.timings[name] = {"seconds": round(time.monotonic() - started, 2),
+                                "timeout_seconds": deadline}
         # Credentials in output are replaced before writing test evidence.
         output = (result.stdout + result.stderr).replace(gateway.token, "[caller]")
         tag = f"{'real' if gateway.real else 'mock'}-{gateway.provider}-{name}-{gateway.args.profile}"
@@ -289,7 +389,8 @@ def harnesses(gateway, install=True, selected=None):
             assert MARKER in output, f"{name} did not complete the tool continuation"
             assert records and all(r["credential_ok"] for r in records), "provider credential replacement failed"
             assert any(r["stream"] for r in records) and any(r["continuation"] for r in records), "missing stream/tool-result request"
-        print(f"PASS: {name}: installed Praxis → {'real' if gateway.real else 'mock'} {gateway.provider} → files → unittest", flush=True)
+        print(f"PASS: {name}: installed Praxis → {'real' if gateway.real else 'mock'} {gateway.provider} → files → unittest "
+              f"({gateway.timings[name]['seconds']}s)", flush=True)
 
 
 def main():
@@ -309,7 +410,15 @@ def main():
             parser.error("automated real tests require vLLM; cloud calls are manual")
         results = {"scenario": args.scenario, "profile": args.profile, "model": gateway.model, "checks": {}}
         try:
+            results["runtime"] = runtime_metadata()
+            results["client_limits"] = {"context_tokens": QWEN_CONTEXT,
+                                        "opencode_claude_output_tokens": QWEN_OUTPUT,
+                                        "codex_auto_compact_tokens": QWEN_CONTEXT - QWEN_OUTPUT,
+                                        "harness_timeout_seconds": harness_timeout(True)}
+            results["harness_timings"] = gateway.timings
+            started = time.monotonic()
             gateway.real_contracts()
+            results["api_checks_seconds"] = round(time.monotonic() - started, 2)
             results["checks"]["protocols"] = "passed"
             setup_harnesses()
             for name in ([args.harness] if args.harness else ["codex", "opencode", "claude"]):

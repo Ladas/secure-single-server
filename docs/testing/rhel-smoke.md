@@ -1,99 +1,71 @@
 # RHEL smoke tests
 
-Start after [AWS deployment](aws.md). Keep `ALL_IN_ONE_HOST`,
-`REMOTE_GATEWAY_HOST` and `SSH_KEY` in your workstation terminal. Verify each
-SSH host key and unlock your key with `ssh-add` before automation.
+After [AWS deployment](aws.md#4-select-one-vm-for-testing), select one VM with
+`aws_test_verify NAME`. Keep the workstation terminal open: commands below use
+`RHEL_HOST`, `RHEL_SCENARIO` and `SSH_KEY`. They work for all four CPU/GPU variants.
 
-The runner installs Praxis and real Codex, OpenCode and Claude CLIs, then tests
-private mocked vLLM, OpenAI and Anthropic providers. No real provider key is
-needed. The administrator installs services; the runner creates `praxis-smoke`
-and runs CLIs as that ordinary account, without sudo or access to service
-configuration. SSH agent forwarding is disabled. For interactive work afterward,
-[create a separate personal login](../quickstarts/all-in-one/accounts.md).
+The runner installs Praxis and pinned Codex, OpenCode and Claude Code CLIs.
+It tests mocked Qwen/vLLM, OpenAI and Anthropic using synthetic credentials.
+Services are installed by the administrator; harnesses run as the ordinary
+`praxis-smoke` account. No real provider key is needed.
 
 ## 1. Install and test
 
-Run from the checkout on your workstation:
+Run from the repository root on your workstation:
 
 ```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --profile memory
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --profile memory
 ```
 
-```console
-python3 tests/rhel/run.py --host "$REMOTE_GATEWAY_HOST" --ssh-key "$SSH_KEY" \
-  --scenario remote-gateway --profile memory
-```
+This checks JSON/SSE APIs, CLI tool execution and generated tests, then exercises
+adding OpenAI and Anthropic independently. Remote-gateway also checks public
+TLS/JWT. See the [matrix](compatibility.md) for coverage and exclusions.
 
-Each command checks installation, JSON/SSE, native tool execution and generated
-tests. It exercises Qwen-only operation, then independent OpenAI and Anthropic
-additions, disabled routes and backend failure without cloud fallback.
-Remote-gateway also checks public TLS and JWT rejection/acceptance.
-
-Both VMs need RHEL 9, enforcing SELinux, cgroups v2 and outbound package/image
-access. GPU drivers are unnecessary for mocks. The runner refuses unrelated
-installations and real cloud secrets. Fix any nonzero result before continuing;
-rerun the same command to resume the matching mock installation.
+Stop on a nonzero result. Rerun the same command after correcting the error;
+it resumes its matching mock installation and refuses unrelated installations
+or real cloud secrets. GPU drivers are unnecessary for this step.
 
 ## 2. Check reboot recovery
 
-These commands reboot the VMs, verify a changed boot ID and repeat host/CLI checks:
-
 ```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --phase lifecycle
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --phase lifecycle
 ```
 
+This reboots the selected VM, checks its boot ID and repeats host/CLI checks.
+Continue to [real Qwen setup](rhel-real.md) when both steps pass.
+
+## Optional Valkey
+
+To test durable quotas, switch the mock installation and repeat lifecycle:
+
 ```console
-python3 tests/rhel/run.py --host "$REMOTE_GATEWAY_HOST" --ssh-key "$SSH_KEY" \
-  --scenario remote-gateway --phase lifecycle
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --profile valkey --phase switch-profile
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --profile valkey --phase lifecycle
 ```
 
-## 3. Choose the next test
+Retain `--profile valkey` on subsequent commands for this VM.
 
-For real Qwen, continue to [real-provider setup](rhel-real.md).
-Its `real-setup` phase removes mocks and synthetic cloud secrets. Existing VMs
-can be reused; fresh VMs are optional.
+## Optional OpenShell
 
-### Optional Valkey
-
-To repeat the suite with durable quotas:
+On **all-in-one only**, after the native mock suite passes:
 
 ```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --profile valkey --phase switch-profile
-```
-
-```console
-python3 tests/rhel/run.py --host "$REMOTE_GATEWAY_HOST" --ssh-key "$SSH_KEY" \
-  --scenario remote-gateway --profile valkey --phase switch-profile
-```
-
-Repeat lifecycle checks with `--profile valkey`, and retain that option for
-subsequent real-provider commands. Profile switching applies only to the
-runner's mock installation and preserves existing secrets/Valkey data.
-
-### Optional OpenShell
-
-Reuse all-in-one after its native mock suite passes:
-
-```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_HOST" --ssh-key "$SSH_KEY" \
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
   --scenario all-in-one --profile memory --phase openshell
 ```
 
-Use `--profile valkey` instead if installed. This experimental addon has a
-separate service account and tests a sandbox API request and policy enforcement.
-It does not yet repeat the native CLI file/test task inside the sandbox.
-Run it before switching to real providers; a third VM is unnecessary.
-For real Qwen experiments afterward, use [manual OpenShell testing](openshell-manual.md).
+Use `--profile valkey` if installed. This checks a sandbox API request and
+policy denial; it does not run the CLI file/test task inside OpenShell.
+Run this phase before real-provider setup. For actual sandbox harness tasks,
+use [manual OpenShell testing](openshell-manual.md) afterward.
 
-## Logs and diagnostics
+## Logs and reruns
 
-Workstation: `.state/rhel-USER-HOST/`. VM: `/var/lib/praxis-rhel-smoke/`.
-Logs contain redacted results and bundle hashes; private CA/JWT signing keys
-stay on the workstation. Services remain running after a failure.
-
-Use `--phase check` for host checks, `--phase test` for baseline mock contracts
-and CLIs, or `--phase providers` for the full provider-addition sequence.
-Do not enter real keys into a mock installation.
+Workstation logs: `.state/rhel-USER-HOST/`. VM logs: `/var/lib/praxis-rhel-smoke/`.
+Services remain running after a failure. `--phase check` repeats host checks,
+`--phase test` repeats baseline mocks/CLIs, and `--phase providers` repeats
+provider additions. Keep private state out of Git.

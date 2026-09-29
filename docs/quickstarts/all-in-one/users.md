@@ -51,17 +51,26 @@ git init -q
 ### Qwen through local vLLM
 
 When installed by the administrator, Qwen needs no cloud credentials. Start
-with the qualified OpenCode path:
+with OpenCode:
 
 ```console
 praxis-harness opencode --provider vllm
 ```
 
-The launcher selects `qwen3-8b` through Praxis's `/vllm/v1` route. CPU/GPU
-OpenCode tool smoke tests passed. Codex and Claude Code currently fail against
-the pinned vLLM backend; their reproduction commands and exact results are in
-the [compatibility matrix](../../testing/compatibility.md) and
-[testing guide](../../testing/harnesses.md#qwen).
+The launcher selects `qwen3-8b` through Praxis's `/vllm/v1` route, with thinking
+enabled and reasoning separated from the final answer. OpenCode's file/test
+task passed on CPU and GPU. Claude also passed on both; Codex passed on GPU.
+See CPU Codex and protocol limits in the [matrix](../../testing/compatibility.md).
+
+Or choose another harness:
+
+```console
+praxis-harness codex --provider vllm
+```
+
+```console
+praxis-harness claude --provider vllm
+```
 
 ### OpenAI
 
@@ -111,12 +120,15 @@ adding `--url http://127.0.0.1:8082` to the OpenAI command. The administrator
 controls judge/Weak/Strong routing; Codex Responses and Claude Messages cannot
 use that Chat-only listener.
 
+For acceptance, run the [file/test task](../../testing/harnesses.md#acceptance-task)
+in a fresh project for each harness/provider.
+
 ## 4. Optional sandbox execution
 
 Use [OpenShell setup and usage](../../testing/openshell-manual.md) after the
 administrator installs the addon. Run its client commands as this same ordinary
 user. Sandbox/provider coverage is separate from direct-host coverage; see
-[the execution matrix](../../testing/compatibility.md#execution-modes).
+[the execution matrix](../../testing/compatibility.md#all-in-one).
 
 ## Continue after disconnecting
 

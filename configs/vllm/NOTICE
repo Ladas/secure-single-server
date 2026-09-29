@@ -1,8 +1,8 @@
-qwen3-no-thinking.jinja is derived from Qwen/Qwen3-8B tokenizer_config.json,
+qwen3.jinja is derived from Qwen/Qwen3-8B tokenizer_config.json,
 revision b968826d9c46dd6066d109eabc6255188de91218:
 https://huggingface.co/Qwen/Qwen3-8B/blob/b968826d9c46dd6066d109eabc6255188de91218/tokenizer_config.json
 
 Upstream license: Apache License 2.0 (see LICENSE.Qwen3).
-Modification: set enable_thinking=false before the upstream template, so the
-pinned vLLM Responses path also uses non-thinking generation. The remaining
-template is unchanged. This does not change the model weights or revision.
+Modification: add provenance comments; the upstream template behavior is
+unchanged. Thinking is enabled by default. This does not change the model
+weights or revision.

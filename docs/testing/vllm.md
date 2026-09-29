@@ -15,7 +15,13 @@ Valkey profile. Choose one backend:
 The installer uses pinned vLLM images, model revision and chat template from
 `configs/vllm/`. It downloads model weights into the service account's persistent
 cache. vLLM joins Praxis's private container network; port 8000 is never
-published on the host.
+published on the host. `qwen3.jinja` preserves the pinned model template's
+thinking-enabled default; the server uses the `qwen3` reasoning parser and
+`hermes` tool parser. The harness launcher configures Qwen's reasoning format
+and 16k context; OpenCode and Claude reserve up to 4096 output tokens, including
+thinking. Long reasoning can exhaust that budget before answering. These are
+small-machine smoke settings, not the model's maximum context or a guarantee
+of cloud-model quality. See the [matrix](compatibility.md#thinking-mode).
 
 ## Prepare a fresh Praxis installation
 
@@ -75,6 +81,9 @@ sudo scripts/vllm/install cpu
 Installation waits up to 30 minutes for the model. Repeating it preserves the
 cache and replaces only its managed service/template. The GPU container alone
 uses `SecurityLabelDisable` for CDI access; host SELinux remains enforcing.
+For controlled version comparisons, `--image NAME@sha256:DIGEST` overrides
+only the backend image. Use the [candidate testing guide](vllm-debugging.md#compare-a-vllm-candidate)
+before changing default pins.
 
 If Praxis was installed without Qwen, enable its routes using the matching
 checkout:
@@ -93,7 +102,7 @@ clients follow the [HTTPS/JWT harness guide](harnesses.md).
 
 ```console
 sudo bash -c 'source scripts/common/lib.sh; as_service systemctl --user status praxis-vllm.service --no-pager'
-sudo bash -c 'source scripts/common/lib.sh; as_service journalctl --user -u praxis-vllm.service -n 80 --no-pager'
+sudo bash -c 'source scripts/common/lib.sh; as_service podman logs --tail 80 praxis-vllm'
 sudo bash -c 'source scripts/common/lib.sh; as_service podman port praxis-vllm'
 ```
 

@@ -1,43 +1,18 @@
-# Experimental Praxis integration
+# OpenShell user setup and usage
 
-The shared bootc base starts Praxis and OpenShell. This does not establish that
-every harness can complete a task through Praxis.
+For mutable RHEL all-in-one, follow [manual OpenShell testing](../../testing/openshell-manual.md).
+The administrator installs the addon and public recipes. You use your ordinary
+SSH account to register the local gateway and run harnesses without sudo.
 
-| Combination | Status |
-| --- | --- |
-| Codex + Praxis | Unsupported; `--config` fails before creating anything |
-| OpenClaw + Praxis | Unsupported; `--config` fails before creating anything |
-| OpenCode + Praxis dev | Real Qwen CPU/GPU qualified on bootc; mutable RHEL qualification remains separate |
-| OpenCode review | CLI data-directory permission limitation; outside supported recipes |
+Start with OpenCode and Qwen through Praxis. The guide also includes an OpenAI
+experiment. Codex/OpenClaw Praxis adapters and a Claude image/recipe are still
+missing. The [compatibility matrix](../../testing/compatibility.md#all-in-one)
+separates direct, OpenShell, CPU/GPU and mock/real results.
 
-For OpenCode experiments, run as the OpenShell service account with the explicit
-HOME/user-bus environment from the [OpenCode recipe](../../../openshell/docs/quickstarts/opencode.md):
+The management API currently trusts local users; registration does not create
+a private per-user control plane. Keep management ports on loopback. See the
+[deployment boundary](../../../openshell/docs/threat-model.md).
 
-```bash
-export OPENSHELL_MODEL_ID=administrator-approved-model
-openshell/harnesses/opencode/create.sh --profile dev --config configs/openshell-praxis
-```
-
-`PRAXIS_PORT` defaults to 8080 and must be an integer from 1 through 65535.
-`PRAXIS_API_PREFIX` defaults to empty for the cloud/bootc route; set `/vllm`
-for Qwen installed by the mutable RHEL workflow. For administrator setup followed
-by an ordinary SSH user's client session, use the
-[manual RHEL guide](../../testing/openshell-manual.md). See the
-[execution matrix](../../testing/compatibility.md#execution-modes) for exact scope.
-The script renders the numeric policy port and JSON model safely, selects the
-Praxis model, and uploads config to `~/.config/opencode/opencode.json`. The actual
-binary paths, alias route, tools and streaming must pass native qualification
-before use with real credentials. A successful config upload is not inference.
-Integrated mode rejects `--provider` and SSH helpers never forward provider keys.
-
-The policies intend to limit model traffic to `host.openshell.internal`; dev,
-automation and interactive also permit development endpoints. GitHub API access
-is read-only, but Git-over-HTTPS is not. Filesystem permissions do not establish
-workspace mounts, retention after deletion, or disconnected task persistence.
-
-`tests/openshell-praxis/smoke.sh` requires a preconfigured Praxis/mock-provider
-fixture and an approved test model. It requires successful inference and runs the
-controlled policy probe. A timeout, SSH failure, or HTTP 401 does not prove denial.
-This qualification suite is separate from the opt-in standalone runtime CI suite.
-Delete test sandboxes with `openshell sandbox delete NAME`; do not source libraries
-into your terminal. See [threat model](../../../openshell/docs/threat-model.md).
+For bootc installations, use the [bootc workflow](../../../bootc/README.md)
+and its [recorded validation](../../../bootc/VLLM-VALIDATION.md). Bootc results
+do not qualify the mutable RHEL sandbox workflow.

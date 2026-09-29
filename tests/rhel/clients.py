@@ -10,6 +10,32 @@ from harness import configuration
 
 
 class ClientsTest(unittest.TestCase):
+    def test_qwen_context_and_output_limits_do_not_override_cloud_models(self):
+        for provider in ("vllm", "openai"):
+            command, _ = configuration("codex", provider, "model", "http://127.0.0.1:8080", "caller")
+            self.assertEqual("model_context_window=16384" in command, provider == "vllm")
+            self.assertEqual("model_auto_compact_token_limit=12288" in command, provider == "vllm")
+            self.assertEqual("show_raw_agent_reasoning=true" in command, provider == "vllm")
+        for provider in ("vllm", "anthropic"):
+            _, env = configuration("claude", provider, "model", "http://127.0.0.1:8081", "caller")
+            if provider == "vllm":
+                self.assertEqual(env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "16384")
+                self.assertEqual(env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"], "4096")
+            else:
+                self.assertNotIn("CLAUDE_CODE_MAX_OUTPUT_TOKENS", env)
+            self.assertNotIn("CLAUDE_CODE_DISABLE_THINKING", env)
+
+    def test_qwen_reasoning_capability_and_continuation_are_explicit(self):
+        for provider in ("vllm", "openai", "anthropic"):
+            command, env = configuration("opencode", provider, "qwen3-8b", "http://127.0.0.1:8080", "caller", prompt="task")
+            model = json.loads(env["OPENCODE_CONFIG_CONTENT"])["provider"]["praxis"]["models"]["qwen3-8b"]
+            if provider == "vllm":
+                self.assertTrue(model["reasoning"])
+                self.assertEqual(model["interleaved"], {"field": "reasoning"})
+                self.assertIn("--thinking", command)
+            else:
+                self.assertNotIn("interleaved", model)
+
     def test_interactive_launch_preserves_native_tool_policy_and_smoke_is_bounded(self):
         for prompt in (None, "task"):
             _, env = configuration("opencode", "vllm", "qwen3-8b", "http://127.0.0.1:8080", "caller", prompt=prompt)

@@ -1,7 +1,7 @@
 # AWS VM operations and recovery
 
-Start with the [deployment walkthrough](aws.md). This reference covers the
-resource boundary, direct CLI use, recovery and cleanup.
+**To deploy CPU/GPU all-in-one or remote-gateway VMs, follow [aws.md](aws.md).**
+This page is the reference for custom configuration, recovery and cleanup.
 
 ## Resource boundary and permissions
 
@@ -21,6 +21,7 @@ Podman data belong on the encrypted EBS root disk in the planned installation.
 | `plan` | Read-only validation and resource plan; no state-file writes |
 | `apply` | Fresh validation and printed plan, then typed account/region/prefix confirmation before creation |
 | `verify` | Read-only comparison against the recorded launch, including ownership, image/type, ingress, IMDSv2 and disk/interface deletion settings |
+| `capacity` | Read-only offered zones and public subnet candidates; spare instance capacity remains unknown |
 
 Credentials need `sts:GetCallerIdentity`, EC2 describe access for instance
 types, instance-type offerings, images, subnets, route tables, instances,
@@ -40,16 +41,16 @@ AWS CLI credential chain; do not mix exported keys and an AWS profile.
 
 ```console
 python3 scripts/aws/rhel-vm plan --config configs/aws/vllm-gpu.json --scenario all-in-one \
-  --region "$REGION" --account-id "$ACCOUNT" --prefix "$RUN_PREFIX-all-in-one" \
+  --region "$REGION" --account-id "$ACCOUNT" --prefix "$RUN_PREFIX-all-in-one-gpu" \
   --subnet-id "$SUBNET" --allowed-cidr "$CLIENT_CIDR" \
-  --public-key "$SSH_KEY.pub" --state-file ".state/$RUN_PREFIX-all-in-one.json" \
+  --public-key "$SSH_KEY.pub" --state-file ".state/$RUN_PREFIX-all-in-one-gpu.json" \
   || printf 'Plan failed; no resources launched.\n'
 ```
 
 Replace `plan` with `apply` when ready; confirmation remains mandatory. A
 separate earlier plan is optional because apply always validates current
-inputs. Existing journals, instances, security groups or key pairs with the
-same prefix are refused, including partial deployments.
+inputs. A recorded failed instance launch is reconciled and retried using its existing
+security group/key pair. Completed VMs and unrelated name collisions are refused.
 
 Plan/apply require `--config`. The hardware presets omit `scenario`; pass it with
 `--scenario all-in-one` or `--scenario remote-gateway`. The session helper
@@ -75,7 +76,7 @@ cp -n configs/aws/vllm-gpu.json configs/aws/custom-gpu.local \
 Edit `instance_type` and `volume_gib` in that file, then use it in the array:
 
 ```console
-ALL_IN_ONE_VM=(configs/aws/custom-gpu.local --scenario all-in-one)
+ALL_IN_ONE_GPU_VM=(configs/aws/custom-gpu.local --scenario all-in-one)
 ```
 
 Or append explicit overrides after choosing hardware. These are independent
@@ -84,25 +85,25 @@ examples; use only the ones matching your run.
 **Larger all-in-one GPU VM:** keep a `vllm-gpu.json` hardware selection.
 
 ```console
-ALL_IN_ONE_VM+=(--instance-type g6.4xlarge --volume-gib 300)
+ALL_IN_ONE_GPU_VM+=(--instance-type g6.4xlarge --volume-gib 300)
 ```
 
 **Larger remote-gateway CPU inference VM:** keep a `vllm-cpu.json` selection.
 
 ```console
-REMOTE_GATEWAY_VM+=(--instance-type m7i.8xlarge --volume-gib 150)
+REMOTE_GATEWAY_CPU_VM+=(--instance-type m7i.8xlarge --volume-gib 150)
 ```
 
 **Another approved subnet for one VM:** replace the example subnet ID.
 
 ```console
-ALL_IN_ONE_VM+=(--subnet-id subnet-REPLACE_ME)
+ALL_IN_ONE_GPU_VM+=(--subnet-id subnet-REPLACE_ME)
 ```
 
 **Pin one official RHEL AMI:** replace the example ID; architecture/owner checks remain.
 
 ```console
-REMOTE_GATEWAY_VM+=(--ami-id ami-REPLACE_ME)
+REMOTE_GATEWAY_CPU_VM+=(--ami-id ami-REPLACE_ME)
 ```
 
 The minimum is 32 GiB RAM for all profiles; CPU inference recommends 64 GiB.
@@ -119,101 +120,145 @@ AWS metadata does not establish AVX-512 support on the running guest; CPU host
 preflight is still required. GPU driver and NVIDIA Container Toolkit readiness
 must likewise be checked on the guest before installing vLLM.
 
+## Capacity errors
+
+`InsufficientInstanceCapacity` means AWS could not place the requested instance
+in that Availability Zone at launch time. Earlier success and termination of an
+old VM do not reserve capacity for a replacement. This differs from a quota or
+credentials error. AWS recommends waiting or choosing another zone/type:
+[launch troubleshooting](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/troubleshooting-launch.html#troubleshooting-launch-capacity).
+
+In the prepared workstation terminal, reload the helper and inspect alternatives:
+
+```console
+source scripts/aws/session.sh || printf 'Load failed; check your working directory.\n'
+aws_test_capacity g6.2xlarge || printf 'Placement check failed; inspect the error.\n'
+```
+
+The report lists zones offering that type and public subnet candidates in the
+current VPC. `SpareInstanceCapacity: unknown` is intentional: instance-type
+[offerings](https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-instance-type-offerings.html)
+are supported locations, not free-instance counts. Subnet IP counts measure
+address space only. A launch `--dry-run` checks permissions, not availability.
+This command creates nothing and writes no journal.
+
+### Retry the failed GPU launch
+
+Keep its journal and resources. After waiting a few minutes, rerun the same
+plan and deploy commands. No new run prefix, key pair or security group is needed:
+
+```console
+aws_test_plan all-in-one-gpu "${ALL_IN_ONE_GPU_VM[@]}" \
+  || printf 'Plan stopped; inspect the reported recovery condition.\n'
+```
+
+```console
+aws_test_deploy all-in-one-gpu "${ALL_IN_ONE_GPU_VM[@]}" \
+  || printf 'Retry stopped; the journal is retained for another attempt.\n'
+```
+
+The plan checks resource ownership, ingress, public key, subnet and recorded
+launch tokens. Deploy asks for confirmation. An uncertain prior outcome is
+retried in the original subnet with the same token and parameters. If AWS
+already has the instance, the helper recovers its ID without launching another.
+Concurrent deploys using the same journal are refused.
+
+If the updated helper records another `InsufficientInstanceCapacity`, you can
+explicitly select a public subnet in another zone **in the same VPC**. Replace
+the placeholder with a candidate from `aws_test_capacity`:
+
+```console
+ALL_IN_ONE_GPU_VM+=(--subnet-id subnet-REPLACE_ME)
+```
+
+Repeat the two plan/deploy blocks above. The failed attempt remains in the
+journal; the new subnet is used only after confirmation. Hardware, AMI, disk,
+access rules and SSH key stay fixed. An older journal without a recorded
+capacity rejection must first retry its original subnet to resolve its outcome.
+
+There is no automatic launch, zone fallback or instance-size substitution.
+Planning checks that the type is offered; only an actual launch establishes
+placement. Failures before instance launch and resource drift still require
+[inspection](#if-apply-failed); no resources are deleted automatically.
+
 ## Deploy additional variants of a scenario
 
-The VM name identifies AWS resources and the journal; `--scenario` selects
-Praxis's role. Names such as `all-in-one-cpu` and `all-in-one-gpu` both use
-`--scenario all-in-one`. Each gets its own VM, security group and journal.
-The helper already supports this; hardware never changes the scenario name.
+Choose another [named VM block](aws.md#3-deploy-the-vms-you-need). Keep the run
+settings/key, and plan/launch that VM independently. Names accept 1–20 lowercase
+letters, digits and hyphens, starting with a letter; the full prefix/name must
+fit 40 characters. Each name has its own journal.
 
-To add CPU all-in-one beside your existing GPU all-in-one and CPU remote-gateway,
-use the same prepared workstation terminal, run prefix and SSH key:
-
-```console
-source scripts/aws/session.sh
-ALL_IN_ONE_CPU_VM=(configs/aws/vllm-cpu.json --scenario all-in-one --ssh-access restricted)
-```
-
-```console
-aws_test_plan all-in-one-cpu "${ALL_IN_ONE_CPU_VM[@]}" \
-  || printf 'Plan failed; nothing launched. Correct the error and retry.\n'
-```
-
-```console
-aws_test_deploy all-in-one-cpu "${ALL_IN_ONE_CPU_VM[@]}" \
-  || printf 'Deploy stopped; inspect its journal before retrying.\n'
-```
-
-```console
-unset ALL_IN_ONE_CPU_HOST
-if aws_test_verify all-in-one-cpu; then ALL_IN_ONE_CPU_HOST="$RHEL_HOST"; fi
-aws_test_ssh all-in-one-cpu
-```
-
-Check its SSH host key, then exit to the workstation. Unlock the key and run
-its smoke and real tests independently:
-
-```console
-ssh-add "$SSH_KEY"
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_CPU_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --profile memory
-```
-
-```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_CPU_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --phase real-setup --inference cpu
-```
-
-```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_CPU_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --phase real-test --harness opencode
-```
-
-The original `ALL_IN_ONE_HOST` and `REMOTE_GATEWAY_HOST` remain available.
-Evidence is stored by host, so two VMs with the same scenario do not share logs.
-See the [CPU/GPU debug plan](vllm-debugging.md) for the comparisons this enables.
-
-For other combinations, choose a fresh name and array. For example:
-
-```console
-REMOTE_GATEWAY_GPU_VM=(configs/aws/vllm-gpu.json --scenario remote-gateway \
-  --ssh-access restricted --https-access restricted)
-```
-
-```console
-aws_test_plan remote-gateway-gpu "${REMOTE_GATEWAY_GPU_VM[@]}"
-```
-
-```console
-aws_test_deploy remote-gateway-gpu "${REMOTE_GATEWAY_GPU_VM[@]}"
-```
-
-Use the same name with verify/SSH. Names accept 1–20 lowercase letters, digits
-and hyphens, starting with a letter; the full run-prefix/name must fit 40
-characters. Existing names are refused. Record and clean up every extra VM.
+For external providers without local inference, use the
+[all-in-one without vLLM](aws.md#all-in-one-without-vllm) or
+[remote-gateway without vLLM](aws.md#remote-gateway-without-vllm) blocks.
+Both use the smaller `no-vllm.json` preset. The helper currently requires
+at least 32 GiB RAM; smaller instance types are rejected.
 
 ## Access and changed IPs
 
-Choose independent SSH/HTTPS settings using the [copyable access blocks](aws.md#4-choose-access-one-block-per-vm).
-Discovery detects your workstation's public IPv4 `/32`; use an explicit source
-if your VPN or SSH connection has different egress.
+Choose a block **before** configuring the VM array in [aws.md](aws.md#2-choose-access).
+Access flags affect new launches; they do not update existing security groups.
 
-For public SSH, check the effective guest settings after a trusted login:
+### All-in-one access
+
+Restrict SSH to the IP detected by discovery:
+
+```console
+ALL_IN_ONE_ACCESS=(--ssh-access restricted)
+```
+
+Or restrict SSH to a specific source (replace the example):
+
+```console
+ALL_IN_ONE_ACCESS=(--ssh-access restricted --allowed-cidr 203.0.113.10/32)
+```
+
+Or allow SSH from any IPv4 address:
+
+```console
+ALL_IN_ONE_ACCESS=(--ssh-access public)
+```
+
+### Remote-gateway access
+
+Restrict both SSH and HTTPS to the detected IP:
+
+```console
+REMOTE_GATEWAY_ACCESS=(--ssh-access restricted --https-access restricted)
+```
+
+Or restrict SSH while allowing HTTPS/JWT clients from any IP:
+
+```console
+REMOTE_GATEWAY_ACCESS=(--ssh-access restricted --https-access public)
+```
+
+Or restrict SSH to a specific IP and allow public HTTPS:
+
+```console
+REMOTE_GATEWAY_ACCESS=(--ssh-access restricted --allowed-cidr 203.0.113.10/32 --https-access public)
+```
+
+Or allow both SSH and HTTPS from any IPv4 address:
+
+```console
+REMOTE_GATEWAY_ACCESS=(--ssh-access public --https-access public)
+```
+
+Public SSH still requires authentication. Check that the guest enables public-key
+authentication and disables password/keyboard-interactive authentication:
 
 ```console
 sudo sshd -T | grep -E '^(pubkeyauthentication|passwordauthentication|kbdinteractiveauthentication) '
 ```
 
-Expect public-key authentication enabled and password/keyboard-interactive
-authentication disabled. The AWS helper does not change `sshd` configuration.
-AWS recommends restricting [SSH sources](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/changing-security-group.html).
+The helper does not change `sshd` configuration. HTTPS requires TLS/JWT after
+service installation. vLLM and management ports remain private. AWS recommends
+[restricting SSH sources](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/changing-security-group.html).
 
 Changing `CLIENT_CIDR` affects new plans only. Manual ingress edits cause
-`verify` to report drift; this helper has no security-group update operation.
-Use the original/VPN source or clean up and provision with the desired access.
-
-If a plan prints two VMs, reload `source scripts/aws/session.sh` in that terminal,
-then plan each role separately. Reloading preserves credentials and run settings.
+`verify` to report drift; there is no security-group update operation here.
+Use the original/VPN source or provision with the desired access.
 
 ### SSM Session Manager
 
@@ -235,15 +280,15 @@ load credentials again and restore those values from the recorded run. Verify
 uses the journal, not the current config file or current instance defaults:
 
 ```console
-aws_test_verify all-in-one || printf 'Verification failed; inspect the recorded deployment.\n'
+aws_test_verify all-in-one-gpu || printf 'Verification failed; inspect the recorded deployment.\n'
 ```
 
-Verify `remote-gateway` independently with `aws_test_verify remote-gateway`.
+Select another deployed VM by its exact name, for example `aws_test_verify remote-gateway-cpu`.
 For any earlier run, use its recorded journal suffix. To inspect one directly:
 
 ```console
 python3 scripts/aws/rhel-vm verify --region "$REGION" --account-id "$ACCOUNT" \
-  --state-file ".state/$RUN_PREFIX-all-in-one.json" \
+  --state-file ".state/$RUN_PREFIX-all-in-one-gpu.json" \
   || printf 'Verification failed; inspect the journal and tagged resources.\n'
 ```
 
@@ -305,11 +350,13 @@ interrupted launch; a volume without a live VM needs separate cleanup.
 Earlier failures normally leave only the
 non-billable security group/key pair; confirm actual resources in the console.
 `verify` refuses an incomplete journal instead of treating it as a successful
-deployment. No automatic deletion or launch retry occurs.
+deployment. For a recorded instance-launch failure, [repeat plan/deploy](#retry-the-failed-gpu-launch)
+to reconcile it. Earlier failures or resource drift require inspection.
+No automatic deletion or unconfirmed launch retry occurs.
 
 ```console
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_TEST_CREDENTIALS \
-  AWS_TEST_READY RHEL_HOST || printf 'Could not clear credentials; check your shell settings.\n'
+  AWS_TEST_READY RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE || printf 'Could not clear credentials; check your shell settings.\n'
 ```
 
 The helper contains no termination/deletion command. Keep non-secret state

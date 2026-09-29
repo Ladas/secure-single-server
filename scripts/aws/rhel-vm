@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Plan/apply one tagged RHEL 9 test VM, or verify it without changing AWS.
+"""Plan/apply one tagged RHEL 9 VM, retry its failed launch, or inspect AWS read-only.
 
 Requires AWS CLI v2 and its normal credential chain. Never accepts access keys
 as arguments. Creates only a key-pair import, security group, instance and root
 disk; no IAM, VPC, DNS, gateway deployment or deletion. Apply is never implicit.
 """
 import argparse
+from contextlib import contextmanager, nullcontext
+import fcntl
 import ipaddress
 import json
 import os
@@ -26,6 +28,12 @@ READS = {"get-caller-identity", "describe-instance-types", "describe-images", "d
 WRITES = {"import-key-pair", "create-security-group", "authorize-security-group-ingress", "run-instances"}
 
 
+class AwsError(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
 class Aws:
     def __init__(self, region, profile, apply):
         self.region, self.profile, self.apply = region, profile, apply
@@ -38,6 +46,9 @@ class Aws:
             command += ["--profile", self.profile]
         command += [service, action]
         for key, value in options.items():
+            if isinstance(value, bool):
+                command += ["--" + ("" if value else "no-") + key.replace("_", "-")]
+                continue
             command += ["--" + key.replace("_", "-")]
             if isinstance(value, (dict, list)):
                 command += [json.dumps(value)]
@@ -49,7 +60,11 @@ class Aws:
             # debug output or full request arguments into evidence.
             match = re.search(r"\(([A-Za-z0-9_.]+)\)", result.stderr)
             code = match.group(1) if match else "CLI error"
-            raise ValueError(f"AWS {action} failed ({code}); check region, credentials and permissions")
+            if code == "InsufficientInstanceCapacity":
+                raise AwsError(code, f"AWS {action} failed ({code}); insufficient On-Demand capacity in the selected "
+                                 "Availability Zone. Inspect the recovery journal before retrying; wait or choose "
+                                 "another public subnet. See docs/testing/aws-operations.md#capacity-errors")
+            raise AwsError(code, f"AWS {action} failed ({code}); check region, credentials and permissions")
         return json.loads(result.stdout or "{}")
 
 
@@ -193,6 +208,42 @@ def check_offering(aws, instance_type, zone):
         raise ValueError(f"{instance_type} is not offered in {zone}; choose another approved public subnet or instance type")
 
 
+def capacity_report(aws, args):
+    """Read placement candidates; EC2 offerings do not report spare capacity."""
+    check_identity(aws, args.account_id)
+    selected = aws.call("ec2", "describe-subnets", subnet_ids=[args.subnet_id])["Subnets"][0]
+    if selected["OwnerId"] != args.account_id:
+        raise ValueError("selected subnet must belong to the expected account")
+    offerings = aws.call("ec2", "describe-instance-type-offerings", location_type="availability-zone",
+                         filters=filters(**{"instance-type": args.instance_type}))["InstanceTypeOfferings"]
+    zones = sorted({item["Location"] for item in offerings})
+    subnets = aws.call("ec2", "describe-subnets", filters=filters(
+        **{"vpc-id": selected["VpcId"], "owner-id": args.account_id, "state": "available"}))["Subnets"]
+    tables = aws.call("ec2", "describe-route-tables", filters=filters(
+        **{"vpc-id": selected["VpcId"]}))["RouteTables"]
+    candidates = []
+    for subnet in subnets:
+        if subnet["AvailabilityZone"] not in zones or subnet["AvailableIpAddressCount"] < 1:
+            continue
+        routes = [table for table in tables if any(association.get("SubnetId") == subnet["SubnetId"]
+                  for association in table.get("Associations", []))]
+        if not routes:
+            routes = [table for table in tables if any(association.get("Main")
+                      for association in table.get("Associations", []))]
+        if any(route.get("DestinationCidrBlock") == "0.0.0.0/0"
+               and route.get("GatewayId", "").startswith("igw-") and route.get("State") == "active"
+               for table in routes for route in table["Routes"]):
+            candidates.append({"SubnetId": subnet["SubnetId"], "AvailabilityZone": subnet["AvailabilityZone"],
+                               "AvailableIpAddresses": subnet["AvailableIpAddressCount"]})
+    return {"AccountId": args.account_id, "Region": aws.region, "InstanceType": args.instance_type,
+            "SelectedSubnetId": args.subnet_id, "SelectedAvailabilityZone": selected["AvailabilityZone"],
+            "VpcId": selected["VpcId"], "OfferedInAvailabilityZones": zones,
+            "PublicSubnetCandidates": sorted(candidates, key=lambda item: (item["AvailabilityZone"], item["SubnetId"])),
+            "SpareInstanceCapacity": "unknown",
+            "Result": "Read-only placement report, not a capacity reservation. Subnet IP counts are not free EC2 instances. "
+                      "No launch, dry-run launch, resource change or journal write was attempted."}
+
+
 def plan(aws, args):
     try:
         key = args.public_key.read_text()
@@ -272,20 +323,150 @@ def apply_plan(aws, args, proposal):
              tag_specifications=[{"ResourceType": "key-pair", "Tags": owned}])
     state.update(KeyPairName=args.prefix, ApplyStatus="launch-requested")
     update_state(args.state_file, state)
-    # The private SSH key and AWS credentials never leave the workstation.
-    result = aws.call("ec2", "run-instances", image_id=proposal["ImageId"],
-        instance_type=proposal["InstanceType"], count=1, client_token=state["ClientToken"], key_name=args.prefix,
-        network_interfaces=[{"DeviceIndex": 0, "SubnetId": args.subnet_id,
-                             "AssociatePublicIpAddress": True, "DeleteOnTermination": True, "Groups": [group]}],
-        metadata_options={"HttpTokens": "required", "HttpEndpoint": "enabled", "HttpPutResponseHopLimit": 1},
-        block_device_mappings=[{"DeviceName": proposal["RootDeviceName"], "Ebs": {
-            "Encrypted": True, "VolumeSize": args.volume_gib, "VolumeType": "gp3", "DeleteOnTermination": True}}],
-        tag_specifications=[{"ResourceType": kind, "Tags": owned} for kind in ["instance", "volume"]])
+    launch_instance(aws, args, proposal, state)
+
+
+def launch_instance(aws, args, proposal, state):
+    # Replay identical parameters with the recorded token after an uncertain result.
+    owned = tags(args.prefix, args.scenario)
+    try:
+        result = aws.call("ec2", "run-instances", image_id=proposal["ImageId"],
+            instance_type=proposal["InstanceType"], count=1, client_token=state["ClientToken"], key_name=state["KeyPairName"],
+            network_interfaces=[{"DeviceIndex": 0, "SubnetId": args.subnet_id,
+                                 "AssociatePublicIpAddress": True, "DeleteOnTermination": True,
+                                 "Groups": [state["SecurityGroupId"]]}],
+            metadata_options={"HttpTokens": "required", "HttpEndpoint": "enabled", "HttpPutResponseHopLimit": 1},
+            block_device_mappings=[{"DeviceName": proposal["RootDeviceName"], "Ebs": {
+                "Encrypted": True, "VolumeSize": args.volume_gib, "VolumeType": "gp3", "DeleteOnTermination": True}}],
+            tag_specifications=[{"ResourceType": kind, "Tags": owned} for kind in ["instance", "volume"]])
+    except AwsError as error:
+        if error.code == "InsufficientInstanceCapacity":
+            state["ApplyStatus"] = "capacity-unavailable"
+            update_state(args.state_file, state)
+        raise
     instance_id = result["Instances"][0]["InstanceId"]
     print("Launched instance:", instance_id, flush=True)
     state.update(InstanceId=instance_id, ApplyStatus="complete")
     update_state(args.state_file, state)
     print("State saved. Run verify after boot. On any failure inspect tagged resources; none are deleted automatically.")
+
+
+@contextmanager
+def deployment_lock(path):
+    """Serialize applies across confirmation, reconciliation and journal updates."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(str(path) + ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError("another deployment is using this journal; wait for it to finish") from None
+        yield
+    finally:
+        os.close(fd)
+
+
+def retry_state(args):
+    if args.state_file.is_symlink():
+        raise ValueError("refusing a symlink journal")
+    state = json.loads(args.state_file.read_text())
+    if not isinstance(state, dict):
+        raise ValueError("incomplete journal: expected a JSON object")
+    if state.get("InstanceId") or state.get("ApplyStatus") == "complete":
+        raise ValueError(f"VM already recorded: {state.get('InstanceId', 'unknown')}; use aws_test_verify, not deploy")
+    required = ("AccountId", "Region", "Prefix", "Scenario", "Inference", "Architecture", "InstanceType",
+                "ImageId", "RootDeviceName", "SubnetId", "VpcId", "AvailabilityZone", "VolumeGiB",
+                "Ingress", "ClientToken", "SecurityGroupId", "KeyPairName")
+    if state.get("ApplyStatus") not in ("launch-requested", "capacity-unavailable") or any(k not in state for k in required):
+        raise ValueError("incomplete journal before instance launch; inspect recorded resources before recovery")
+    expected = {"AccountId": args.account_id, "Region": args.region, "Prefix": args.prefix,
+                "Scenario": args.scenario, "Inference": args.inference, "InstanceType": args.instance_type,
+                "Architecture": "arm64" if args.arch == "arm64" else "x86_64", "VolumeGiB": args.volume_gib,
+                "Ingress": ingress(args.scenario, args.allowed_cidr, args.ssh_access, args.https_access),
+                "KeyPairName": args.prefix}
+    if any(state[k] != value for k, value in expected.items()) or (args.ami_id and args.ami_id != state["ImageId"]):
+        raise ValueError("retry must keep the recorded account, role, hardware, AMI, disk and access settings")
+    if args.subnet_id != state["SubnetId"] and state["ApplyStatus"] != "capacity-unavailable":
+        raise ValueError("previous launch outcome is uncertain; retry the original subnet first with the same client token")
+    return state
+
+
+def check_ingress(group, state):
+    normalized = []
+    for permission in group["IpPermissions"]:
+        if permission.get("Ipv6Ranges") or permission.get("UserIdGroupPairs") or permission.get("PrefixListIds"):
+            raise ValueError("unexpected non-IPv4 ingress")
+        normalized.append({key: permission[key] for key in ["IpProtocol", "FromPort", "ToPort", "IpRanges"]})
+    if sorted(normalized, key=lambda rule: rule["FromPort"]) != state["Ingress"]:
+        raise ValueError("security-group ingress differs from the recorded plan")
+
+
+def check_owned(resource, state):
+    actual = {item["Key"]: item["Value"] for item in resource.get("Tags", [])}
+    if any(actual.get(item["Key"]) != item["Value"] for item in tags(state["Prefix"], state["Scenario"])):
+        raise ValueError("retry resource ownership tags differ from the journal")
+
+
+def retry_plan(aws, args, state):
+    check_identity(aws, args.account_id)
+    tokens = [state["ClientToken"], *[item["ClientToken"] for item in state.get("PreviousAttempts", [])]]
+    instances = {}
+    for query in (filters(**{"tag:ResourcePrefix": args.prefix}), [{"Name": "client-token", "Values": tokens}]):
+        found = aws.call("ec2", "describe-instances", filters=query)
+        instances.update({item["InstanceId"]: item for row in found["Reservations"] for item in row["Instances"]})
+    if len(instances) > 1:
+        raise ValueError("multiple instances match this journal; inspect them before any retry")
+    if instances:
+        instance = next(iter(instances.values()))
+        check_owned(instance, state)
+        if (instance.get("ClientToken") != state["ClientToken"] or instance.get("ImageId") != state["ImageId"]
+                or instance.get("InstanceType") != state["InstanceType"] or instance.get("SubnetId") != state["SubnetId"]):
+            raise ValueError("existing instance differs from the recorded launch; inspect before retrying")
+        return {**state, "RecoveredInstanceId": instance["InstanceId"], "Action": "recover existing instance; no launch"}
+    image = aws.call("ec2", "describe-images", image_ids=[state["ImageId"]])["Images"][0]
+    validate_image(image, state["Architecture"])
+    subnet = aws.call("ec2", "describe-subnets", subnet_ids=[args.subnet_id])["Subnets"][0]
+    if (subnet["State"] != "available" or subnet["VpcId"] != state["VpcId"]
+            or subnet["OwnerId"] != args.account_id or subnet["AvailableIpAddressCount"] < 1):
+        raise ValueError("retry needs an available subnet with free IPs in the recorded VPC/account")
+    check_offering(aws, state["InstanceType"], subnet["AvailabilityZone"])
+    tables = aws.call("ec2", "describe-route-tables", filters=filters(**{"association.subnet-id": args.subnet_id}))["RouteTables"]
+    if not tables:
+        tables = aws.call("ec2", "describe-route-tables", filters=filters(
+            **{"vpc-id": subnet["VpcId"], "association.main": "true"}))["RouteTables"]
+    if not any(route.get("DestinationCidrBlock") == "0.0.0.0/0" and route.get("GatewayId", "").startswith("igw-")
+               and route.get("State") == "active" for table in tables for route in table["Routes"]):
+        raise ValueError("retry subnet needs an active IPv4 internet-gateway route")
+    group = aws.call("ec2", "describe-security-groups", group_ids=[state["SecurityGroupId"]])["SecurityGroups"][0]
+    check_owned(group, state)
+    if group["VpcId"] != state["VpcId"] or group["GroupName"] != args.prefix:
+        raise ValueError("retry security group differs from the journal")
+    check_ingress(group, state)
+    key = aws.call("ec2", "describe-key-pairs", key_names=[state["KeyPairName"]], include_public_key=True)["KeyPairs"][0]
+    check_owned(key, state)
+    if key["PublicKey"].split()[:2] != args.public_key.read_text().split()[:2]:
+        raise ValueError("retry public key differs from the imported key; restore the original SSH_KEY")
+    return {**state, "SubnetId": args.subnet_id, "AvailabilityZone": subnet["AvailabilityZone"],
+            "Action": "retry instance launch; reuse security group and key pair"}
+
+
+def apply_retry(aws, args, state, proposal):
+    updated = {**proposal}
+    updated.pop("Action", None)
+    recovered = updated.pop("RecoveredInstanceId", None)
+    if recovered:
+        updated.update(InstanceId=recovered, ApplyStatus="complete")
+        update_state(args.state_file, updated)
+        print("Recovered existing instance:", recovered, "— run verify; no AWS resources changed.")
+        return
+    if proposal["SubnetId"] != state["SubnetId"]:
+        updated["PreviousAttempts"] = [*state.get("PreviousAttempts", []), {
+            "ClientToken": state["ClientToken"], "SubnetId": state["SubnetId"],
+            "AvailabilityZone": state["AvailabilityZone"], "ApplyStatus": state["ApplyStatus"]}]
+        updated["ClientToken"] = str(uuid.uuid4())
+    updated["ApplyStatus"] = "launch-requested"
+    update_state(args.state_file, updated)
+    launch_instance(aws, args, proposal, updated)
 
 
 def verify(aws, args):
@@ -313,13 +494,7 @@ def verify(aws, args):
     group_tags = {item["Key"]: item["Value"] for item in group.get("Tags", [])}
     if any(group_tags.get(item["Key"]) != item["Value"] for item in tags(state["Prefix"], state["Scenario"])):
         raise ValueError("security-group ownership/scenario tags do not match")
-    normalized = []
-    for permission in group["IpPermissions"]:
-        if permission.get("Ipv6Ranges") or permission.get("UserIdGroupPairs") or permission.get("PrefixListIds"):
-            raise ValueError("unexpected non-IPv4 ingress")
-        normalized.append({key: permission[key] for key in ["IpProtocol", "FromPort", "ToPort", "IpRanges"]})
-    if sorted(normalized, key=lambda rule: rule["FromPort"]) != state["Ingress"]:
-        raise ValueError("security-group ingress differs from the recorded plan")
+    check_ingress(group, state)
     interfaces = instance.get("NetworkInterfaces", [])
     if len(interfaces) != 1 or not interfaces[0].get("Attachment", {}).get("DeleteOnTermination"):
         raise ValueError("expected one network interface with deletion on termination")
@@ -340,11 +515,11 @@ def verify(aws, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["plan", "apply", "verify"], nargs="?", default="plan")
+    parser.add_argument("mode", choices=["plan", "apply", "verify", "capacity"], nargs="?", default="plan")
     parser.add_argument("--region", required=True)
     parser.add_argument("--account-id", required=True)
     parser.add_argument("--profile")
-    parser.add_argument("--state-file", type=Path, required=True)
+    parser.add_argument("--state-file", type=Path)
     parser.add_argument("--config", type=Path, help="JSON VM settings; explicit flags override its values")
     parser.add_argument("--scenario", choices=SCENARIOS)
     parser.add_argument("--inference", choices=["none", "cpu", "gpu"], help="hardware profile, not an application install")
@@ -369,6 +544,13 @@ def main():
     if access and (args.profile or os.environ.get("AWS_PROFILE") or os.environ.get("AWS_DEFAULT_PROFILE")):
         raise ValueError("do not mix exported AWS keys and a profile")
     aws = Aws(args.region, args.profile, False)
+    if args.mode == "capacity":
+        if not args.instance_type or not re.fullmatch(r"[a-z0-9]+\.[a-z0-9]+", args.instance_type) or not args.subnet_id:
+            raise ValueError("capacity needs --instance-type and --subnet-id")
+        print(json.dumps(capacity_report(aws, args), indent=2))
+        return
+    if not args.state_file:
+        parser.error("--state-file is required for plan/apply/verify")
     if args.mode == "verify":
         verify(aws, args)
         return
@@ -380,12 +562,19 @@ def main():
         raise ValueError("plan/apply need a scenario, --prefix, --subnet-id and --public-key")
     if not re.fullmatch(r"[a-z][a-z0-9-]{2,39}", args.prefix) or args.volume_gib < 50:
         raise ValueError("prefix must be 3-40 lowercase letters/digits/hyphens; disk must be at least 50 GiB")
-    if args.state_file.exists() or args.state_file.is_symlink():
-        raise ValueError("state file already exists; verify it or use a new path")
-    proposal = plan(aws, args)
+    with deployment_lock(args.state_file) if args.mode == "apply" else nullcontext():
+        execute_plan(aws, args)
+
+
+def execute_plan(aws, args):
+    state = retry_state(args) if args.state_file.exists() or args.state_file.is_symlink() else None
+    proposal = retry_plan(aws, args, state) if state else plan(aws, args)
     print(json.dumps(proposal, indent=2))
-    print("Plan: one on-demand VM, encrypted root disk, imported PUBLIC key and security group."
-          " Default security-group IPv4 egress is unrestricted. No IAM/SSM or application install.")
+    if state:
+        print("Recovery plan:", proposal["Action"], "— existing journal retained.")
+    else:
+        print("Plan: one on-demand VM, encrypted root disk, imported PUBLIC key and security group."
+              " Default security-group IPv4 egress is unrestricted. No IAM/SSM or application install.")
     if args.ssh_access == "public":
         print("Public SSH selected: anyone on the IPv4 Internet can reach port 22."
               " SSH authentication still applies.")
@@ -404,11 +593,18 @@ def main():
     if args.mode == "plan":
         print("Read-only plan complete: no AWS resource or local state file was changed.")
         return
-    confirmation = f"launch {args.account_id} {args.region} {args.prefix}"
-    if input("Billable resources. Type exactly '" + confirmation + "': ") != confirmation:
+    action = "recover" if proposal.get("RecoveredInstanceId") else "launch"
+    confirmation = f"{action} {args.account_id} {args.region} {args.prefix}"
+    notice = "Recover existing instance journal." if action == "recover" else "Billable instance launch."
+    if input(notice + " Type exactly '" + confirmation + "': ") != confirmation:
         raise ValueError("confirmation did not match; no changes made")
     aws.apply = True
-    apply_plan(aws, args, proposal)
+    if state:
+        # Repeat reconciliation after the operator has reviewed the plan.
+        proposal = retry_plan(aws, args, state)
+        apply_retry(aws, args, state, proposal)
+    else:
+        apply_plan(aws, args, proposal)
 
 
 if __name__ == "__main__":

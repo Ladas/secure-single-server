@@ -1,124 +1,106 @@
 # Real Qwen and optional cloud providers
 
-Start after [mock smoke testing](rhel-smoke.md). Commands use the workstation
-variables from [AWS deployment](aws.md): `ALL_IN_ONE_HOST`,
-`REMOTE_GATEWAY_HOST` and `SSH_KEY`.
+Complete [mock smoke tests](rhel-smoke.md) on the selected VM first. Run the
+commands below from the repository root on your workstation, using
+`RHEL_HOST`, `RHEL_SCENARIO`, `RHEL_INFERENCE` and `SSH_KEY` from
+[AWS verification](aws.md#4-select-one-vm-for-testing).
+
+Use `--profile valkey` on runner commands if that is the installed profile.
 
 ## 1. Install real Qwen
 
-**GPU all-in-one — run on the workstation:**
+**GPU only:** install the driver, reboot and verify recovery. Skip this block
+for CPU VMs.
 
 ```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --phase gpu-drivers
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --phase gpu-drivers
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --phase lifecycle
 ```
 
-Reboot and verify the driver setup with the existing smoke installation:
+**Both CPU and GPU:**
 
 ```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --phase lifecycle
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --phase real-setup --inference "$RHEL_INFERENCE"
 ```
 
-```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --phase real-setup --inference gpu
-```
-
-**CPU remote-gateway — run on the workstation:**
-
-```console
-python3 tests/rhel/run.py --host "$REMOTE_GATEWAY_HOST" --ssh-key "$SSH_KEY" \
-  --scenario remote-gateway --phase real-setup --inference cpu
-```
-
-Use `--profile valkey` on every command if you selected Valkey. Either VM can
-use either backend; GPU requires its driver/reboot steps. Downloads and CPU
-startup can take several minutes.
-
-`real-setup` removes the test mocks and synthetic cloud secrets, preserves
-TLS/JWT identity and Valkey data, and starts pinned Qwen3-8B as `qwen3-8b`.
-vLLM has no published host port. No cloud key or replacement VM is required.
-The [vLLM images and model revision](../../configs/vllm/images.env) are pinned.
+This removes mocks and synthetic cloud secrets, preserves TLS/JWT and Valkey
+data, and starts pinned Qwen3-8B as `qwen3-8b`. vLLM has no published host port.
+Downloads and CPU startup take several minutes. No cloud key is required.
+Qwen thinking is enabled. The [matrix](compatibility.md) separates current
+thinking-enabled results from older baselines and candidate-image experiments.
 
 ## 2. Test real inference
 
-Run API checks and the OpenCode file/test task:
+Start with the API checks and OpenCode file/test task:
 
 ```console
-python3 tests/rhel/run.py --host "$ALL_IN_ONE_HOST" --ssh-key "$SSH_KEY" \
-  --scenario all-in-one --phase real-test --harness opencode
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --phase real-test --harness opencode
 ```
 
-```console
-python3 tests/rhel/run.py --host "$REMOTE_GATEWAY_HOST" --ssh-key "$SSH_KEY" \
-  --scenario remote-gateway --phase real-test --harness opencode
-```
-
-To test reboot recovery, change `real-test` to `real-lifecycle`.
-Omit `--harness opencode` to run all three CLIs; see the
-[compatibility and test matrix](compatibility.md). Codex/Claude currently fail
-against the pinned real backend; mocks passing does not qualify those paths.
-Failures return nonzero. Logs and bundle hashes are saved in
-`.state/rhel-USER-HOST/`; detailed CLI logs are under
-`/var/lib/praxis-rhel-smoke/` on the VM.
+To test reboot recovery, change `real-test` to `real-lifecycle`. To test all
+three CLIs, omit `--harness opencode`. All three passed on GPU vLLM 0.30;
+CPU and protocol limits are recorded in the [compatibility matrix](compatibility.md).
+Every failure returns nonzero. Logs are under `.state/rhel-USER-HOST/` on your
+workstation and `/var/lib/praxis-rhel-smoke/` on the VM. Real-test JSON records
+the deployed image versions, parser/model settings and configuration hashes.
+CPU tests automatically allow 60 minutes per CLI; GPU allows 30 minutes.
+Result JSON includes elapsed times. See [limits and measured performance](compatibility.md#cpugpu-limits-and-measured-performance)
+before comparing the backends.
 
 ## 3. Add OpenAI to existing Praxis
 
-SSH to the chosen VM and run these commands as its administrator. Complete
-`real-setup` before entering real keys.
+To add either optional cloud provider after real setup, first connect as the
+administrator:
+
+```console
+ssh -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST"
+```
+
+For OpenAI, run on the VM (skip this block if adding only Anthropic):
 
 ```console
 cd ~/secure-single-server-deploy
 sudo scripts/common/providers enable openai
 ```
 
-Enter the key at the hidden prompt. It goes through the existing stdin-only
-Podman secret helper; it is never a command argument, config value or client
-credential. Qwen remains available. Choose the OpenAI model when
-[starting the harness](harnesses.md#openai).
+Enter the key at the hidden prompt. The helper stores it using the stdin-only
+Podman secret workflow; users never receive it. Qwen remains available.
 
 ## 4. Add Anthropic independently
 
-On the chosen VM:
+Optional; works with or without OpenAI. Use the administrator SSH connection
+above, even if you skipped the OpenAI enable command:
 
 ```console
 cd ~/secure-single-server-deploy
 sudo scripts/common/providers enable anthropic
-```
-
-This works with or without OpenAI enabled. Choose the Anthropic model when
-[starting the harness](harnesses.md#anthropic).
-
-```console
 sudo scripts/common/providers show
 sudo scripts/common/verify --host
 ```
 
-Repeat `enable` to rotate a key. Use `--secret NAME` to activate an existing
-versioned secret. Disable a route without deleting its saved secret:
-
-```console
-sudo scripts/common/providers disable openai
-```
-
-```console
-sudo scripts/common/providers disable anthropic
-```
-
-Provider changes retain TLS/JWT files and other provider settings. Changes
-restart Praxis: memory quotas reset; Valkey counters persist. Repeating an
-unchanged selection does not restart it. Modified or mismatched templates are
-rejected; failed activation restores the previous configuration.
+Repeat `enable` to rotate a key. To disable a route while retaining its secret,
+use `sudo scripts/common/providers disable openai` or `disable anthropic`.
+Changes preserve other providers and TLS/JWT settings. A service restart resets
+memory quotas; Valkey counters persist.
 
 ## 5. Start manual testing
 
-The service/provider commands above are administrator tasks. On all-in-one,
-[create a personal SSH login](../quickstarts/all-in-one/accounts.md), then log in as that ordinary user
-and follow [manual harness commands](harnesses.md). No sudo is needed to run a
-harness. Provider keys stay on the server; local clients use a placeholder and
-remote clients use a caller JWT. The same login can run the
-[optional OpenShell experiments](openshell-manual.md) after administrator setup.
+Exit any administrator SSH session first. Choose the guide for your scenario:
 
-For installation without the smoke runner, backend diagnostics or removal,
-see [vLLM administration](vllm.md).
+- **All-in-one:** use the `praxis-user` login created during AWS setup and follow
+  [user setup and harness commands](../quickstarts/all-in-one/users.md). If needed,
+  [create the account first](../quickstarts/all-in-one/accounts.md).
+- **Remote-gateway:** follow [workstation harness testing](harnesses.md#remote-gateway-client).
+
+Run the [file/test acceptance task](harnesses.md#acceptance-task) with each
+harness/provider. Provider keys stay in Praxis; users run without sudo.
+After the all-in-one baseline, optionally test [OpenShell](openshell-manual.md)
+using the same personal login.
+
+For installation without the runner, maintenance or removal, use
+[vLLM administration](vllm.md). For another VM, return to
+[AWS selection](aws.md#4-select-one-vm-for-testing) and repeat the tests.

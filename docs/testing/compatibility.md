@@ -1,160 +1,277 @@
 # Compatibility and test matrix
 
-Use this matrix to choose a working test path and locate remaining fixes.
-Results apply to the pinned versions and tested deployments below. The
-[debug plan](vllm-debugging.md) defines the API paths, CPU/GPU controls, PR #40
-image comparison, translation experiments and upstream fix candidates.
+Every acceptance path below includes Praxis. **Direct** means the harness runs
+under an ordinary OS account, outside OpenShell. **Bypass** means a diagnostic
+request to vLLM without Praxis; it is never an acceptance result.
 
-**Start with OpenCode → Praxis → real Qwen.** Codex → OpenAI and Claude Code →
-Anthropic are configured native-provider paths with passing mock tests; real
-cloud calls still need manual validation. Codex/Claude tool tasks against the
-pinned real vLLM backend are failing and are not qualified for use.
+- **Passed**: native CLI streaming, a tool task and tool-result continuation
+  passed. Real Qwen smoke also requires generated files and independent unittest
+  checks. This is functional smoke coverage, not general coding reliability.
+- **Failed**: the test ran and failed; the command returns nonzero.
+- **Not run**: no runtime result for that exact combination.
+- **Blocked**: a required launcher, sandbox image or provider adapter is missing.
 
-## Tested scope
+Start qualification with **OpenCode → Praxis → Qwen**. Real cloud calls
+remain untested; passing mocks do not qualify real OpenAI/Anthropic accounts.
 
-- All-in-one: AWS `g6.2xlarge`, NVIDIA L4, real GPU vLLM.
-- Remote-gateway: AWS `m7i.4xlarge`, real CPU vLLM, HTTPS/JWT access.
-- Both: RHEL 9.8 x86_64, Podman 5.8.2, enforcing SELinux, memory quotas.
-- Backend: vLLM 0.19.0 with Qwen3-8B. Exact image digests and model revision:
-  [backend pins](../../configs/vllm/images.env).
-- Native clients: Codex 0.157.1, OpenCode 1.18.32, Claude Code 2.1.283;
-  [CLI pins](../../tests/rhel/harness-versions.json).
+## Thinking mode
 
-CPU all-in-one and GPU remote-gateway are configurable alternatives; those
-reversed hardware/scenario combinations have not been qualified by this run.
+Mutable RHEL installs enable **Qwen thinking**. The all-in-one tables below
+qualify this setting. Remote-gateway and bootc results remain a separate
+**thinking disabled** baseline; their thinking-enabled qualification is pending.
+Mocks do not exercise model reasoning.
 
-## Harness and provider matrix
+The target is usable reasoning, final answers and tools in each harness's
+native API. It does not imply identical answers, context capacity or model
+quality across Qwen, OpenAI and Anthropic. OpenCode explicitly enables
+reasoning and preserves its separate field across tool turns; Codex and
+Claude use limits for the installed 16k context. A GPU OpenCode run emitted
+separate reasoning, text and tool events and passed the independent file tests.
+The basic API checks require final answer text, completion and token usage;
+reasoning alone cannot satisfy them.
 
-Every path in this table goes through Praxis. **Mock passed** means the native
-CLI completed a tool task against a synthetic backend, including credential
-handling and tool continuation. **Real smoke passed** means the real model
-created the specified files, ran unittest through a CLI tool and passed
-independent file/test checks. It does not establish general coding reliability.
+## Versions and deployments
 
-| Harness | Backend | Native API | Mock test on both VMs | Real-provider result |
-| --- | --- | --- | --- | --- |
-| OpenCode | Qwen/vLLM | Chat Completions | Passed | Smoke passed on GPU all-in-one and CPU remote-gateway |
-| Codex | Qwen/vLLM | Responses | Passed | Failed on both: streamed tool response does not complete |
-| Claude Code | Qwen/vLLM | Messages | Passed | Failed on both: backend rejects a system-role message |
-| Codex | OpenAI | Responses | Passed | Not tested with real credentials; intended native-provider path |
-| OpenCode | OpenAI | Chat Completions | Passed | Not tested with real credentials; intended native-provider path |
-| Claude Code | Anthropic | Messages | Passed | Not tested with real credentials; intended native-provider path |
-| OpenCode | Anthropic | Messages | Passed | Not tested with real credentials; intended native-provider path |
+The mutable AWS results use RHEL 9.8 x86_64, Podman 5.8.2, enforcing SELinux and
+memory quotas. GPU all-in-one uses `g6.2xlarge` (NVIDIA L4); CPU all-in-one
+and the recorded CPU remote-gateway use `m7i.4xlarge`. GPU remote-gateway
+has no results yet. [Deploy variants independently](aws.md#3-deploy-the-vms-you-need).
 
-Codex → Anthropic and Claude Code → OpenAI are not configured by this launcher.
-Praxis preserves the selected native API; this workflow supplies no translation
-between Responses, Chat Completions and Messages. A vLLM model must implement
-the particular API and tool behavior required by the client.
+Mutable RHEL vLLM is pinned to 0.30.0 with Qwen3-8B; CPU/GPU have
+[separate image digests](../../configs/vllm/images.env). Direct harness pins are
+Codex 0.157.1, OpenCode 1.18.32 and Claude Code 2.1.283
+([version file](../../tests/rhel/harness-versions.json)). Keep results for a new
+image, API translation mode, CLI pin or deployment separate from this baseline.
 
-## CPU and GPU results
+## All-in-one
 
-| Backend / scenario | Basic APIs through Praxis | OpenCode task through Praxis | Codex / Claude tasks through Praxis | Direct Codex / Claude control |
-| --- | --- | --- | --- | --- |
-| GPU / all-in-one | Passed | Passed | Both failed | Both failed |
-| CPU / remote-gateway | Passed | Passed | Both failed | Not yet run |
-| CPU / additional all-in-one | Not yet run | Not yet run | Not yet run | Not yet run |
+Both variants run Praxis and their selected CPU/GPU vLLM on the same host.
+OpenShell is a separate execution mode on that host after the direct baseline.
+**CPU remote-gateway results do not populate CPU all-in-one cells.**
 
-The direct GPU result does not substitute for the pending direct CPU control.
+### Direct harnesses as ordinary users: vLLM 0.30
 
-## Execution modes
+| Harness | Provider | GPU mock | GPU real | CPU mock | CPU real |
+| --- | --- | --- | --- | --- | --- |
+| OpenCode | Qwen/vLLM | Passed | Passed | Passed | Passed |
+| Codex | Qwen/vLLM | Passed | Passed | Passed | Failed: tool-policy/task loops with corrected settings |
+| Claude Code | Qwen/vLLM | Passed | Passed | Passed | Passed |
+| Codex | OpenAI | Passed | Not run | Passed | Not run |
+| OpenCode | OpenAI | Passed | Not run | Passed | Not run |
+| Claude Code | Anthropic | Passed | Not run | Passed | Not run |
+| OpenCode | Anthropic | Passed | Not run | Passed | Not run |
+| OpenClaw | Qwen/OpenAI/Anthropic | Blocked | Blocked | Blocked | Blocked |
 
-Native tests and sandbox tests are separate acceptance results. All inference
-acceptance goes through Praxis; direct vLLM calls are only diagnostic controls.
+OpenClaw has no direct launcher/test in this workflow; its first integration
+will use OpenShell. Codex → Anthropic and Claude → OpenAI are not configured.
+Codex uses Responses, OpenCode uses Chat Completions (Messages for Anthropic),
+and Claude uses Messages. Current routes forward the native API without translation.
 
-| Harness | Ordinary host account | OpenShell sandbox through Praxis |
+All six basic JSON/SSE API checks passed on both backends. GPU Codex passed
+three consecutive file/test tasks, including one after a host reboot, and reports
+reasoning-token usage; OpenCode emits separate reasoning events; Claude emits
+thinking, tool-use, tool-result and final-text blocks. These are native API
+results through Praxis, with no translation filters. Single smoke passes do
+not establish general model reliability or qualify OpenShell. A stricter GPU
+Responses capture and private backend replay found that streamed tool IDs differ
+from the final response's IDs, even though each tool's arguments match and Codex
+completes its task. Track
+that protocol gap separately from CLI smoke success.
+
+### Earlier vLLM 0.19 comparison
+
+The same Praxis image/model with thinking enabled produced these results:
+
+| Harness | GPU real Qwen | CPU real Qwen |
 | --- | --- | --- |
-| OpenCode | Mock Qwen/OpenAI/Anthropic passed; real Qwen CPU/GPU passed | Real Qwen CPU/GPU passed on **bootc**. Mutable AWS route/config tests pass; live sandbox/tool acceptance remains pending. OpenAI/Anthropic sandbox mocks remain pending. |
-| Codex | Mock Qwen/OpenAI passed; real Qwen fails as described above | Standalone image/recipe exists; Praxis adapter is not implemented (`--config` rejects it). No integrated inference result. |
-| Claude Code | Mock Qwen/Anthropic passed; real Qwen fails as described above | No pinned sandbox image/recipe or integrated inference result. |
-| OpenClaw | No native launcher/test in this workflow | Standalone image/recipe exists; Praxis adapter is not implemented (`--config` rejects it). No integrated inference result. |
+| OpenCode | Passed | Passed |
+| Codex | Failed: malformed tool arguments / reasoning continuation | Failed: malformed tool arguments / reasoning continuation |
+| Claude Code | Failed: system role | Failed: system role |
 
-[PR #6's bootc evidence](../../bootc/VLLM-VALIDATION.md) covers OpenCode 1.18.31
-streaming, a real tool-created file with independent readback, and explicit
-network denials on CPU/GPU. Its images, network layout, model route and task
-differ from this mutable RHEL runner, so it cannot qualify that runner's
-OpenShell path. The mutable optional mock phase currently checks a sandbox API
-call and controlled policy denial, rather than a native CLI tool task.
+The [previous pins](https://github.com/redhat-et/secure-single-server/blob/36690004af49955937e905339b1830617282a9e1/configs/vllm/images.env)
+and private baseline evidence are retained for comparison. Moving to 0.30 also
+exposed Claude's oversized default output request; the launcher correction was
+then tested on CPU and GPU. No Praxis image or API translation change was needed.
 
-OpenClaw is included in the target matrix, starting with OpenShell. Its existing
-build/schema/recipe tests do not establish provider compatibility. This is a
-test-scope choice, not a requirement that OpenClaw can only run in OpenShell.
-Future results must record harness, execution mode, provider/API, CPU/GPU,
-scenario, image/CLI pins, tool continuation, usage and network-denial checks.
+### CPU/GPU limits and measured performance
 
-## Account boundaries
+These are Qwen3-8B lab settings, with thinking enabled on both backends. The
+launcher configures context limits explicitly; cloud-model defaults do not
+apply to this smaller backend.
 
-The administrator installs services and manages upstream secrets. The native
-runner creates `praxis-smoke`, installs CLIs in its home and executes them using
-that ordinary account; it checks that service configuration is unreadable.
-[Manual setup](../quickstarts/all-in-one/accounts.md) creates a separate SSH login without granting sudo
-or service groups. Local users share the gateway's configured quota pool.
+| Setting or observation | All-in-one CPU | All-in-one GPU |
+| --- | --- | --- |
+| AWS host | `m7i.4xlarge`, 16 vCPU / 64 GiB | `g6.2xlarge`, NVIDIA L4 / 32 GiB |
+| Model precision / server context | BF16 / 16,384 tokens | BF16 / 16,384 tokens |
+| Concurrent inference requests | 1; additional requests queue | 1; additional requests queue |
+| OpenCode / Claude output budget | 4096 tokens, including thinking | 4096 tokens, including thinking |
+| Codex context / auto-compaction threshold | 16,384 / 12,288 tokens | 16,384 / 12,288 tokens |
+| Codex output budget | Remaining server context; pinned CLI exposes no separate output-cap setting | Same |
+| Automated real CLI deadline | 60 minutes per harness | 30 minutes per harness |
+| Observed vLLM 0.30 generation rate | About 3 tokens/s | About 15 tokens/s |
+| Approximate time to generate the full 4096-token budget at that rate | 23 minutes, before other overhead | 4.5 minutes, before other overhead |
+| Recorded OpenCode file/test task with the final launcher | 12.6 minutes | 1.7 minutes |
+| Recorded Claude file/test task, seven CLI turns | 10.2 minutes | 2.4 minutes |
+| Consequence for manual use | Expect minutes per tool task; prefer GPU for interactive work | Faster, but still limited by this model and context size |
 
-Remote-gateway automation runs its native CLIs as an ordinary user on the VM
-against HTTPS/JWT, plus a public TLS/JWT probe from the workstation. Full native
-CLI runs from an external client are a separate [manual check](harnesses.md).
+Rates are observed single-request server samples, not sustained benchmarks or
+latency guarantees. They exclude prompt processing, tool execution and queueing.
+Durations are complete native runs of the same task, one sample per backend
+and harness. Reasoning length and model decisions vary, so these are not pure
+hardware comparisons. Both OpenCode runs used the final launcher and passed
+file creation, native unittest execution and independent checks.
+CPU Codex first timed out at 30 minutes with fallback client settings. With
+corrected context settings, it repeatedly requested forbidden escalation.
+A separate instruction experiment avoided that request but called an
+unadvertised tool and repeatedly ran an empty test suite. Both diagnostic loops
+were stopped and recorded as failures, not deadline expirations. They do not
+establish a CPU-specific protocol defect; see the [debug plan](vllm-debugging.md#cpu-codex-task-failures).
 
-OpenShell uses the locked `openshell-svc` service owner. Ordinary users can
-register the loopback client and enter sandboxes without sudo, but the current
-management API trusts all local users. This remains a trusted-host experiment,
-not per-user sandbox ownership or workspace isolation. See the
+The runner detects CPU/GPU from the installed backend and records its deadline, client
+limits, API-check duration and each harness's elapsed time in result JSON.
+Timeouts remain failures, and thinking is never disabled to meet a deadline.
+Mocks retain a three-minute deadline per harness.
+
+### OpenShell harnesses on the same host
+
+These are **mutable AWS RHEL** results. A passing direct-host test, recipe
+rendering test or Ready sandbox cannot populate a sandbox tool-test cell.
+
+| Harness | Provider | GPU mock | GPU real | CPU mock | CPU real |
+| --- | --- | --- | --- | --- | --- |
+| OpenCode | Qwen/vLLM | Not run | Not run | Not run | Not run |
+| OpenCode | OpenAI | Not run | Not run | Not run | Not run |
+| OpenCode | Anthropic | Blocked | Blocked | Blocked | Blocked |
+| Codex | Qwen/vLLM | Blocked | Blocked | Blocked | Blocked |
+| Codex | OpenAI | Blocked | Blocked | Blocked | Blocked |
+| Claude Code | Qwen/Anthropic | Blocked | Blocked | Blocked | Blocked |
+| OpenClaw | Qwen/OpenAI/Anthropic | Blocked | Blocked | Blocked | Blocked |
+
+OpenCode's Qwen/OpenAI config rendering passes offline tests. The mutable Qwen
+route is `/vllm/v1`; the cloud route is `/v1`. The Anthropic sandbox adapter is
+missing. Codex and OpenClaw have standalone images/recipes but reject Praxis
+`--config`; those adapters are missing. Claude needs a pinned image and recipe.
+
+The optional `--phase openshell` currently checks a sandbox API request and
+controlled policy denial. It does **not** run the native CLI file/test task and
+cannot produce a Passed cell above. Use the
+[manual sandbox guide](openshell-manual.md) for the current experiment.
+
+### Separate bootc OpenShell evidence
+
+| Deployment | Harness/provider through Praxis | Real CPU | Real GPU | Evidence scope |
+| --- | --- | --- | --- | --- |
+| Bootc all-in-one | OpenCode / Qwen | Passed | Passed | Streaming, tool-created file with independent readback, explicit network denials and lifecycle checks |
+
+[Bootc evidence](../../bootc/VLLM-VALIDATION.md), also with thinking disabled, uses OpenCode 1.18.31, different
+OS/service images, networking, model route and tool task. It is useful for the
+mutable-host qualification method but does not qualify that deployment.
+Bootc image/recipe checks for Codex/OpenClaw do not establish Praxis inference.
+No Claude or real cloud-provider sandbox pass is recorded here.
+
+## Remote-gateway
+
+The gateway serves HTTPS/JWT. Recorded **CPU gateway VM** results use vLLM 0.19
+with thinking disabled. Neither remote-gateway variant has been qualified
+with the current vLLM 0.30/thinking-enabled defaults.
+Harnesses normally run on separate client machines. Existing automation runs
+ordinary-user CLIs on the gateway VM against loopback HTTPS/JWT and separately
+probes public TLS/JWT from the workstation. This qualifies the installed CPU
+backend/native API path, not a full external-client CLI session.
+
+### Direct harness tests on the CPU gateway VM: vLLM 0.19 baseline
+
+| Harness | Provider | Mock through HTTPS/JWT | Real through HTTPS/JWT |
+| --- | --- | --- | --- |
+| OpenCode | Qwen/vLLM | Passed | Passed |
+| Codex | Qwen/vLLM | Passed | Failed: tool stream |
+| Claude Code | Qwen/vLLM | Passed | Failed: system role |
+| Codex | OpenAI | Passed | Not run |
+| OpenCode | OpenAI | Passed | Not run |
+| Claude Code | Anthropic | Passed | Not run |
+| OpenCode | Anthropic | Passed | Not run |
+| OpenClaw | Qwen/OpenAI/Anthropic | Blocked: no launcher | Blocked: no launcher |
+
+### External clients, direct and OpenShell
+
+| Client execution | Harnesses | Mock | Real | Remaining work |
+| --- | --- | --- | --- | --- |
+| Ordinary workstation account | OpenCode, Codex, Claude on the provider paths above | Not run | Not run | Run the full CLI task with the public URL, trusted CA and caller JWT |
+| Ordinary workstation account | OpenClaw | Blocked | Blocked | Implement a client adapter |
+| OpenShell on a separate client host | OpenCode, Codex, Claude, OpenClaw | Blocked | Blocked | Add HTTPS/CA/JWT adapters and gateway egress policy, plus each missing harness recipe/provider integration |
+
+Public TLS/JWT probes passed: a valid caller was accepted and an invalid caller
+rejected. These were API probes, not external CLI tool tasks. Follow the
+[remote manual commands](harnesses.md#remote-gateway-client). OpenShell belongs on
+the client in this scenario; do not install it on remote-gateway to stand in
+for an external sandbox test. Current OpenShell recipes target local all-in-one.
+
+## External-provider-only VMs
+
+The `all-in-one-cloud` and `remote-gateway-cloud` AWS presets install no local
+vLLM. Fresh runtime qualification of those deployments is **Not run**, for both
+direct and OpenShell clients. Earlier OpenAI/Anthropic mock passes above verify
+the provider routes on the recorded hosts; real cloud accounts remain untested.
+
+## Backend diagnostics and fix ownership
+
+| Backend/scenario | Basic JSON/SSE APIs through Praxis | Codex bypass control | Claude bypass control |
+| --- | --- | --- | --- |
+| GPU all-in-one, vLLM 0.19, thinking on | All six checks passed | Captured stream has concatenated tool arguments; continuation rejected | Captured CLI request rejected |
+| CPU all-in-one, vLLM 0.19, thinking on | All six checks passed | Reduced reasoning continuation rejected | Captured CLI request rejected |
+| CPU remote-gateway, vLLM 0.19, thinking off | All six checks passed | Not run | Not run |
+| GPU all-in-one, vLLM 0.30, thinking on | All six checks passed | Valid per-tool arguments, but streamed/final IDs differ | Native CLI passes; no failure to replay |
+
+With vLLM 0.19, both backends reproduce validation failures without Praxis. Claude controls
+replay captured CLI requests. Codex uses a captured GPU continuation and a
+reduced CPU reasoning item without `id`. Replaying the GPU first request also
+reproduces malformed tool argument aggregation without Praxis. These controls
+locate failures; they do not qualify full harness behavior. Earlier GPU
+thinking-disabled controls also failed. Basic text APIs exercise less than a
+native tool task.
+
+| Failure | Observed evidence | Next investigation |
+| --- | --- | --- |
+| Codex/vLLM 0.19, thinking on | CPU/GPU CLIs report malformed tool arguments, then HTTP 400 for a reasoning continuation missing `id`; GPU bypass reproduces concatenation of arguments from multiple calls | Upgrade backend; vLLM 0.30 native GPU tasks pass. CPU tool-policy behavior is a separate investigation |
+| Codex/vLLM 0.19, thinking off | Earlier Responses stream disconnects; traceback constructs `ResponseFunctionToolCallItem(arguments=None)` | Keep this first-tool-delta regression separate from thinking-enabled continuation failures |
+| Claude/vLLM 0.19 | HTTP 400 rejects `messages[1].role=system`; basic top-level system requests pass | Upgrade backend and correct the client's output budget; vLLM 0.30 tasks pass on CPU/GPU |
+| CPU Codex/Qwen | Corrected settings still produce tool-policy/task loops; explicit permission guidance alone did not fix the task | Compare the same captured request and client tool schema on CPU/GPU; qualify model/client guidance without loosening permissions |
+| Codex/vLLM 0.30 | GPU CLI passes, but direct replay changes tool IDs between streamed items and the completed response | Reuse streamed items in vLLM's final response builder; retain a stable-ID regression |
+| OpenCode/model quality | Explicit smoke passed; earlier open-ended tasks made errors or looped | Keep transport success separate from model/prompt quality |
+
+The [debug plan](vllm-debugging.md) contains source findings, upstream links,
+controlled configuration/image comparisons and acceptance requirements.
+
+## Host and policy checks
+
+| Check | Recorded result |
+| --- | --- |
+| AWS/RHEL installation, native mocks, provider additions | Passed on CPU/GPU all-in-one and the earlier CPU remote-gateway with memory quotas |
+| Mock reboot recovery | Passed on both current all-in-one hosts; GPU also recovered after the driver/kernel update |
+| Real vLLM 0.30 reboot recovery | Passed on GPU: all six basic API checks and native Codex task; CPU not run |
+| Mock removal | Passed on CPU/GPU all-in-one: no mock service, fixture files, synthetic cloud secrets or published vLLM port |
+| Ordinary user | CPU/GPU smoke CLIs use `praxis-smoke`; personal `praxis-user` SSH login and pinned CLI installation passed on both hosts, with no sudo or service-file access |
+| Valkey | Provider container tests passed for both roles; fresh RHEL lifecycle remains untested |
+| OpenShell CPU/memory limits | Defaults/overrides pass offline checks; effective runtime limits on these AWS hosts remain unverified |
+| OpenShell kernel/dev-server behavior | `bootc/test-kernel` exists; no runtime result for this AWS pair |
+
+The administrator manages services and upstream secrets. Local direct users
+share the gateway's quota pool. OpenShell's current loopback management API
+trusts local users; ordinary login does not establish private sandbox ownership.
+See [account setup](../quickstarts/all-in-one/accounts.md) and the
 [OpenShell boundary](../../openshell/docs/threat-model.md).
 
-## What bypassing Praxis proves
+## Run and record the next results
 
-The normal path is `CLI → Praxis → vLLM → Qwen`. The diagnostic path was
-`CLI → vLLM → Qwen`, using the same GPU backend and pinned CLI versions.
-Codex and Claude still failed. These failures therefore do not require Praxis
-to occur; they are not evidence that Praxis lacks the corresponding API.
+Use [mock smoke tests](rhel-smoke.md), then [real-provider tests](rhel-real.md).
+Begin new real qualification with `--harness opencode`; then test Codex and
+Claude against the matching backend's recorded results. Do not count failures as expected passes.
 
-Praxis routing and native tool transport passed with mocks. Real Qwen also
-passed basic text requests through Responses, Chat Completions and Messages,
-with both JSON and streaming responses. Full CLI tool requests exercise more
-of the backend API and expose failures that those basic requests do not.
+For each new result record scenario, CPU/GPU, execution location, harness,
+provider/API, thinking mode, mock or real backend, exact pins, streamed tool/continuation
+result, independent generated-test result and evidence path. Keep translated
+and native API modes separate. Add results only to their matching table cells.
 
-The direct result narrows the problem to the pinned backend/client combination.
-It does not declare every vLLM version incompatible with these harnesses, or
-prove that every possible request through Praxis is correct.
-
-## Fix locations and acceptance
-
-| Failure or gap | Evidence | Where to investigate or change |
-| --- | --- | --- |
-| Codex → vLLM tool streaming | Through-Praxis failure on CPU/GPU; direct failure on GPU. CPU traceback constructs `ResponseFunctionToolCallItem` with `arguments=None` in `responses/serving.py::_process_simple_streaming_events`. | Start with vLLM's Responses streaming implementation. Reduce to a minimal streamed function-call request; fix upstream or select a verified compatible backend/client pin, then update this repository's pins. |
-| Claude Code → vLLM Messages | Through-Praxis failure on CPU/GPU and the same HTTP 400 directly on GPU: `body.messages[1].role=system`, expected `user`/`assistant`. Basic Messages requests with top-level `system` pass. | Inspect the native CLI request and vLLM's Messages validation/conversion. Determine whether the change belongs in vLLM, the CLI integration or its pin; direct reproduction alone does not identify which creates the invalid role. |
-| Broader OpenCode/Qwen coding reliability | Explicit smoke passes; open-ended attempts also produced incorrect tests or repeated edits. | Evaluate the model, prompt and tool behavior separately. Keep smoke permission instructions accurate and retain normal interactive approvals. Do not treat a model mistake as a proxy transport failure. |
-| Real OpenAI/Anthropic acceptance | Native mock paths pass; no real cloud credentials used. | Run the manual provider/harness combinations above with chosen accessible models. There is no demonstrated cloud-provider defect to fix yet. |
-
-For any candidate Codex/Claude fix, require successful streamed tool calls,
-tool-result continuation, final usage, and independently passing generated
-tests on CPU and GPU through Praxis. Compare directly with the backend first.
-A failure that passes directly but fails through Praxis then needs a proxy or
-gateway-configuration investigation. No cloud fallback should hide a Qwen error.
-
-## Deployment and test coverage
-
-| Check | Result and boundary |
-| --- | --- |
-| AWS provisioning and RHEL installation | Passed for the two tested hardware/scenario combinations |
-| Native mocks and independent provider additions | Passed on both RHEL VMs with memory quotas |
-| Real Qwen basic API contracts | All six JSON/streaming checks passed on both VMs |
-| Remote public TLS/JWT | Valid caller accepted; invalid caller rejected |
-| Transition from mocks to real Qwen | Passed; mock service, fixture files and synthetic cloud secrets removed; no vLLM host port |
-| Valkey provider configurations | Container tests passed for both scenarios; fresh RHEL lifecycle acceptance remains untested |
-| OpenShell with Praxis | Bootc OpenCode/Qwen CPU/GPU passed; mutable AWS sandbox/tool qualification pending |
-| OpenClaw | Standalone build/recipe contracts only; integrated Praxis adapter and runtime acceptance pending |
-| Sandbox CPU/memory limits | Merged create helper passes 2 CPUs/4 GiB by default; defaults/overrides pass offline checks. Effective runtime limits on these AWS VMs remain unverified. |
-| Kernel/sandbox dev-server behavior | Merged `bootc/test-kernel` records Landlock/kernel/seccomp behavior. No result recorded for this AWS pair; bootc's prior inference pass does not qualify socket write-back or dev-server workloads. |
-
-## Run the checks
-
-Use [mock smoke testing](rhel-smoke.md), then [real-provider testing](rhel-real.md).
-The real test runs basic API checks plus the selected harness. Use
-`--harness opencode` for the passing smoke path; select `codex` or `claude` to
-reproduce a known failure, or omit the selector to run all three. Failures
-remain nonzero; they are not counted as expected passes.
-
-Use [manual harness commands](harnesses.md) for real cloud providers and broader
-model tasks. Workstation logs and source hashes are in `.state/rhel-USER-HOST/`;
-VM CLI logs and result JSON are in `/var/lib/praxis-rhel-smoke/`. Direct diagnostic
-logs are `direct-codex.log` and `direct-claude.log` on the GPU VM. These private
-run artifacts are not committed documentation.
+Workstation logs and source hashes live in `.state/rhel-USER-HOST/`; VM CLI logs
+and result JSON live in `/var/lib/praxis-rhel-smoke/`. GPU bypass evidence is in
+private baseline archives and captured-request directories. Private artifacts stay out of Git.

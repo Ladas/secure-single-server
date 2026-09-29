@@ -32,7 +32,7 @@ aws_test_credentials() {
   set +x
   set +a
   local test_access='' test_secret='' test_token=''
-  unset AWS_TEST_CREDENTIALS AWS_TEST_READY AWS_TEST_PLAN_INPUTS RHEL_HOST ALL_IN_ONE_HOST REMOTE_GATEWAY_HOST REMOTE_HOST OPENSHELL_HOST
+  unset AWS_TEST_CREDENTIALS AWS_TEST_READY AWS_TEST_PLAN_INPUTS RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE ALL_IN_ONE_HOST REMOTE_GATEWAY_HOST REMOTE_HOST OPENSHELL_HOST
   unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
   _aws_test_prompt test_access 'AWS access key ID' || return 1
   if [ -z "$test_access" ]; then
@@ -66,7 +66,7 @@ _aws_test_identity_ready() {
 
 aws_test_discover() {
   local test_tool test_identity test_principal test_subnets test_ip test_subnet test_cidr
-  unset AWS_TEST_READY AWS_TEST_PLAN_INPUTS ACCOUNT RHEL_HOST ALL_IN_ONE_HOST REMOTE_GATEWAY_HOST REMOTE_HOST OPENSHELL_HOST
+  unset AWS_TEST_READY AWS_TEST_PLAN_INPUTS ACCOUNT RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE ALL_IN_ONE_HOST REMOTE_GATEWAY_HOST REMOTE_HOST OPENSHELL_HOST
   _aws_test_identity_ready || return 1
   for test_tool in aws python3 jq curl ssh ssh-keygen; do
     command -v "$test_tool" >/dev/null 2>&1 || {
@@ -208,9 +208,19 @@ aws_test_plan() {
   _aws_test_launch plan "$@"
 }
 
+aws_test_capacity() {
+  _aws_test_identity_ready || return 1
+  if [ "$#" -ne 1 ] || [ -z "${ACCOUNT:-}" ] || [ -z "${SUBNET:-}" ]; then
+    _aws_test_error 'Run discovery, then aws_test_capacity INSTANCE_TYPE (for example g6.2xlarge).'
+    return 1
+  fi
+  _aws_test_vm capacity --region "$REGION" --account-id "$ACCOUNT" \
+    --instance-type "$1" --subnet-id "$SUBNET" || return 1
+}
+
 aws_test_deploy() {
   # apply re-plans the current inputs and requires typed confirmation itself.
-  # Existing journals/prefixes are refused by rhel-vm, including partial launches.
+  # rhel-vm reconciles retryable launch journals; completed/unrelated launches are refused.
   _aws_test_launch apply "$@"
 }
 
@@ -220,8 +230,8 @@ aws_test_apply() {
 }
 
 aws_test_verify() {
-  local test_name=${1:-} test_info test_ip
-  unset RHEL_HOST
+  local test_name=${1:-} test_info test_ip test_scenario test_inference
+  unset RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE
   _aws_test_identity_ready || return 1
   _aws_test_name "$test_name" || return 1
   if [ "$#" -ne 1 ]; then _aws_test_error 'Verify takes exactly one VM name.'; return 1; fi
@@ -233,9 +243,14 @@ aws_test_verify() {
     _aws_test_error "$test_name must be running with a public IP; wait and rerun verify."
     return 1
   }
+  test_scenario=$(printf '%s' "$test_info" | jq -er '.Scenario | select(. == "all-in-one" or . == "remote-gateway" or . == "openshell-praxis")') || return 1
+  test_inference=$(printf '%s' "$test_info" | jq -er '.Inference | select(. == "cpu" or . == "gpu" or . == "none")') || return 1
   RHEL_HOST="ec2-user@$test_ip"
+  RHEL_SCENARIO="$test_scenario"
+  RHEL_INFERENCE="$test_inference"
   printf '%s login: %s\nJournal: %s/.state/%s-%s.json\nSSH key: %s\n' \
     "$test_name" "$RHEL_HOST" "$AWS_TEST_REPO" "$RUN_PREFIX" "$test_name" "${SSH_KEY:-not set}"
+  printf 'Selected for testing: %s / %s inference (RHEL_HOST, RHEL_SCENARIO, RHEL_INFERENCE).\n' "$RHEL_SCENARIO" "$RHEL_INFERENCE"
 }
 
 aws_test_ssh() {

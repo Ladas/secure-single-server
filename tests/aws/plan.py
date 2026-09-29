@@ -20,6 +20,47 @@ loader.exec_module(vm)
 
 
 class PlanTest(unittest.TestCase):
+    def test_capacity_report_lists_only_public_subnets_without_claiming_free_instances(self):
+        aws = vm.Aws("eu-central-1", None, False)
+        args = SimpleNamespace(account_id="123456789012", instance_type="g6.2xlarge", subnet_id="subnet-a")
+        def subnet(name, zone, count=10):
+            return {"SubnetId": name, "VpcId": "vpc-test", "AvailabilityZone": zone,
+                    "AvailableIpAddressCount": count, "State": "available", "OwnerId": args.account_id}
+        route = {"DestinationCidrBlock": "0.0.0.0/0", "GatewayId": "igw-test", "State": "active"}
+        replies = [
+            {"Account": args.account_id, "Arn": "arn:aws:iam::123456789012:user/test"},
+            {"Subnets": [subnet("subnet-a", "eu-central-1a")]},
+            {"InstanceTypeOfferings": [{"Location": "eu-central-1a"}, {"Location": "eu-central-1b"}]},
+            {"Subnets": [subnet("subnet-a", "eu-central-1a"), subnet("subnet-b", "eu-central-1b"),
+                         subnet("subnet-private", "eu-central-1b"), subnet("subnet-full", "eu-central-1b", 0),
+                         subnet("subnet-unsupported", "eu-central-1c")]},
+            {"RouteTables": [{"Associations": [{"Main": True}], "Routes": [route]},
+                             {"Associations": [{"SubnetId": "subnet-private"}], "Routes": []}]}]
+        with patch.object(aws, "call", side_effect=replies) as calls:
+            report = vm.capacity_report(aws, args)
+        self.assertEqual(report["SpareInstanceCapacity"], "unknown")
+        self.assertEqual([s["SubnetId"] for s in report["PublicSubnetCandidates"]], ["subnet-a", "subnet-b"])
+        self.assertEqual(report["SelectedAvailabilityZone"], "eu-central-1a")
+        self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
+    def test_capacity_command_needs_no_journal_or_launch_settings(self):
+        argv = ["rhel-vm", "capacity", "--region", "eu-central-1", "--account-id", "123456789012",
+                "--instance-type", "g6.2xlarge", "--subnet-id", "subnet-a"]
+        with patch.object(vm.sys, "argv", argv), patch.object(vm, "capacity_report", return_value={}) as report, \
+                patch.object(vm, "apply_plan") as apply, contextlib.redirect_stdout(io.StringIO()):
+            vm.main()
+        report.assert_called_once()
+        self.assertFalse(report.call_args.args[0].apply)
+        apply.assert_not_called()
+
+    def test_capacity_error_is_not_reported_as_bad_credentials(self):
+        aws = vm.Aws("eu-central-1", None, True)
+        error = SimpleNamespace(returncode=1, stderr="An error occurred (InsufficientInstanceCapacity): details", stdout="")
+        with patch.object(vm.subprocess, "run", return_value=error):
+            with self.assertRaisesRegex(ValueError, "capacity.*Availability Zone") as caught:
+                aws.call("ec2", "run-instances")
+        self.assertNotIn("credentials", str(caught.exception))
+
     def test_complete_plans_cover_each_scenario_and_hardware_profile(self):
         with tempfile.TemporaryDirectory() as directory:
             key = Path(directory) / "test.pub"
@@ -137,9 +178,145 @@ class PlanTest(unittest.TestCase):
                     "--prefix", "test-qwen", "--subnet-id", "subnet-test", "--public-key", "missing.pub",
                     "--allowed-cidr", "192.0.2.1/32"]
             with patch.object(vm.sys, "argv", argv), patch.object(vm.Aws, "call") as calls:
-                with self.assertRaisesRegex(ValueError, "state file already exists"):
+                with self.assertRaisesRegex(ValueError, "incomplete journal"):
                     vm.main()
                 calls.assert_not_called()
+
+    def test_retry_apply_reuses_resources_and_client_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, proposal, aws = self.apply_inputs(directory)
+            proposal.update(Prefix=args.prefix, Scenario=args.scenario, SubnetId=args.subnet_id,
+                            VolumeGiB=args.volume_gib, AvailabilityZone="eu-central-1a")
+            state = {**proposal, "ClientToken": "original-token", "SecurityGroupId": "sg-original",
+                     "KeyPairName": args.prefix, "ApplyStatus": "launch-requested"}
+            vm.save_state(args.state_file, state)
+            with patch.object(aws, "call", return_value={"Instances": [{"InstanceId": "i-retry"}]}) as calls, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                vm.apply_retry(aws, args, state, state)
+            self.assertEqual([call.args[1] for call in calls.call_args_list], ["run-instances"])
+            self.assertEqual(calls.call_args.kwargs["client_token"], "original-token")
+            self.assertEqual(calls.call_args.kwargs["network_interfaces"][0]["Groups"], ["sg-original"])
+            self.assertEqual(json.loads(args.state_file.read_text())["InstanceId"], "i-retry")
+
+    def retry_inputs(self, directory):
+        args = self.settings(config=ROOT / "configs/aws/vllm-gpu.json", scenario="all-in-one",
+            account_id="123456789012", region="eu-central-1", prefix="test-gpu", subnet_id="subnet-a",
+            allowed_cidr="192.0.2.1/32", public_key=Path(directory) / "test.pub", state_file=Path(directory) / "retry.json")
+        vm.configure(args)
+        args.public_key.write_text("ssh-ed25519 fixture-public-key\n")
+        state = {"AccountId": args.account_id, "Region": args.region, "Prefix": args.prefix,
+            "Scenario": args.scenario, "Inference": args.inference, "InstanceType": args.instance_type,
+            "Architecture": "x86_64", "VolumeGiB": args.volume_gib, "ImageId": "ami-aaaa",
+            "RootDeviceName": "/dev/sda1", "SubnetId": args.subnet_id, "VpcId": "vpc-test", "AvailabilityZone": "eu-central-1a",
+            "Ingress": vm.ingress(args.scenario, args.allowed_cidr), "ClientToken": "original-token",
+            "SecurityGroupId": "sg-test", "KeyPairName": args.prefix, "ApplyStatus": "launch-requested"}
+        vm.save_state(args.state_file, state)
+        owned = vm.tags(args.prefix, args.scenario)
+        replies = {
+            "get-caller-identity": {"Account": args.account_id, "Arn": "arn:aws:iam::123456789012:user/test"},
+            "describe-instances": {"Reservations": []},
+            "describe-images": {"Images": [{"ImageId": state["ImageId"], "OwnerId": vm.OWNER, "Architecture": "x86_64",
+                "State": "available", "RootDeviceType": "ebs", "RootDeviceName": "/dev/sda1",
+                "Name": "RHEL-9.8_HVM-test-x86_64-0-Hourly2-GP3", "BlockDeviceMappings": [{"DeviceName": "/dev/sda1", "Ebs": {}}]}]},
+            "describe-subnets": {"Subnets": [{"SubnetId": args.subnet_id, "VpcId": "vpc-test", "OwnerId": args.account_id,
+                "AvailabilityZone": "eu-central-1a", "AvailableIpAddressCount": 10, "State": "available"}]},
+            "describe-instance-type-offerings": {"InstanceTypeOfferings": [{"Location": "eu-central-1a"}]},
+            "describe-route-tables": {"RouteTables": [{"Routes": [{"DestinationCidrBlock": "0.0.0.0/0", "GatewayId": "igw-test", "State": "active"}]}]},
+            "describe-security-groups": {"SecurityGroups": [{"GroupId": "sg-test", "GroupName": args.prefix,
+                "VpcId": "vpc-test", "Tags": owned, "IpPermissions": state["Ingress"]}]},
+            "describe-key-pairs": {"KeyPairs": [{"KeyName": args.prefix, "Tags": owned, "PublicKey": args.public_key.read_text()}]}}
+        return args, state, replies
+
+    def test_retry_plan_reconciles_resources_without_changing_the_journal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, state, replies = self.retry_inputs(directory)
+            before = args.state_file.read_bytes()
+            aws = vm.Aws(args.region, None, False)
+            with patch.object(aws, "call", side_effect=lambda service, action, **options: replies[action]) as calls:
+                proposal = vm.retry_plan(aws, args, vm.retry_state(args))
+            self.assertEqual(proposal["ClientToken"], "original-token")
+            self.assertIn("reuse", proposal["Action"])
+            self.assertEqual(args.state_file.read_bytes(), before)
+            self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
+    def test_retry_refuses_changed_settings_and_uncertain_zone_moves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, state, _ = self.retry_inputs(directory)
+            for field, value in (("instance_type", "g6.4xlarge"), ("volume_gib", 300), ("account_id", "000000000000"),
+                                 ("allowed_cidr", "192.0.2.2/32"), ("subnet_id", "subnet-b")):
+                changed = copy.copy(args)
+                setattr(changed, field, value)
+                with self.subTest(field=field), self.assertRaises(ValueError):
+                    vm.retry_state(changed)
+            state["ApplyStatus"] = "capacity-unavailable"
+            vm.update_state(args.state_file, state)
+            args.subnet_id = "subnet-b"
+            self.assertEqual(vm.retry_state(args), state)
+
+    def test_retry_refuses_resource_drift_and_recovers_only_its_own_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, state, original = self.retry_inputs(directory)
+            for case in ("ingress", "owner", "key", "instance"):
+                replies = copy.deepcopy(original)
+                if case == "ingress":
+                    replies["describe-security-groups"]["SecurityGroups"][0]["IpPermissions"] = []
+                elif case == "owner":
+                    replies["describe-security-groups"]["SecurityGroups"][0]["Tags"] = []
+                elif case == "key":
+                    replies["describe-key-pairs"]["KeyPairs"][0]["PublicKey"] = "ssh-ed25519 different-key"
+                else:
+                    replies["describe-instances"] = {"Reservations": [{"Instances": [{"InstanceId": "i-other", "Tags": []}]}]}
+                aws = vm.Aws(args.region, None, False)
+                with self.subTest(case=case), patch.object(aws, "call", side_effect=lambda service, action, **options: replies[action]), \
+                        self.assertRaises(ValueError):
+                    vm.retry_plan(aws, args, state)
+            original["describe-instances"] = {"Reservations": [{"Instances": [{"InstanceId": "i-found",
+                "ClientToken": state["ClientToken"], "ImageId": state["ImageId"], "InstanceType": state["InstanceType"],
+                "SubnetId": state["SubnetId"], "Tags": vm.tags(args.prefix, args.scenario)}]}]}
+            with patch.object(aws, "call", side_effect=lambda service, action, **options: original[action]):
+                self.assertEqual(vm.retry_plan(aws, args, state)["RecoveredInstanceId"], "i-found")
+
+    def test_retry_zone_change_records_the_previous_attempt_before_launch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, state, _ = self.retry_inputs(directory)
+            state["ApplyStatus"] = "capacity-unavailable"
+            args.subnet_id = "subnet-b"
+            proposal = {**state, "SubnetId": args.subnet_id, "AvailabilityZone": "eu-central-1b"}
+            aws = vm.Aws(args.region, None, True)
+            with patch.object(aws, "call", side_effect=ValueError("lost response")), \
+                    self.assertRaises(ValueError):
+                vm.apply_retry(aws, args, state, proposal)
+            saved = json.loads(args.state_file.read_text())
+            self.assertNotEqual(saved["ClientToken"], state["ClientToken"])
+            self.assertEqual(saved["PreviousAttempts"][0]["ClientToken"], state["ClientToken"])
+            self.assertEqual(saved["ApplyStatus"], "launch-requested")
+            self.assertEqual(saved["SubnetId"], "subnet-b")
+
+    def test_apply_lock_rejects_concurrent_deployment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            with vm.deployment_lock(path), self.assertRaisesRegex(ValueError, "another deployment"):
+                with vm.deployment_lock(path):
+                    self.fail("acquired the same deployment lock twice")
+
+    def test_retry_recovers_a_lost_response_without_launching(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, proposal, aws = self.apply_inputs(directory)
+            state = {**proposal, "ClientToken": "original-token", "ApplyStatus": "launch-requested"}
+            vm.save_state(args.state_file, state)
+            with patch.object(aws, "call") as calls, contextlib.redirect_stdout(io.StringIO()):
+                vm.apply_retry(aws, args, state, {**state, "RecoveredInstanceId": "i-existing"})
+            calls.assert_not_called()
+            self.assertEqual(json.loads(args.state_file.read_text())["InstanceId"], "i-existing")
+
+    def test_capacity_failure_is_recorded_for_explicit_zone_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args, proposal, aws = self.apply_inputs(directory)
+            responses = [{"GroupId": "sg-test"}, {}, {}, vm.AwsError("InsufficientInstanceCapacity", "capacity")]
+            with patch.object(aws, "call", side_effect=responses), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(vm.AwsError):
+                vm.apply_plan(aws, args, proposal)
+            self.assertEqual(json.loads(args.state_file.read_text())["ApplyStatus"], "capacity-unavailable")
 
     def test_apply_requires_confirmation_of_current_plan(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -99,6 +99,9 @@ if args[:2] == ["sandbox", "list"]:
                          "http://host.openshell.internal:18080/vllm/v1")
         self.assertEqual(config["provider"]["praxis"]["models"][self.env["OPENSHELL_MODEL_ID"]]["limit"],
                          {"context": 16384, "output": 4096})
+        model = config["provider"]["praxis"]["models"][self.env["OPENSHELL_MODEL_ID"]]
+        self.assertTrue(model["reasoning"])
+        self.assertEqual(model["interleaved"], {"field": "reasoning"})
         endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
         self.assertEqual(endpoint["host"], "host.openshell.internal")
         self.assertEqual(endpoint["port"], 18080)

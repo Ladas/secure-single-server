@@ -4,7 +4,7 @@ Reuse all-in-one after direct harness tests. Keep real Qwen installed and use
 the ordinary login from [user setup](../quickstarts/all-in-one/accounts.md). OpenCode is the first
 Praxis integration to qualify here. Bootc has separate CPU/GPU evidence; this
 mutable RHEL path still requires a live sandbox run. See the
-[execution matrix](compatibility.md#execution-modes).
+[execution matrix](compatibility.md#all-in-one).
 
 This is a trusted test host: the current OpenShell management API trusts local
 users. Registering an ordinary client gives it sandbox management access, not
@@ -69,7 +69,7 @@ openshell/harnesses/opencode/create.sh --profile dev --name "$SANDBOX_NAME" \
 openshell/harnesses/opencode/connect.sh --name "$SANDBOX_NAME"
 ```
 
-Use the [file/test task](harnesses.md#4-exercise-tools-and-check-the-result).
+Use the [file/test task](harnesses.md#acceptance-task).
 Check the generated files and rerun unittest **inside the sandbox**; host files
 are not automatically mounted. Both model traffic and tool continuation must
 go through Praxis. Do not attach an OpenShell direct-provider binding.
@@ -112,7 +112,6 @@ openshell sandbox delete "$SANDBOX_NAME"
 A Ready sandbox or successful config upload is not harness acceptance. Record
 streamed inference, an actual tool event and independently checked results;
 also run the controlled network policy test before claiming confinement.
-Kernel-dependent socket/dev-server behavior and effective runtime resource
-limits need separate qualification. Bootc provides `bootc/test-kernel`; that
-command uses the bootc filesystem layout and must be adapted before running
-the same probe on a mutable RHEL installation.
+Record effective sandbox resource limits and network denials in the
+[matrix](compatibility.md). Kernel/dev-server qualification is tracked in the
+[debugging plan](vllm-debugging.md#5-add-sandbox-execution-without-losing-the-native-baseline).

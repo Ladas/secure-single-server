@@ -2,27 +2,30 @@
 
 ## AWS RHEL workflow
 
-Use two VMs, with hardware chosen independently for each role:
+Follow these in order. Select a VM once, then use the same test commands for
+any all-in-one or remote-gateway CPU/GPU variant.
 
-1. [Deploy all-in-one and remote-gateway](aws.md): choose CPU, GPU or no vLLM;
-   plan and deploy each VM separately.
-2. [Run mock smoke tests](rhel-smoke.md): install services, exercise native
-   harnesses with synthetic credentials, then check reboot behavior.
-3. [Install and test real Qwen](rhel-real.md): remove mocks, start private vLLM,
-   and optionally add OpenAI and Anthropic to the same Praxis installation.
-4. [Create an ordinary SSH login](../quickstarts/all-in-one/accounts.md), then
-   [use the harnesses interactively](harnesses.md): copyable commands for
-   OpenCode, Codex and Claude Code, including backend compatibility limits.
+1. [Deploy VMs](aws.md) — separate plan/launch blocks, an ordinary user login
+   for all-in-one and a copyable VM inventory.
+   CPU/GPU variants follow the test sequence below; external-provider-only
+   variants link to their standard installation guides.
+2. [Run mock smoke tests](rhel-smoke.md) — install services and exercise all
+   supported direct harness/provider paths without real keys.
+3. [Install and test real Qwen](rhel-real.md) — remove mocks, install vLLM,
+   optionally add OpenAI/Anthropic, then start manual testing.
 
-The [compatibility and test matrix](compatibility.md) records what passed,
-what remains untested, known failures and where fixes belong. The
-[vLLM debug plan](vllm-debugging.md) covers CPU/GPU isolation and candidate
-Praxis/backend updates.
+For all-in-one users, use the login created during AWS setup
+→ [install and use harnesses](../quickstarts/all-in-one/users.md)
+→ [run the acceptance task](harnesses.md#acceptance-task).
+Remote clients use [the HTTPS/JWT harness guide](harnesses.md#remote-gateway-client).
+[OpenShell testing](openshell-manual.md) is optional after the all-in-one baseline.
 
-Optional [manual OpenShell testing](openshell-manual.md) reuses all-in-one after
-its baseline passes, with administrator setup and ordinary-user commands.
-[AWS operations](aws-operations.md) covers custom hardware, recovery and cleanup.
-[vLLM administration](vllm.md) covers installation without the smoke runner.
+References, as needed:
+
+- [Compatibility matrix](compatibility.md): direct and OpenShell results by scenario/backend.
+- [AWS operations](aws-operations.md): access choices, custom hardware, recovery and cleanup.
+- [vLLM administration](vllm.md): installation without the smoke runner and maintenance.
+- [vLLM debugging](vllm-debugging.md): known failures, upstream leads and fix qualification.
 
 ## Local development checks
 
@@ -32,7 +35,7 @@ Run the offline regression suite from the repository root:
 python3 -B tests/mocked-provider.py --suite offline
 ```
 
-It requires Python 3.9+, Bash, Git, OpenSSL, `jq`, `rg`, Ruby with Psych and
+It requires Python 3.9+ with PyYAML and Jinja2, Bash, Git, OpenSSL, `jq`, `rg`, Ruby with Psych and
 ShellCheck. Install zsh to check both supported workstation shells.
 
 With Podman running, execute the container regressions and mock API contracts:

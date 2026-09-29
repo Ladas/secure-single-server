@@ -10,6 +10,7 @@ source "${ROOT}/configs/vllm/images.env"
 render() {
   local image="${VLLM_CPU_IMAGE}" extra=''
   if [[ "$1" == gpu ]]; then image="${VLLM_GPU_IMAGE}"; extra='--gpu-memory-utilization 0.90'; fi
+  image="${image_override:-${image}}"
   cat <<UNIT
 # Managed by scripts/vllm/install
 [Unit]
@@ -39,7 +40,7 @@ UNIT
     printf 'Environment=VLLM_CPU_KVCACHE_SPACE=4 VLLM_CPU_OMP_THREADS_BIND=nobind\n'
   fi
   cat <<UNIT
-Exec=${VLLM_MODEL} --revision ${VLLM_REVISION} --served-model-name qwen3-8b --host 0.0.0.0 --port 8000 --dtype bfloat16 --tensor-parallel-size 1 --max-model-len 16384 --max-num-seqs 1 --enforce-eager --enable-auto-tool-choice --tool-call-parser hermes --reasoning-parser qwen3 --chat-template /etc/vllm-chat-template.jinja --default-chat-template-kwargs '{"enable_thinking":false}' ${extra}
+Exec=${VLLM_MODEL} --revision ${VLLM_REVISION} --served-model-name qwen3-8b --host 0.0.0.0 --port 8000 --dtype bfloat16 --tensor-parallel-size 1 --max-model-len 16384 --max-num-seqs 1 --enforce-eager --enable-auto-tool-choice --tool-call-parser hermes --reasoning-parser qwen3 --chat-template /etc/vllm-chat-template.jinja --default-chat-template-kwargs '{"enable_thinking":true}' ${extra}
 [Service]
 Restart=on-failure
 RestartSec=10
@@ -51,13 +52,22 @@ UNIT
 }
 
 if [[ "${1:-}" == --help || "$#" == 0 ]]; then
-  printf 'Usage: sudo scripts/vllm/install cpu|gpu\n       scripts/vllm/install --render cpu|gpu\n'
+  printf 'Usage: sudo scripts/vllm/install [--image NAME@sha256:DIGEST] cpu|gpu\n       scripts/vllm/install --render [--image NAME@sha256:DIGEST] cpu|gpu\n'
   exit 0
 fi
-mode="${!#}"
-case "${mode}" in cpu|gpu) ;; *) die 'expected cpu or gpu' ;; esac
-if [[ "$#" == 2 && "$1" == --render ]]; then render "${mode}"; exit 0; fi
-[[ "$#" == 1 ]] || die 'usage: sudo scripts/vllm/install cpu|gpu'
+mode='' image_override='' render_only=false
+while (( $# )); do
+  case "$1" in
+    cpu|gpu) [[ -z "${mode}" ]] || die 'select one inference mode'; mode="$1"; shift ;;
+    --render) render_only=true; shift ;;
+    --image)
+      [[ "$#" -ge 2 && -z "${image_override}" ]] || die '--image requires one immutable image reference'
+      image_override="$2"; validate_digest_image "${image_override}"; shift 2 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+[[ -n "${mode}" ]] || die 'expected cpu or gpu'
+if "${render_only}"; then render "${mode}"; exit 0; fi
 require_root
 [[ "$(uname -m)" == x86_64 ]] || die 'vLLM requires x86_64'
 # shellcheck disable=SC1091
@@ -82,6 +92,7 @@ else
   grep -qw avx512f /proc/cpuinfo || die 'CPU profile requires AVX-512'
   awk '/MemTotal/ {exit ($2 < 32000000)}' /proc/meminfo || die 'CPU inference requires at least 32 GB RAM; 64 GiB recommended'
 fi
+image="${image_override:-${image}}"
 uid="$(service_uid)"
 gid="$(service_gid)"
 unit="/etc/containers/systemd/users/${uid}/praxis-vllm.container"
@@ -102,7 +113,7 @@ require_linux_image_platform vLLM "$(as_service podman image inspect "${image}" 
   "$(as_service podman image inspect "${image}" --format '{{.Architecture}}')" amd64
 as_service mkdir -p "$(service_home)/vllm-cache"
 install -d -o root -g "${gid}" -m 0750 "${state}"
-install -o root -g "${gid}" -m 0640 "${ROOT}/configs/vllm/qwen3-no-thinking.jinja" "${state}/chat-template.jinja"
+install -o root -g "${gid}" -m 0640 "${ROOT}/configs/vllm/qwen3.jinja" "${state}/chat-template.jinja"
 if ! semanage fcontext -a -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$' 2>/dev/null; then
   semanage fcontext -m -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$'
 fi
@@ -123,7 +134,7 @@ for (( attempt=0; attempt<360; attempt++ )); do
     note "vLLM ${mode} ready: qwen3-8b, private container port 8000; no host publication"
     exit 0
   fi
-  if (( attempt % 6 == 0 )); then note 'waiting for vLLM model download/startup; inspect praxis-vllm.service journal for progress'; fi
+  if (( attempt % 6 == 0 )); then note 'waiting for vLLM model download/startup; inspect praxis-vllm container logs for progress'; fi
   sleep 5
 done
-die 'vLLM did not become ready in 30 minutes; inspect the service journal; cache is retained'
+die 'vLLM did not become ready in 30 minutes; inspect praxis-vllm container logs; cache is retained'

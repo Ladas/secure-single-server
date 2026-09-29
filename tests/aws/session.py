@@ -46,8 +46,10 @@ _aws_test_vm() {
   if [ "$1" = verify ]; then
     if [ "$MODE" = no_ip ]; then
       printf '%s\\n' '{"State":"pending","PublicIpAddress":null}'
-    else
+    elif [ "$MODE" = missing_metadata ]; then
       printf '%s\\n' '{"State":"running","PublicIpAddress":"192.0.2.8"}'
+    else
+      printf '%s\\n' '{"State":"running","PublicIpAddress":"192.0.2.8","Scenario":"remote-gateway","Inference":"cpu"}'
     fi
   fi
 }
@@ -89,6 +91,21 @@ printf 'SHELL_ALIVE\\n'
             self.assertNotIn("VM_CALL:", output)
             self.assertNotIn("UNEXPECTED_", output)
             self.assertIn("aws_test_key", output)
+
+    def test_capacity_is_read_only_and_needs_no_launch_key_or_journal(self):
+        for shell in SHELLS:
+            output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
+ACCOUNT=123456789012 SUBNET=subnet-a
+unset SSH_KEY
+if aws_test_capacity g6.2xlarge; then printf 'CAPACITY_OK\\n'; fi
+if aws_test_capacity; then printf 'UNEXPECTED_SUCCESS\\n'; fi
+printf 'SHELL_ALIVE\\n'
+""")
+            self.assertIn("CAPACITY_OK", output)
+            self.assertEqual(output.count("VM_CALL:capacity"), 1)
+            self.assertIn("--instance-type g6.2xlarge --subnet-id subnet-a", output)
+            self.assertNotIn("--state-file", output)
+            self.assertNotIn("UNEXPECTED_", output)
 
     def test_reload_replaces_batch_helpers_and_keeps_credentials_and_run(self):
         for shell in SHELLS:
@@ -239,15 +256,17 @@ printf 'SHELL_ALIVE\\n'
 
     def test_verify_failure_clears_previous_login_address(self):
         for shell in SHELLS:
-            for mode in ("normal", "no_ip", "first_failed"):
+            for mode in ("normal", "no_ip", "first_failed", "missing_metadata"):
                 with self.subTest(shell=shell, mode=mode):
                     output = self.run_shell(shell, "set -eu\nMODE=" + mode + "\n" + SETUP + """
-ACCOUNT=123456789012 RHEL_HOST=stale
+ACCOUNT=123456789012 RHEL_HOST=stale RHEL_SCENARIO=stale RHEL_INFERENCE=stale
 if aws_test_verify all-in-one; then printf 'VERIFY_OK\\n'; else printf 'VERIFY_FAILED\\n'; fi
-printf 'HOST:%s\\nSHELL_ALIVE\\n' "${RHEL_HOST:-}"
+printf 'HOST:%s\\nSCENARIO:%s\\nINFERENCE:%s\\nSHELL_ALIVE\\n' "${RHEL_HOST:-}" "${RHEL_SCENARIO:-}" "${RHEL_INFERENCE:-}"
 """)
                     self.assertEqual("VERIFY_OK" in output, mode == "normal")
                     self.assertIn("HOST:ec2-user@192.0.2.8" if mode == "normal" else "HOST:\n", output)
+                    self.assertIn("SCENARIO:remote-gateway\n" if mode == "normal" else "SCENARIO:\n", output)
+                    self.assertIn("INFERENCE:cpu\n" if mode == "normal" else "INFERENCE:\n", output)
 
     def test_ssh_verifies_the_requested_vm_instead_of_using_a_stale_host(self):
         for shell in SHELLS:
@@ -360,32 +379,57 @@ printf 'LOADED:%s\\nKEY:%s\\nSHELL_ALIVE\\n' "${AWS_TEST_CREDENTIALS:-}" "${AWS_
                                         capture_output=True, text=True, env=environment())
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_copyable_vm_and_access_choices_keep_one_plan_and_deploy_per_role(self):
+    def test_copyable_vm_and_access_choices_keep_one_plan_and_deploy_per_vm(self):
         document = (ROOT / "docs/testing/aws.md").read_text()
+        reference = (ROOT / "docs/testing/aws-operations.md").read_text()
         blocks = re.findall(r"^```console\n(.*?)^```", document, re.M | re.S)
-        self.assertEqual(sum(block.startswith("aws_test_plan ") for block in blocks), 2)
-        self.assertEqual(sum(block.startswith("aws_test_deploy ") for block in blocks), 2)
-        for role, variable in (("all-in-one", "ALL_IN_ONE_VM"), ("remote-gateway", "REMOTE_GATEWAY_VM")):
-            hardware = [block for block in blocks if block.startswith(variable + "=(")]
-            access = [block for block in blocks if block.startswith(variable + "+=(")]
-            self.assertEqual(len(hardware), 3)
-            self.assertEqual(len(access), 4 if role == "remote-gateway" else 3)
-            plan = next(block for block in blocks if block.startswith("aws_test_plan " + role + " "))
-            deploy = next(block for block in blocks if block.startswith("aws_test_deploy " + role + " "))
-            for shell in SHELLS:
-                for config in hardware:
+        policies = re.findall(r"^```console\n(.*?)^```", reference, re.M | re.S)
+        for role in ("all-in-one", "remote-gateway"):
+            for inference in ("cpu", "gpu", "cloud"):
+                name = role + "-" + inference
+                variable = name.upper().replace("-", "_") + "_VM"
+                access_variable = role.upper().replace("-", "_") + "_ACCESS"
+                plan = next(block for block in blocks if block.startswith(variable + "=("))
+                deploy = next(block for block in blocks if block.startswith("aws_test_deploy " + name + " "))
+                access = [block for block in policies if block.startswith(access_variable + "=(")]
+                self.assertTrue(access)
+                for shell in SHELLS:
                     for policy in access:
-                        with self.subTest(role=role, shell=shell, config=config.strip(), policy=policy.strip()):
+                        with self.subTest(name=name, shell=shell, policy=policy.strip()):
                             output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
 ACCOUNT=123456789012 SUBNET=subnet-a CLIENT_CIDR=192.0.2.7/32 AWS_TEST_READY=ready
-""" + config + policy + plan + deploy + "printf 'SHELL_ALIVE\\n'")
+""" + policy + plan + deploy + "printf 'SHELL_ALIVE\\n'")
                             calls = [shlex.split(line[len("VM_ARGS:"):]) for line in output.splitlines()
                                      if line.startswith("VM_ARGS:")]
                             self.assertEqual([call[0] for call in calls], ["plan", "apply"])
                             self.assertEqual(calls[0][1:], calls[1][1:])
                             self.assertEqual(calls[0][calls[0].index("--scenario") + 1], role)
-                            self.assertEqual(calls[0][calls[0].index("--prefix") + 1], "gateway-test-" + role)
+                            self.assertEqual(calls[0][calls[0].index("--prefix") + 1], "gateway-test-" + name)
+                            self.assertEqual(calls[0][calls[0].index("--config") + 1], ("configs/aws/no-vllm.json" if inference == "cloud" else "configs/aws/vllm-" + inference + ".json"))
                             self.assertNotIn("error:", output)
+
+    def test_inventory_lists_only_deployed_vms_and_preserves_selection(self):
+        document = (ROOT / "docs/testing/aws.md").read_text()
+        inventory = next(block for block in re.findall(r"^```console\n(.*?)^```", document, re.M | re.S)
+                         if block.startswith("(\n"))
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / ".state"
+            state.mkdir()
+            for name in ("all-in-one-cpu", "all-in-one-gpu"):
+                (state / ("gateway-test-" + name + ".json")).write_text("{}")
+            for shell in SHELLS:
+                output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + f"""
+ACCOUNT=123456789012 AWS_TEST_REPO={shlex.quote(directory)}
+RHEL_HOST=previous-login RHEL_SCENARIO=previous-role RHEL_INFERENCE=previous-backend
+""" + inventory + """
+printf 'SELECTED:%s/%s/%s\\nSHELL_ALIVE\\n' "$RHEL_HOST" "$RHEL_SCENARIO" "$RHEL_INFERENCE"
+""")
+                self.assertEqual(output.count("VM_CALL:verify"), 2)
+                self.assertIn("all-in-one-cpu login:", output)
+                self.assertIn("all-in-one-gpu login:", output)
+                self.assertNotIn("remote-gateway", "\n".join(line for line in output.splitlines() if line.startswith("VM_ARGS:")))
+                self.assertIn("SELECTED:previous-login/previous-role/previous-backend", output)
+                self.assertNotIn("synthetic-secret", output)
 
     def test_copyable_blocks_keep_shell_open_with_failed_commands(self):
         document = (ROOT / "docs/testing/aws.md").read_text()
@@ -395,8 +439,17 @@ ACCOUNT=123456789012 SUBNET=subnet-a CLIENT_CIDR=192.0.2.7/32 AWS_TEST_READY=rea
                 with self.subTest(shell=shell, first_line=block.splitlines()[0]):
                     mocks = """
 SSH_KEY=/test-private-location/key
-ALL_IN_ONE_VM=(configs/aws/vllm-gpu.json --scenario all-in-one)
-REMOTE_GATEWAY_VM=(configs/aws/no-vllm.json --scenario remote-gateway)
+ALL_IN_ONE_GPU_VM=(configs/aws/vllm-gpu.json --scenario all-in-one)
+ALL_IN_ONE_CPU_VM=(configs/aws/vllm-cpu.json --scenario all-in-one)
+REMOTE_GATEWAY_CPU_VM=(configs/aws/vllm-cpu.json --scenario remote-gateway)
+REMOTE_GATEWAY_GPU_VM=(configs/aws/vllm-gpu.json --scenario remote-gateway)
+ALL_IN_ONE_CLOUD_VM=(configs/aws/no-vllm.json --scenario all-in-one)
+REMOTE_GATEWAY_CLOUD_VM=(configs/aws/no-vllm.json --scenario remote-gateway)
+ALL_IN_ONE_ACCESS=(--ssh-access restricted)
+REMOTE_GATEWAY_ACCESS=(--ssh-access restricted --https-access restricted)
+ACCOUNT=123456789012 REGION=eu-central-1 RUN_PREFIX=no-deployed-fixtures
+AWS_TEST_REPO=/unused RHEL_HOST=ec2-user@192.0.2.8
+ssh() { return 1; }
 aws_test_credentials() { return 1; }
 ssh-add() { return 1; }
 cp() { return 1; }

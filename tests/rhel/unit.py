@@ -21,7 +21,67 @@ from integration import ran_tests
 import integration
 
 
+class EvidenceTest(unittest.TestCase):
+    def test_cpu_harness_has_a_longer_bounded_deadline_without_affecting_mocks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mode = Path(directory) / "mode"
+            for inference, expected in (("cpu", 3600), ("gpu", 1800)):
+                mode.write_text(inference + "\n")
+                self.assertEqual(integration.harness_timeout(True, mode), expected)
+            mode.unlink()
+            self.assertEqual(integration.harness_timeout(False, mode), 180)
+            mode.write_text("invalid\n")
+            with self.assertRaises(ValueError):
+                integration.harness_timeout(True, mode)
+
+    def test_runtime_record_keeps_versions_and_hashes_without_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inference, gateway = root / "vllm", root / "praxis"
+            inference.mkdir()
+            gateway.mkdir()
+            (inference / "mode").write_text("cpu\n")
+            (inference / "chat-template.jinja").write_text("template")
+            (gateway / "shared-gateway.yaml").write_text("private configuration")
+            containers = [{"Name": name, "ImageName": name + "@sha256:abc", "Image": "image-id",
+                           "Config": {"Env": ["PRIVATE_SECRET=must-not-record"],
+                                      "Labels": {"org.opencontainers.image.revision": "revision"},
+                                      "Cmd": ["model", "--revision", "model-revision",
+                                              "--default-chat-template-kwargs", '{"enable_thinking":true}',
+                                              "--api-key", "must-not-record"]}}
+                          for name in ("praxis-shared-gateway", "praxis-vllm")]
+            def service_output(*command):
+                if command[:2] == ("podman", "inspect"):
+                    names = [container["Name"] for container in containers]
+                    self.assertCountEqual(command[2:], names)
+                    return json.dumps(containers)
+                return '{"vllm":"0.19.0"}'
+            with patch.object(integration, "service_output", side_effect=service_output):
+                record = integration.runtime_metadata(inference, gateway)
+            self.assertEqual(record["inference"], "cpu")
+            self.assertEqual(record["settings"]["--revision"], "model-revision")
+            self.assertEqual(record["packages"]["vllm"], "0.19.0")
+            self.assertEqual(len(record["template_sha256"]), 64)
+            self.assertNotIn("must-not-record", json.dumps(record))
+            self.assertNotIn("private configuration", json.dumps(record))
+
+
 class RunnerTest(unittest.TestCase):
+    def test_candidate_override_rejects_other_phases_and_mutable_tags_before_ssh(self):
+        image = "registry.example/vllm@sha256:" + "1" * 64
+        for phase, candidate, message in (("real-test", image, "only to real-setup"),
+                                          ("real-setup", "vllm:latest", "immutable"),
+                                          ("real-setup", "", "immutable")):
+            args = ["run.py", "--host", "test@example.test", "--ssh-key", "/missing-key",
+                    "--scenario", "all-in-one", "--phase", phase, "--inference", "cpu",
+                    "--vllm-image", candidate]
+            error = io.StringIO()
+            with patch.object(sys, "argv", args), patch.object(sys, "stderr", error), \
+                 patch.object(runner, "run") as execute, self.assertRaises(SystemExit):
+                runner.main()
+            self.assertIn(message, error.getvalue())
+            execute.assert_not_called()
+
     def test_failed_command_streams_and_retains_output(self):
         terminal, log = io.StringIO(), io.StringIO()
         with redirect_stdout(terminal):
@@ -54,6 +114,57 @@ class RunnerTest(unittest.TestCase):
             (root / "configs/key").symlink_to(private)
             with patch.object(runner, "ROOT", root), self.assertRaises(ValueError):
                 runner.bundle()
+
+
+class RealAnswerTest(unittest.TestCase):
+    def fixtures(self, text):
+        usage = {"input_tokens": 10, "output_tokens": 20}
+        chat = {"choices": [{"message": {"content": text, "reasoning_content": "ready"},
+                              "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20}}
+        responses = {"status": "completed", "usage": usage, "output": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "ready"}]},
+            {"type": "message", "content": [{"type": "output_text", "text": text}]}]}
+        messages = {"stop_reason": "end_turn", "usage": usage,
+                    "content": [{"type": "thinking", "thinking": "ready"}, {"type": "text", "text": text}]}
+        streams = {
+            "/v1/chat/completions": [
+                {"choices": [{"delta": {"reasoning_content": "ready"}, "finish_reason": None}]},
+                {"choices": [{"delta": {"content": text}, "finish_reason": "stop"}]},
+                {"choices": [], "usage": chat["usage"]}, "[DONE]"],
+            "/v1/responses": [
+                {"type": "response.reasoning_summary_text.delta", "delta": "ready"},
+                {"type": "response.output_text.delta", "delta": text},
+                {"type": "response.completed", "response": responses}],
+            "/v1/messages": [
+                {"type": "message_start", "message": {"usage": {"input_tokens": 10}}},
+                {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "ready"}},
+                {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}},
+                {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 20}},
+                {"type": "message_stop"}]}
+        for path, result in zip(streams, (chat, responses, messages)):
+            yield path, json.dumps(result), False
+            yield path, "".join("data: " + (value if isinstance(value, str) else json.dumps(value)) + "\n\n"
+                                for value in streams[path]), True
+
+    def test_reasoning_alone_does_not_count_as_a_final_answer(self):
+        for text in ("", "ready"):
+            for path, body, stream in self.fixtures(text):
+                with self.subTest(path=path, stream=stream, text=text):
+                    if text:
+                        integration.check_real_answer(path, body, stream)
+                    else:
+                        with self.assertRaises(AssertionError):
+                            integration.check_real_answer(path, body, stream)
+
+    def test_budget_exhaustion_and_missing_usage_are_failures(self):
+        for path, body, stream in self.fixtures("ready"):
+            with self.subTest(path=path, stream=stream):
+                limited = body.replace('"stop"', '"length"').replace('"end_turn"', '"max_tokens"').replace('"completed"', '"incomplete"')
+                with self.assertRaises(AssertionError):
+                    integration.check_real_answer(path, limited, stream)
+                with self.assertRaises(AssertionError):
+                    integration.check_real_answer(path, body.replace('"usage"', '"absent"'), stream)
 
 
 class HarnessTest(unittest.TestCase):

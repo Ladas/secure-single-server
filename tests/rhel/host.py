@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -288,7 +289,7 @@ def real_setup(args):
         shutil.rmtree(fixture)
     previous.update(mock=False, ready=False, inference=args.inference, secrets={})
     state_path.write_text(json.dumps(previous) + "\n")
-    run("scripts/vllm/install", args.inference)
+    run("scripts/vllm/install", *(["--image", args.vllm_image] if args.vllm_image else []), args.inference)
     assert not service_output("podman", "ps", "--filter", "label=rhel-smoke=true", "--format", "{{.Names}}")
     run("scripts/common/verify", "--host")
     previous["ready"] = True
@@ -312,9 +313,12 @@ def main():
     parser.add_argument("--profile", required=True, choices=("memory", "valkey"))
     parser.add_argument("--phase", required=True, choices=("install", "mock", "test", "check", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "all"))
     parser.add_argument("--inference", choices=("cpu", "gpu"))
+    parser.add_argument("--vllm-image")
     parser.add_argument("--harness", choices=("codex", "opencode", "claude"))
     parser.add_argument("--hostname", required=True)
     args = parser.parse_args()
+    if args.vllm_image is not None and (args.phase != "real-setup" or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", args.vllm_image)):
+        parser.error("--vllm-image requires real-setup and an immutable NAME@sha256:DIGEST")
     if os.geteuid() != 0:
         parser.error("run as root on the disposable test VM")
     os.chdir(ROOT)

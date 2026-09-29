@@ -7,6 +7,9 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
+QWEN_CONTEXT = 16384
+QWEN_OUTPUT = 4096
+
 
 def configuration(name, provider, model, base, caller, *, prompt=None, messages_base=None):
     if (name, provider) in (("codex", "anthropic"), ("claude", "openai")):
@@ -24,27 +27,37 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
             "-c", 'model_providers.praxis.base_url=' + json.dumps(base + "/v1"),
             "-c", 'model_providers.praxis.env_key="PRAXIS_PLACEHOLDER_KEY"',
             "-c", 'model_providers.praxis.wire_api="responses"', "-c", 'web_search="disabled"', "--model", model]
+        if provider == "vllm":
+            command += ["-c", f"model_context_window={QWEN_CONTEXT}",
+                        "-c", f"model_auto_compact_token_limit={QWEN_CONTEXT - QWEN_OUTPUT}",
+                        "-c", "show_raw_agent_reasoning=true"]
     elif name == "opencode":
         anthropic = provider == "anthropic"
         config = {"model": "praxis/" + model,
             "provider": {"praxis": {"npm": "@ai-sdk/anthropic" if anthropic else "@ai-sdk/openai-compatible", "name": "Praxis",
                 "options": {"baseURL": (messages_base if anthropic else base) + "/v1", "apiKey": caller,
                             "headers": {"Authorization": "Bearer " + caller}},
-                "models": {model: {"name": model, "limit": {"context": 16384 if provider == "vllm" else 128000,
-                                                               "output": 4096}}}}}}
+                "models": {model: {"name": model, "limit": {"context": QWEN_CONTEXT if provider == "vllm" else 128000,
+                                                               "output": QWEN_OUTPUT if provider == "vllm" else 4096}}}}}}
+        if provider == "vllm":
+            config["provider"]["praxis"]["models"][model].update(
+                reasoning=True, interleaved={"field": "reasoning"})
         if prompt:
             config.update(agent={"build": {"steps": 12}}, permission={
                 "*": "deny", "read": "allow", "edit": "allow",
                 "bash": {"*": "deny", "python3 *": "allow"}})
         env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config)
         command = ["opencode", *(["run", "--format", "json"] if prompt else [])]
+        if prompt and provider == "vllm":
+            command += ["--thinking"]
     else:
         env.update(ANTHROPIC_BASE_URL=messages_base, ANTHROPIC_AUTH_TOKEN=caller,
                    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
         if provider == "vllm":
             env.update(ANTHROPIC_API_KEY=caller, ANTHROPIC_DEFAULT_OPUS_MODEL=model,
                        ANTHROPIC_DEFAULT_SONNET_MODEL=model, ANTHROPIC_DEFAULT_HAIKU_MODEL=model,
-                       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1", CLAUDE_CODE_SIMPLE="1")
+                       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1", CLAUDE_CODE_SIMPLE="1",
+                       CLAUDE_CODE_MAX_CONTEXT_TOKENS=str(QWEN_CONTEXT), CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(QWEN_OUTPUT))
         command = ["claude", *(["-p"] if prompt else []), "--model", model]
         if prompt:
             command += ["--output-format", "stream-json", "--verbose", "--allowedTools", "Bash(python3 *)",

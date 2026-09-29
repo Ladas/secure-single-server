@@ -1,6 +1,5 @@
 {# Qwen/Qwen3-8B b968826d9c46dd6066d109eabc6255188de91218 tokenizer_config.json. #}
-{# Same pinned template, with thinking disabled for every API, including Responses. #}
-{% set enable_thinking = false %}
+{# Preserve the model's default thinking mode for every API, including Responses. #}
 {%- if tools %}
     {{- '<|im_start|>system\n' }}
     {%- if messages[0].role == 'system' %}
