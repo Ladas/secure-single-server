@@ -67,3 +67,5 @@ permissions; it does not mount your checkout or establish persistence.
 The dev policy restricts GitHub API methods; Git-over-HTTPS to github.com is not
 read-only. Landlock is best-effort and requires inspection of actual runtime
 enforcement. See the [threat model](../threat-model.md).
+
+Before changing OpenShell release pins, follow the [upgrade runbook](../upgrade.md).

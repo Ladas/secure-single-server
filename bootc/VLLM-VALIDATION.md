@@ -67,9 +67,11 @@ exercised by the OS update/reboot on both hosts.
 - OpenCode's writable local dev profile is the supported harness path. It
   permits only Praxis network access; package/GitHub access is not included.
 - The older OpenShell host-mapping blocker in [the September 25 report](VALIDATION.md)
-  is fixed by the coordinated control-plane pin update. The ODH fork still
-  omits the managed `openshell inference` command; this uses an explicit policy
-  endpoint instead.
+  is fixed by the coordinated control-plane pin update. Upstream OpenShell
+  removed managed inference routes and `openshell inference` in the 0.1 series.
+  This test uses an explicit OpenCode provider configuration and Praxis endpoint
+  policy; it does not qualify the replacement OpenShell provider-profile and
+  attachment flow. See the [current configuration](VLLM.md#opencode-configuration).
 - CPU inference is functional but slow on eight vCPUs. This is a functional
   demonstration, not a throughput or coding-quality benchmark. Cached reboot
   still requires reading roughly 16 GB of weights from disk.

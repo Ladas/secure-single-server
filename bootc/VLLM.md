@@ -174,10 +174,15 @@ The configured context and output limits are carried through provider rendering.
 Existing sandboxes retain their installed configuration and policy; recreate them
 after changing these defaults.
 
-The ODH release excludes the managed `openshell inference` CLI, so the reference
-lab's managed-inference commands do not apply. This example instead permits only
-the explicit Praxis endpoint in the sandbox policy. OpenCode's canonical binary
-path is `/usr/local/bin/opencode`; its `/usr/local/sbin` launcher is a symlink.
+Upstream OpenShell removed workspace-global managed inference routes and the
+`openshell inference` commands in the 0.1 series; this is not an ODH-only omission.
+The supported replacement is [provider profiles and per-sandbox attachments](https://github.com/NVIDIA/OpenShell/blob/v0.1.2/docs/how-it-works/inference.mdx#migrate-from-managed-inference-routes).
+This example uses an explicit **OpenCode** Praxis provider configuration plus a
+sandbox policy permitting only the Praxis endpoint. It does not yet import an
+OpenShell provider profile or attach a provider; that integration is tracked in
+[the roadmap](../docs/roadmap.md#upstream-01x-capabilities-we-do-not-use-yet).
+OpenCode's canonical binary path is `/usr/local/bin/opencode`; its
+`/usr/local/sbin` launcher is a symlink.
 
 See [runtime validation](VLLM-VALIDATION.md) for the tested hardware, image revisions,
 actual inference results, and remaining limits. Use the dedicated local policy;

@@ -142,6 +142,11 @@ the units from that deployment's pins, which also applies after bootc rollback.
 Keys, caches, workspaces and DB contents persist; OS rollback does not roll back
 application data or guarantee compatibility with older database schemas.
 
+When an OS update changes OpenShell, follow the [OpenShell upgrade
+runbook](../openshell/docs/upgrade.md) before staging/rebooting: export work,
+delete every pre-upgrade sandbox, and recreate sandboxes with the new pins.
+Apply the same recreation rule when rolling OpenShell back.
+
 After publishing a reviewed OS image, stage it with `sudo bootc switch
 REGISTRY/IMAGE:RELEASE`, inspect `sudo bootc status`, then reboot. To return to
 the previous OS deployment, use `sudo bootc rollback` and reboot. The selected
