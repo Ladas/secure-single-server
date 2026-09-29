@@ -14,20 +14,27 @@ cleanup() {
   rm -rf "${td}"
 }
 trap cleanup EXIT
-fixture_ip=127.0.0.1
-python3 "${ROOT}/openshell/tests/controlled-http.py" "${td}/requests" "${fixture_ip}" & server=$!
+server_bind=0.0.0.0
+python3 "${ROOT}/openshell/tests/controlled-http.py" "${td}/requests" "${server_bind}" & server=$!
 for ((i=0; i<20; i++)); do
-  if curl -s "http://${fixture_ip}:18080" >/dev/null; then break; fi
+  if curl -s "http://127.0.0.1:18080" >/dev/null; then break; fi
   sleep 1
 done
 kill -0 "${server}"
-cat >"${td}/deny.yaml" <<'YAML'
+cat >"${td}/base.yaml" <<'YAML'
 version: 1
 filesystem_policy: {include_workdir: true, read_only: [/usr, /lib, /lib64, /etc, /proc, /dev/urandom, /opt], read_write: [/sandbox, /tmp, /dev/null, /home]}
 landlock: {compatibility: best_effort}
-network_policies: {}
 YAML
-sed '$d' "${td}/deny.yaml" >"${td}/allow.yaml"
+cp "${td}/base.yaml" "${td}/deny.yaml"
+cat >>"${td}/deny.yaml" <<'YAML'
+network_policies:
+  unrelated:
+    name: unrelated
+    endpoints: [{host: host.openshell.internal, port: 1, enforcement: enforce}]
+    binaries: [{path: /usr/bin/node-26}]
+YAML
+cp "${td}/base.yaml" "${td}/allow.yaml"
 cat >>"${td}/allow.yaml" <<'YAML'
 network_policies:
   control:
@@ -49,12 +56,14 @@ r=json.load(open(sys.argv[1])); assert r['status']==401 and r['body']=='controll
 PY
 [[ "$(wc -l <"${td}/requests")" -gt "${before}" ]] || die 'positive control did not reach server'
 before="$(wc -l <"${td}/requests")"
-# Connection failures/timeouts are inconclusive, and fail this test.
-harness_ssh "${DENY}" 'node /tmp/probe.mjs http://host.openshell.internal:18080/' >"${td}/deny.json"
+# Only the pinned network layer's EACCES result is accepted as denial evidence.
+if harness_ssh "${DENY}" 'node /tmp/probe.mjs http://host.openshell.internal:18080/' >"${td}/deny.json"; then
+  die 'denied probe unexpectedly succeeded'
+fi
 python3 - "${td}/deny.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))
-assert r['status']==403 and 'policy' in r['body'].lower() and 'den' in r['body'].lower(),r
+assert r['kind']=='transport-error' and r['code']=='EACCES',r
 PY
 [[ "$(wc -l <"${td}/requests")" == "${before}" ]] || die 'denied request reached controlled server'
 echo 'openshell-policy: controlled allow/deny proof OK (401 counts as reachable)'

@@ -17,11 +17,22 @@ The runner installs the addon under `openshell-svc`, uses its authenticated
 TLS/mTLS management connection and selects the installed mock or real Qwen
 route. It checks that Praxis files are preserved, requires a final inference
 answer and separately exercises controlled network allow/deny cases.
-Use `--profile valkey` if that is the installed profile.
+It also approves a policy-advisor proposal for a controlled private endpoint,
+requires the retry to reach that endpoint, recreates the sandbox, and requires
+the grant to disappear. Use `--profile valkey` if that is the installed profile.
 
 These are **service-operator probes**, not a full harness task or personal-user
 acceptance. Do not copy the operator's client certificate/key to `praxis-user`.
 Individual access remains blocked by [#12](https://github.com/redhat-et/secure-single-server/issues/12).
+
+The equivalent standalone runtime check is:
+
+```console
+sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
+  XDG_RUNTIME_DIR=/run/user/$(id -u openshell-svc) \
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u openshell-svc)/bus \
+  bash openshell/tests/policy-advisor.sh
+```
 
 ## 2. Qualify actual sandboxed harnesses
 

@@ -12,6 +12,12 @@ The runtime suite owns the gateway lifecycle. The test is separate from Praxis
 inference, which requires `tests/openshell-praxis/smoke.sh` and a configured test
 provider/model. Do not infer successful integration from a denial test alone.
 
+`openshell/tests/policy-advisor.sh` extends the same fixture to the approval
+workflow: it creates one deny-by-default sandbox, waits for a pending endpoint
+proposal, approves it through `openshell/scripts/policy-approve.sh`, proves the
+retry reaches the fixture, recreates the sandbox, and proves the grant is gone.
+Its approval audit record is temporary and local to the test.
+
 Policies are per-binary and must match actual executable paths. The native schema
 test parses all standalone and rendered integrated profiles with the pinned CLI.
 Parsing does not prove runtime enforcement. Inspect actual supervisor logs and
