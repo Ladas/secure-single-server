@@ -28,7 +28,8 @@ uid="$(id -u "${owner}")"
 owner_home="$(getent passwd "${owner}" | cut -d: -f6)"
 os_run() {
   runuser -u "${owner}" -- env HOME="${owner_home}" XDG_RUNTIME_DIR="/run/user/${uid}" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" "$@"
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+    OPENSHELL_TELEMETRY_ENABLED=false "$@"
 }
 # Apply delegation without restarting the manager (which can kill an installer).
 install -d -m 0755 "/etc/systemd/system/user@${uid}.service.d"

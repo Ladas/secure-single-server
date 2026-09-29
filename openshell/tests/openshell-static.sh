@@ -36,6 +36,8 @@ render_openshell_template "${OS_DIR}/configs/quadlet/openshell-gateway.container
 grep -q '@@' "${tmp}" && fail "unrendered placeholder in gateway quadlet"
 grep -q "Image=${ODH_GATEWAY_IMAGE}" "${tmp}" || fail "gateway image not pinned in unit"
 grep -q 'Pull=never' "${tmp}" || fail "gateway unit must set Pull=never"
+grep -q 'Environment=OPENSHELL_TELEMETRY_ENABLED=false' "${tmp}" \
+  || fail "gateway unit must disable OpenShell telemetry"
 rm -f "${tmp}"
 
 # 4. gateway.toml.in uses the podman driver, JWT auth, and pins workload/supervisor images.
