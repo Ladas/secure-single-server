@@ -16,9 +16,8 @@ bash
 
 Enter the SSH login/key and existing TLS certificate/key paths. The TLS
 certificate must cover the hostname/IP in the users' URL and remain valid for
-at least seven days. Use a public or
-organization CA for deployment; [private-CA VM testing](../../testing/remote-gateway.md)
-is available for disposable tests. Never disable certificate verification.
+at least seven days. Use a public or organization CA. Distribute the public
+CA certificate to clients if it is not already trusted; never disable TLS verification.
 
 ```console
 {
@@ -36,18 +35,16 @@ losing its private key prevents issuing new tokens for this verification key.
 ```console
 scripts/remote-gateway/credentials check-tls --cert "$TLS_CERT" --key "$TLS_KEY"
 scripts/remote-gateway/credentials init-jwt --directory "$ISSUER_DIR"
-SSH_OPTIONS=()
+SSH_OPTIONS=(-o ForwardAgent=no)
 if [[ -n "$SSH_KEY" ]]; then
-  SSH_OPTIONS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
+  SSH_OPTIONS+=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 fi
 ssh "${SSH_OPTIONS[@]}" "$RHEL_HOST" \
-  'install -d -m 0700 ~/secure-single-server-deploy/{configs,scripts,tests,material}'
-scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/remote-gateway configs/common \
+  'install -d -m 0700 ~/secure-single-server-deploy/{configs,scripts,material}'
+scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/remote-gateway configs/common configs/vllm \
   "$RHEL_HOST:~/secure-single-server-deploy/configs/"
-scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/remote-gateway \
+scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/remote-gateway scripts/vllm \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/"
-scp "${SSH_OPTIONS[@]}" -p tests/shared-gateway-host.sh \
-  "$RHEL_HOST:~/secure-single-server-deploy/tests/"
 scp "${SSH_OPTIONS[@]}" "$TLS_CERT" "$RHEL_HOST:~/secure-single-server-deploy/material/tls.pem"
 scp "${SSH_OPTIONS[@]}" "$TLS_KEY" "$RHEL_HOST:~/secure-single-server-deploy/material/tls-key.pem"
 scp "${SSH_OPTIONS[@]}" "$ISSUER_DIR/public.pem" "$RHEL_HOST:~/secure-single-server-deploy/material/jwt-public.pem"
@@ -63,8 +60,25 @@ The remaining commands in this section run on RHEL:
 ```console
 cd ~/secure-single-server-deploy
 chmod 600 material/tls-key.pem
-sudo dnf install -y podman python3 openssl policycoreutils-python-utils jq curl
+sudo dnf install -y podman python3 python3-pyyaml openssl policycoreutils-python-utils jq curl
 sudo scripts/remote-gateway/install --prepare
+sudo scripts/common/secret-set valkey v1 --generate
+```
+
+Choose **one** initial provider configuration.
+
+### Local Qwen (CPU or GPU)
+
+```console
+PROVIDER_ARGS=(--vllm)
+```
+
+Continue to installation below; it includes the next step for the private backend.
+OpenAI and Anthropic can be added independently afterward.
+
+### External providers
+
+```console
 set +x
 set +a
 unset PRAXIS_OPENAI_KEY PRAXIS_ANTHROPIC_KEY
@@ -88,21 +102,22 @@ printf '%s' "$PRAXIS_OPENAI_KEY" | sudo scripts/common/secret-set openai v1
 printf '%s' "${PRAXIS_ANTHROPIC_KEY:-provider-not-configured}" \
   | sudo scripts/common/secret-set anthropic v1
 unset PRAXIS_OPENAI_KEY PRAXIS_ANTHROPIC_KEY
-sudo scripts/common/secret-set valkey v1 --generate
+PROVIDER_ARGS=(--openai-secret praxis-openai-api-key-v1 \
+  --anthropic-secret praxis-anthropic-api-key-v1)
 ```
 
 ## 3. Install persistent token quotas
 
 First restrict network ingress: SSH only from the administrator's IP and TCP
 8443 only from approved clients. The installer does **not** change firewall
-rules. [VM testing](../../testing/remote-gateway.md) gives an explicit firewalld
-example; AWS also needs the corresponding security-group rule.
+rules. Configure both the host firewall and, on AWS, the security group for
+your chosen client networks. An internet-facing listener still requires TLS
+and a valid caller JWT for inference.
 
 ```console
 sudo scripts/remote-gateway/install \
   --profile valkey \
-  --openai-secret praxis-openai-api-key-v1 \
-  --anthropic-secret praxis-anthropic-api-key-v1 \
+  "${PROVIDER_ARGS[@]}" \
   --valkey-image docker.io/valkey/valkey@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2 \
   --valkey-url-secret praxis-valkey-url-v1 \
   --valkey-acl-secret praxis-valkey-acl-v1 \
@@ -112,6 +127,10 @@ sudo scripts/remote-gateway/install \
 sudo scripts/common/status
 sudo scripts/common/verify --host
 ```
+
+For local Qwen, now [install one CPU or GPU backend](../common/vllm.md#3-install-one-backend)
+in this same administrator session. For additional hosted models, use
+[provider management](../common/providers.md).
 
 Expected: only `0.0.0.0:8443` is published by Praxis. Admin/Valkey ports remain
 inside the private container network. Confirm TLS trust and unauthenticated

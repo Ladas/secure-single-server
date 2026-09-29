@@ -48,7 +48,7 @@ def create(user, key_file):
         raise ValueError(f"home already exists: {home}; no account was created")
     key = public_key(key_file)
     launcher = (ROOT / "scripts/common/harness.py").read_bytes()
-    versions = (ROOT / "tests/rhel/harness-versions.json").read_bytes()
+    versions = (ROOT / "configs/common/harness-versions.json").read_bytes()
     run("useradd", "--create-home", "--user-group", "--home-dir", str(home),
         "--shell", "/bin/bash", user)
     account = pwd.getpwnam(user)

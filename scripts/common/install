@@ -88,7 +88,7 @@ done
 
 require_root
 require_command flock
-exec 9>/run/lock/praxis-gateway.lock
+exec 9>"$(gateway_lock_path "${SERVICE_USER}")"
 flock -n 9 || die 'another gateway installation/provider change is running'
 for command in awk chmod chown cmp getenforce getent grep head install loginctl podman restorecon runuser sed semanage sha256sum sleep sort ss stat systemctl useradd usermod; do
   require_command "${command}"

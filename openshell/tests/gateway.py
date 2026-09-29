@@ -41,6 +41,10 @@ gateway_install_config owner "$TEST_TMP/home" "$TEST_TMP" 'example/harness@sha25
             config = (self.td / 'home/.config/openshell/gateway.toml').read_text()
             unit = (self.td / 'units/openshell-gateway.container').read_text()
             self.assertIn('default_image     = "example/harness@sha256:abc"', config)
+            for key, filename in (("guest_tls_ca", "ca.crt"),
+                                  ("guest_tls_cert", "client/tls.crt"),
+                                  ("guest_tls_key", "client/tls.key")):
+                self.assertIn(f'{key} = "/var/lib/openshell/tls/{filename}"', config)
             self.assertIn('[openshell.gateway.tls]', config)
             self.assertIn('client_ca_path = "/var/lib/openshell/tls/ca.crt"', config)
             self.assertIn('allow_unauthenticated_users = false', config)

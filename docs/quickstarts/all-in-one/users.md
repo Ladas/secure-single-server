@@ -58,9 +58,11 @@ praxis-harness opencode --provider vllm
 ```
 
 The launcher selects `qwen3-8b` through Praxis's `/vllm/v1` route, with thinking
-enabled and reasoning separated from the final answer. OpenCode's file/test
-task passed on CPU and GPU. Claude also passed on both; Codex passed on GPU.
-See CPU Codex and protocol limits in the [matrix](../../testing/compatibility.md).
+enabled and reasoning separated from the final answer. The local model has a
+16k context; OpenCode and Claude reserve up to 4096 output tokens including
+thinking. CPU responses can take several minutes. All three clients support this workflow
+with the current configuration; GPU is faster. Context remains limited compared
+with hosted models, and model/tool reliability varies.
 
 Or choose another harness:
 
@@ -74,7 +76,7 @@ praxis-harness claude --provider vllm
 
 ### OpenAI
 
-The administrator must [enable OpenAI](../../testing/rhel-real.md#3-add-openai-to-existing-praxis)
+The administrator must [enable OpenAI](../common/providers.md#add-openai)
 and provide a model ID available to that account:
 
 ```console
@@ -94,7 +96,7 @@ praxis-harness opencode --provider openai --model "$OPENAI_MODEL"
 
 ### Anthropic
 
-The administrator can [enable Anthropic independently](../../testing/rhel-real.md#4-add-anthropic-independently).
+The administrator can [enable Anthropic independently](../common/providers.md#add-anthropic).
 Choose an approved model, then either client:
 
 ```console
@@ -110,9 +112,16 @@ praxis-harness claude --provider anthropic --model "$ANTHROPIC_MODEL"
 praxis-harness opencode --provider anthropic --model "$ANTHROPIC_MODEL"
 ```
 
-Cloud routes passed mock tests; real account/model acceptance remains a
-[manual check](../../testing/harnesses.md). Interactive clients keep their
-normal tool approvals. Cloud calls use the administrator's provider account.
+### Model menus
+
+OpenCode uses `/models`; Claude and Codex use `/model`. With these launchers,
+OpenCode lists the configured Praxis model and Claude maps its configured Qwen
+aliases. Codex's current menu omits Qwen: keep the model selected by
+`praxis-harness codex --provider vllm`. None of these commands displays an
+automatically aggregated inventory of all Praxis providers. Other built-in
+entries are not a list of administrator-approved models; use the supplied IDs.
+
+Interactive clients keep their normal tool approvals. Cloud calls use the administrator's provider account.
 The launcher configures each native API; it does not enable API translation.
 
 For an installed Switchyard profile, OpenCode can use its Chat listener by
@@ -120,15 +129,11 @@ adding `--url http://127.0.0.1:8082` to the OpenAI command. The administrator
 controls judge/Weak/Strong routing; Codex Responses and Claude Messages cannot
 use that Chat-only listener.
 
-For acceptance, run the [file/test task](../../testing/harnesses.md#acceptance-task)
-in a fresh project for each harness/provider.
-
 ## 4. Optional sandbox execution
 
-Use [OpenShell setup and usage](../../testing/openshell-manual.md) after the
-administrator installs the addon. Run its client commands as this same ordinary
-user. Sandbox/provider coverage is separate from direct-host coverage; see
-[the execution matrix](../../testing/compatibility.md#all-in-one).
+OpenShell requires separate authenticated management access. Ordinary-user
+enrollment is unfinished; see [OpenShell access status](../openshell-praxis/users.md).
+Continue using the direct clients above until that access is available.
 
 ## Continue after disconnecting
 

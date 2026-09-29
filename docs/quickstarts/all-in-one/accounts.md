@@ -1,29 +1,23 @@
 # Create a user login
 
-The administrator installs services and adds provider credentials. Harnesses
-run in a separate ordinary account. The smoke runner already creates
-`praxis-smoke` for automation; use `praxis-user` for your interactive work.
-If you created it during [AWS setup](../../testing/aws.md#5-create-the-all-in-one-user-login),
-skip to [login](#2-user-log-in). Otherwise use the steps below after
-[real Qwen setup](../../testing/rhel-real.md) or a standard all-in-one profile.
-No provider key is copied to the user.
+The administrator installs services and manages provider credentials. Each
+person runs harnesses in a separate ordinary account. Run this once per new
+account after installing an [all-in-one profile](README.md). If the account
+already exists, skip to login. No provider key is copied to the user.
 
 ## 1. Administrator: create the login
 
-On your workstation, select the all-in-one VM using
-`aws_test_verify all-in-one-gpu` or `aws_test_verify all-in-one-cpu` from the
-[AWS guide](../../testing/aws.md#4-select-one-vm-for-testing). For a standard
-quickstart, keep its `RHEL_HOST` and `SSH_KEY` instead.
-
-Transfer only your public key. These examples use the deployment's `SSH_KEY`
-path; each person should supply their own key for their account:
+In the workstation Bash shell from the installation guide, keep `RHEL_HOST`
+and `SSH_OPTIONS` for the intended server. Supply the user's **public** SSH key:
 
 ```console
-scp -i "$SSH_KEY" "${SSH_KEY}.pub" "$RHEL_HOST:~/praxis-user.pub"
-ssh -i "$SSH_KEY" "$RHEL_HOST"
+printf 'User public SSH key absolute path: '
+IFS= read -r USER_PUBLIC_KEY
+scp "${SSH_OPTIONS[@]}" "$USER_PUBLIC_KEY" "$RHEL_HOST:~/praxis-user.pub" &&
+ssh -t "${SSH_OPTIONS[@]}" "$RHEL_HOST" 'bash -l'
 ```
 
-In the administrator session:
+In that administrator SSH session:
 
 ```console
 cd ~/secure-single-server-deploy
@@ -34,29 +28,28 @@ sudo scripts/common/harness-user --user praxis-user \
 exit
 ```
 
-The helper creates a private home, installs the SSH key, restores SELinux
-labels and makes the client launcher/version pins available. It grants no
+The helper creates a private home, authorizes the public key, restores SELinux
+labels and installs the shared client launcher and version pins. It grants no
 sudo or service-group membership and refuses existing accounts or home paths.
-Run it once per new account. Each person should supply their own public key.
-The original administrator login remains available for service operations.
+Use a distinct account name and public key for each person. The original
+administrator login remains available for service operations.
 
 ## 2. User: log in
 
-On your workstation:
+On the user's workstation, use the matching private key, which stays there.
+Enter the server's DNS name or IP, without the administrator username:
 
 ```console
-ssh -o ForwardAgent=no -i "$SSH_KEY" "praxis-user@${RHEL_HOST#*@}"
+{
+  printf 'RHEL hostname or IP: '; IFS= read -r USER_HOST
+  printf 'Your SSH private-key path: '; IFS= read -r USER_SSH_KEY
+}
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$USER_SSH_KEY" "praxis-user@$USER_HOST"
 ```
 
 Continue with [user setup and usage](users.md) to install the pinned CLIs and
-choose Qwen, OpenAI or Anthropic. For acceptance, follow the
-[manual file/test task](../../testing/harnesses.md). Remote-gateway clients use
-the workstation HTTPS/JWT flow from that guide.
+choose Qwen, OpenAI or Anthropic. Remote-gateway users instead follow
+[client setup](../remote-gateway/users.md) on their own machines.
 
-## 3. Optional OpenShell
-
-The same ordinary account can use the experimental local OpenShell client.
-The administrator still owns installation and service maintenance; the
-user does not become `openshell-svc` or receive its Podman socket or files.
-Follow [manual OpenShell testing](../../testing/openshell-manual.md) for the separate
-installation, registration and sandbox commands.
+For optional sandbox execution, the administrator [installs OpenShell](../openshell-praxis/install.md);
+individual sandbox access awaits [OpenShell user enrollment](../openshell-praxis/users.md).

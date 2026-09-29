@@ -310,7 +310,7 @@ def setup_harnesses():
     run("dnf", "module", "switch-to", "-y", "nodejs:22")
     run("dnf", "install", "-y", "nodejs", "npm")
     versions_file = STATE / "harness-versions.json"
-    versions = json.loads((ROOT / "tests/rhel/harness-versions.json").read_text())
+    versions = json.loads((ROOT / "configs/common/harness-versions.json").read_text())
     versions_file.write_text(json.dumps(versions, indent=2) + "\n")
     print("Harness versions: " + json.dumps(versions), flush=True)
     result = user_command("npm", "install", "--prefix", account.pw_dir + "/.local", "--global",

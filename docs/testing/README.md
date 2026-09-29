@@ -24,7 +24,7 @@ References, as needed:
 
 - [Compatibility matrix](compatibility.md): direct and OpenShell results by scenario/backend.
 - [AWS operations](aws-operations.md): access choices, custom hardware, recovery and cleanup.
-- [vLLM administration](vllm.md): installation without the smoke runner and maintenance.
+- [vLLM administration](../quickstarts/common/vllm.md): installation without the smoke runner and maintenance.
 - [vLLM debugging](vllm-debugging.md): known failures, upstream leads and fix qualification.
 
 ## Local development checks

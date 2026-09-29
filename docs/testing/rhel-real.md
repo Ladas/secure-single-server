@@ -99,8 +99,9 @@ Exit any administrator SSH session first. Choose the guide for your scenario:
 Run the [file/test acceptance task](harnesses.md#acceptance-task) with each
 harness/provider. Provider keys stay in Praxis; users run without sudo.
 After the all-in-one baseline, optionally test [OpenShell](openshell-manual.md)
-using the same personal login.
+using the authenticated service operator; individual-user enrollment remains
+unimplemented. See that guide for the distinction.
 
 For installation without the runner, maintenance or removal, use
-[vLLM administration](vllm.md). For another VM, return to
+[vLLM administration](../quickstarts/common/vllm.md). For another VM, return to
 [AWS selection](aws.md#4-select-one-vm-for-testing) and repeat the tests.

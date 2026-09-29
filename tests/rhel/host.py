@@ -97,7 +97,7 @@ def mock_setup(args):
                         cluster["endpoints"] = [f"praxis-rhel-mock:{port}"]
                         cluster.pop("http", None)
                         cluster.pop("tls", None)
-        config["insecure_options"] = {"allow_private_endpoints": True}
+        config["insecure_options"] = {"allow_private_endpoints": True, "allow_private_upstreams": True}
         class IndentedDumper(yaml.SafeDumper):
             def increase_indent(self, flow=False, indentless=False):
                 return super().increase_indent(flow, False)
@@ -307,6 +307,30 @@ def return_to_mocks(args):
     (STATE / "state.json").rename(STATE / f"state-real-{time.time_ns()}.json")
 
 
+def openshell_inference(state):
+    if state.get("mock", True):
+        return ["OPENSHELL_MODEL_ID=fixture"]
+    if not state.get("ready"):
+        raise ValueError("complete real-setup before OpenShell inference")
+    return ["OPENSHELL_MODEL_ID=qwen3-8b", "PRAXIS_API_PREFIX=/vllm"]
+
+
+def openshell_names(owner_command):
+    result = run(*owner_command, "openshell", "sandbox", "list", "--output", "json",
+                 cwd="/", capture_output=True, text=True)
+    return {item["name"] for item in json.loads(result.stdout)["sandboxes"]}
+
+
+def openshell_leftovers(owner_command, existing, attempts=15):
+    # Delete accepts the request before the gateway finishes removing containers.
+    for attempt in range(attempts):
+        leftovers = sorted(name for name in openshell_names(owner_command) - existing
+                           if name.startswith(("ospx-smoke-", "policy-deny-", "policy-allow-")))
+        if not leftovers or attempt + 1 == attempts:
+            return leftovers
+        time.sleep(2)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", required=True, choices=("all-in-one", "remote-gateway"))
@@ -400,19 +424,18 @@ def main():
             run("chown", "-R", f"root:{owner.pw_gid}", directory)
             run("chmod", "-R", "u=rwX,g=rX,o=", directory)
             owner_command = ["runuser", "-u", "openshell-svc", "--", "env", "-i",
-                f"HOME={owner.pw_dir}", "PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8",
+                f"HOME={owner.pw_dir}", "PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin", "LANG=C.UTF-8",
                 f"XDG_RUNTIME_DIR=/run/user/{owner.pw_uid}",
                 f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{owner.pw_uid}/bus",
-                "OPENSHELL_MODEL_ID=fixture"]
+                "OPENSHELL_TELEMETRY_ENABLED=false",
+                *openshell_inference(json.loads((STATE / "state.json").read_text()))]
+            existing = openshell_names(owner_command)
             result = subprocess.run([*owner_command, "bash", str(Path(directory) / "tests/openshell-praxis/smoke.sh")], cwd="/")
             if result.returncode:
                 print("Integrated inference failed; checking independent policy positive control separately", flush=True)
                 policy = subprocess.run([*owner_command, "bash", str(Path(directory) / "openshell/tests/openshell-policy.sh")], cwd="/")
                 print(f"Independent policy suite exit code: {policy.returncode}", flush=True)
-            sandboxes = json.loads(run(*owner_command, "openshell", "sandbox", "list", "--output", "json",
-                                       cwd="/", capture_output=True, text=True).stdout)
-            leftovers = [item["name"] for item in sandboxes["sandboxes"]
-                         if item["name"].startswith(("ospx-smoke-", "policy-deny-", "policy-allow-"))]
+            leftovers = openshell_leftovers(owner_command, existing)
             print("OpenShell test sandbox leftovers: " + json.dumps(leftovers), flush=True)
             if result.returncode or leftovers:
                 raise ValueError("OpenShell qualification failed; keep experimental support and retain the evidence")

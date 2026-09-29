@@ -77,6 +77,8 @@ if args[:2] == ["sandbox", "list"]:
             endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
             self.assertIs(type(endpoint["port"]), int)
             self.assertEqual(endpoint["port"], 18080)
+            self.assertEqual({b["path"] for b in policy["network_policies"]["praxis_gateway"]["binaries"]},
+                             {"/usr/bin/node-26", "/usr/local/bin/opencode"})
             config = json.loads((self.work / "capture.provider").read_text())
             model = self.env["OPENSHELL_MODEL_ID"]
             self.assertEqual(config["model"], f"praxis/{model}")

@@ -5,6 +5,7 @@
 # This profile has exactly one fixed loopback upstream.
 insecure_options:
   allow_private_endpoints: true
+  allow_private_upstreams: true
 
 admin:
   address: "127.0.0.1:9901"

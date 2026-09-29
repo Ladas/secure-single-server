@@ -28,6 +28,9 @@ expect_failure() {
 [[ "$(oci_architecture amd64)" == amd64 ]] || die "amd64 mapping failed"
 [[ "$(oci_architecture aarch64)" == arm64 ]] || die "aarch64 mapping failed"
 [[ "$(oci_architecture arm64)" == arm64 ]] || die "arm64 mapping failed"
+[[ "$(gateway_lock_path praxis-svc)" == /run/lock/praxis-gateway.lock ]] || die 'Praxis lock changed'
+[[ "$(gateway_lock_path openshell-svc)" != "$(gateway_lock_path praxis-svc)" ]] || die 'independent owners share a lock'
+expect_failure gateway_lock_path '../invalid'
 expect_failure oci_architecture ppc64le
 expect_failure oci_architecture ''
 require_linux_image_platform praxis linux amd64 amd64

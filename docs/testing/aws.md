@@ -227,14 +227,31 @@ Exit the remote shell and continue from your workstation.
 
 ## 5. Create the all-in-one user login
 
-For each **all-in-one** VM, run this once after selecting it above. It creates
+Select **one** all-in-one VM in your workstation terminal. Verification sets
+`RHEL_HOST` for that VM. Run one block, then the creation block below:
+
+```console
+aws_test_verify all-in-one-gpu || printf 'Verify failed; do not create the account.\n'
+```
+
+```console
+aws_test_verify all-in-one-cpu || printf 'Verify failed; do not create the account.\n'
+```
+
+For external providers only:
+
+```console
+aws_test_verify all-in-one-cloud || printf 'Verify failed; do not create the account.\n'
+```
+
+Repeat selection and creation for each all-in-one VM you deployed. This creates
 `praxis-user` before installing Praxis or vLLM, using only this run's public
 SSH key. The account has no sudo or service-group membership. Remote-gateway
 users run clients on their own machines; skip this step for gateway VMs.
 
 ```console
 tar --no-xattrs -czf - scripts/common/harness-user scripts/common/harness_user.py \
-  scripts/common/harness.py tests/rhel/harness-versions.json | \
+  scripts/common/harness.py configs/common/harness-versions.json | \
   ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
     'install -d -m 0700 ~/secure-single-server-deploy && tar -xzf - -C ~/secure-single-server-deploy' &&
 scp -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" \

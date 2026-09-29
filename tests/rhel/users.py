@@ -57,6 +57,12 @@ class UserTest(unittest.TestCase):
             execute.assert_not_called()
 
     def test_create_has_private_home_key_and_no_admin_groups(self):
+        bundle = self.root / "deployment"
+        (bundle / "scripts/common").mkdir(parents=True)
+        (bundle / "configs/common").mkdir(parents=True)
+        (bundle / "scripts/common/harness.py").write_bytes((ROOT / "scripts/common/harness.py").read_bytes())
+        versions = '{"opencode-ai": "1.18.32"}\n'
+        (bundle / "configs/common/harness-versions.json").write_text(versions)
         home = self.root / "tester"
         account = SimpleNamespace(pw_uid=1002, pw_gid=1002, pw_dir=str(home))
         calls = []
@@ -64,7 +70,7 @@ class UserTest(unittest.TestCase):
             calls.append(command)
             if command[0] == "useradd":
                 home.mkdir()
-        with patch.object(users, "HOME_ROOT", self.root), \
+        with patch.object(users, "ROOT", bundle), patch.object(users, "HOME_ROOT", self.root), \
              patch.object(users, "BIN_DIR", self.root / "bin"), \
              patch.object(users, "DATA_DIR", self.root / "share"), \
              patch.object(users.pwd, "getpwnam", side_effect=[KeyError, account]), \
@@ -81,7 +87,7 @@ class UserTest(unittest.TestCase):
         self.assertNotIn("--groups", calls[0])
         self.assertIn(("restorecon", "-RF", str(home)), calls)
         self.assertTrue((self.root / "bin/praxis-harness").is_file())
-        self.assertTrue((self.root / "share/harness-versions.json").is_file())
+        self.assertEqual((self.root / "share/harness-versions.json").read_text(), versions)
 
     def test_unexpected_privileged_group_stops_before_authorizing_login(self):
         home = self.root / "tester"

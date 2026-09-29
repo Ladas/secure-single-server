@@ -6,6 +6,10 @@ bind_address        = "127.0.0.1:8090"
 health_bind_address = "127.0.0.1:8091"
 log_level           = "info"
 compute_driver      = "podman"
+# Podman supervisors authenticate their TLS connection back to the gateway.
+guest_tls_ca = "/var/lib/openshell/tls/ca.crt"
+guest_tls_cert = "/var/lib/openshell/tls/client/tls.crt"
+guest_tls_key = "/var/lib/openshell/tls/client/tls.key"
 
 [openshell.gateway.auth]
 allow_unauthenticated_users = false

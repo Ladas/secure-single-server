@@ -22,80 +22,14 @@ CLIENT_STATE="$PWD/.state/rhel-${RHEL_HOST/@/-}"
 CALLER_JWT="$CLIENT_STATE/manual-$(date -u +%Y%m%dT%H%M%S).jwt"
 scripts/remote-gateway/credentials issue --key "$CLIENT_STATE/issuer/private.pem" \
   --subject manual-user --days 1 --output "$CALLER_JWT"
-HARNESS=(python3 "$PWD/scripts/common/harness.py")
-GATEWAY=(--url "https://${RHEL_HOST#*@}:8443" \
-  --ca-file "$CLIENT_STATE/tls-local-client/ca.pem" --token-file "$CALLER_JWT")
 ```
 
-Install the pinned CLIs in an ordinary workstation account without saved
-personal provider credentials. Do not use sudo:
-
-```console
-python3 - <<'PYCLIENT'
-import json, pathlib, subprocess
-versions = json.loads(pathlib.Path("tests/rhel/harness-versions.json").read_text())
-subprocess.run(["npm", "install", "--global", "--prefix", str(pathlib.Path.home() / ".local"),
-                *[f"{name}@{version}" for name, version in versions.items()]], check=True)
-PYCLIENT
-export PATH="$HOME/.local/bin:$PATH"
-TEST_PROJECT="$(mktemp -d "$HOME/praxis-acceptance.XXXXXX")"
-cd "$TEST_PROJECT"
-git init -q
-```
-
-## Choose a remote provider and harness
-
-### Qwen
-
-Start with OpenCode:
-
-```console
-"${HARNESS[@]}" opencode --provider vllm "${GATEWAY[@]}"
-```
-
-For Codex/Claude testing, check the remote-gateway matrix first; the current
-all-in-one results do not qualify remote clients:
-
-```console
-"${HARNESS[@]}" codex --provider vllm "${GATEWAY[@]}"
-```
-
-```console
-"${HARNESS[@]}" claude --provider vllm "${GATEWAY[@]}"
-```
-
-### OpenAI
-
-First [enable OpenAI on the server](rhel-real.md#3-add-openai-to-existing-praxis).
-Enter an approved model ID, then choose one client:
-
-```console
-printf 'OpenAI model ID: '
-IFS= read -r OPENAI_MODEL
-"${HARNESS[@]}" codex --provider openai --model "$OPENAI_MODEL" "${GATEWAY[@]}"
-```
-
-```console
-"${HARNESS[@]}" opencode --provider openai --model "$OPENAI_MODEL" "${GATEWAY[@]}"
-```
-
-### Anthropic
-
-First [enable Anthropic](rhel-real.md#4-add-anthropic-independently).
-Enter an approved model ID, then choose one client:
-
-```console
-printf 'Anthropic model ID: '
-IFS= read -r ANTHROPIC_MODEL
-"${HARNESS[@]}" claude --provider anthropic --model "$ANTHROPIC_MODEL" "${GATEWAY[@]}"
-```
-
-```console
-"${HARNESS[@]}" opencode --provider anthropic --model "$ANTHROPIC_MODEL" "${GATEWAY[@]}"
-```
-
-Interactive clients retain their normal tool approvals. Real cloud calls use
-the administrator's provider account.
+Give the user that JWT file, the public certificate
+`$CLIENT_STATE/tls-local-client/ca.pem`, the HTTPS URL and approved model IDs.
+Follow [remote client setup](../quickstarts/remote-gateway/users.md) for pinned
+CLI installation and Qwen/OpenAI/Anthropic commands. The user never receives
+the issuer key or provider keys. Use a fresh project for each combination,
+then run the task below.
 
 ## Acceptance task
 
@@ -120,3 +54,30 @@ claim that tests passed is insufficient.
 
 For sandbox execution, use [OpenShell testing](openshell-manual.md).
 Record direct and sandbox results separately in the [matrix](compatibility.md).
+
+## Model-selector checks
+
+Use the same ordinary-user launcher and provider settings as the task test.
+Open the selector without submitting a prompt:
+
+| Harness | Selector | Expected with the current Qwen setup |
+| --- | --- | --- |
+| Codex | `/model` | Qwen is missing; keep the explicit launcher selection |
+| Claude Code | `/model` | Qwen appears through configured aliases |
+| OpenCode | `/models` | Qwen appears under Praxis |
+
+Record the visible model ID, whether it came from local configuration or a
+fetched catalog, and the exact CLI version. Then select the approved entry,
+submit a short prompt and confirm that Praxis received the chosen model ID.
+Record listing and post-selection inference separately; an API model-list probe
+or a task launched with `--model` does not prove either menu interaction.
+
+Repeat for each enabled cloud provider and remote-client configuration. A menu
+entry does not establish that the administrator's provider account can use it.
+For OpenShell, run inside the sandbox and record the service-operator versus
+personal-user access mode. [Current results](compatibility.md#model-listing-and-model-selectors).
+
+Provider configuration references: [Codex model catalog](https://learn.chatgpt.com/docs/config-file/config-reference),
+[OpenCode custom providers](https://opencode.ai/docs/providers#custom-provider),
+and [Claude model configuration](https://code.claude.com/docs/en/model-config).
+These describe configuration; the matrix records the installed versions' results.

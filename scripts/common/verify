@@ -15,14 +15,14 @@ case "${mode}" in
     ;;
   --host)
     [[ "${EUID}" -eq 0 ]] || { printf 'error: --host requires root\n' >&2; exit 1; }
-    "${REPO_DIR}/tests/shared-gateway-host.sh"
+    "${SCRIPT_DIR}/verify-host"
     ;;
   --help|-h)
     printf 'usage: scripts/common/verify --local | --host\n'
     ;;
   '')
     if [[ "$(uname -s)" == "Linux" && "${EUID}" -eq 0 && -f /etc/praxis/shared-gateway.profile ]]; then
-      "${REPO_DIR}/tests/shared-gateway-host.sh"
+      "${SCRIPT_DIR}/verify-host"
     else
       "${REPO_DIR}/tests/shared-gateway-static.sh"
       "${REPO_DIR}/tests/shared-gateway-image.sh"

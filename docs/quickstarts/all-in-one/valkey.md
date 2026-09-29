@@ -45,20 +45,16 @@ Copy and run unchanged to transfer the configuration, administrator scripts,
 and RHEL host check to a private staging directory:
 
 ```console
-SSH_OPTIONS=()
+SSH_OPTIONS=(-o ForwardAgent=no)
 if [[ -n "$SSH_KEY" ]]; then
-  SSH_OPTIONS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
+  SSH_OPTIONS+=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 fi
 ssh "${SSH_OPTIONS[@]}" "$RHEL_HOST" \
-  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts ~/secure-single-server-deploy/tests ~/secure-single-server-deploy/tests/rhel'
+  'install -d -m 0700 ~/secure-single-server-deploy ~/secure-single-server-deploy/configs ~/secure-single-server-deploy/scripts'
 scp "${SSH_OPTIONS[@]}" -pr configs/all-in-one configs/common \
   "$RHEL_HOST:~/secure-single-server-deploy/configs/"
 scp "${SSH_OPTIONS[@]}" -pr scripts/common scripts/all-in-one \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/"
-scp "${SSH_OPTIONS[@]}" -p tests/shared-gateway-host.sh \
-  "$RHEL_HOST:~/secure-single-server-deploy/tests/"
-scp "${SSH_OPTIONS[@]}" -p tests/rhel/harness-versions.json \
-  "$RHEL_HOST:~/secure-single-server-deploy/tests/rhel/"
 ```
 
 SSH may ask you to confirm the server's host key or unlock your private key.
@@ -79,14 +75,14 @@ cd ~/secure-single-server-deploy
 Copy and run unchanged:
 
 ```console
-sudo dnf install -y podman openssl policycoreutils-python-utils jq tar gzip
+sudo dnf install -y podman python3 python3-pyyaml openssl policycoreutils-python-utils jq tar gzip
 sudo scripts/all-in-one/install --prepare
 ```
 
 ## 3. Create provider secrets
 
 OpenAI is used by Codex and OpenCode; Claude Code also requires an Anthropic
-key. Use dedicated test credentials on a test host. Keep keys out of command
+key. Use dedicated provider credentials for this gateway. Keep keys out of command
 history, files, chat, and harness accounts. Use a private, unrecorded
 administrator terminal; `sudo` I/O recording must not capture secret input.
 Podman secrets are not an encrypted vault: root and the service account

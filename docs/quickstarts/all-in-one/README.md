@@ -66,9 +66,8 @@ need subject-keyed state before that identity can receive an individual limit.
 ## Administrator setup
 
 For local Qwen with optional cloud providers, follow
-[vLLM administration](../../testing/vllm.md), or the complete
-[AWS install/test workflow](../../testing/README.md). Existing Qwen installations
-can add [OpenAI and Anthropic independently](../../testing/rhel-real.md#3-add-openai-to-existing-praxis).
+[vLLM installation](../common/vllm.md). Existing installations can add
+[OpenAI and Anthropic independently](../common/providers.md).
 Then [create ordinary user logins](accounts.md); give users the
 [setup and usage guide](users.md).
 
@@ -140,8 +139,8 @@ Switchyard gaps to fill are:
    allowance.
 5. Caller JWT validation alone does not provide per-user request or token
    limits.
-6. Qwen installation is a separate [vLLM setup](../../testing/vllm.md);
-   native Codex/Claude tool acceptance remains incomplete for the pinned backend.
+6. Qwen installation is a separate [vLLM setup](../common/vllm.md).
+   CPU tasks can take several minutes; prefer GPU for interactive work.
    OpenShell integration has a separate [experimental add-on](../openshell-praxis/README.md).
 
 ## Additional details
@@ -155,8 +154,7 @@ about the last second of writes. Valkey does not store request-rate buckets or
 Switchyard routing decisions.
 
 The local-model workflow pins separate upstream vLLM CPU/GPU images and Qwen3-8B
-weights. See [tested combinations](../../testing/compatibility.md) before
-choosing a harness; basic API success does not establish tool compatibility.
+weights. Follow [user setup](users.md) for harness selection and context limits.
 
 For sandboxed harnesses, see the [OpenShell add-on](../openshell-praxis/README.md)
 or [bootc deployment](../../../bootc/README.md). Neither qualifies retained

@@ -90,6 +90,15 @@ class ProvidersTest(unittest.TestCase):
                     self.assertTrue(f["backend"]["namespace"].startswith("secure-single-server:limits:"))
                     self.assertEqual(f["rules"][0]["capacity"], 1000000)
 
+    def test_private_upstream_permission_is_enabled_only_for_local_inference(self):
+        for scenario in ("all-in-one", "remote-gateway"):
+            for vllm in (False, True):
+                with self.subTest(scenario=scenario, vllm=vllm):
+                    config = providers.render(source(scenario), vllm=vllm, openai=True, anthropic=True)
+                    options = config.get("insecure_options", {})
+                    self.assertEqual(options.get("allow_private_upstreams", False), vllm)
+                    self.assertEqual(options.get("allow_private_endpoints", False), vllm)
+
     def test_reject_empty_set_and_leave_source_unchanged(self):
         original = source("all-in-one")
         before = copy.deepcopy(original)

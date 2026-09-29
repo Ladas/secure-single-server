@@ -22,6 +22,30 @@ import integration
 
 
 class EvidenceTest(unittest.TestCase):
+    def test_openshell_cleanup_waits_for_owned_deletions_only(self):
+        existing = {"ospx-smoke-previous"}
+        states = [["ospx-smoke-previous", "policy-deny-current", "personal"],
+                  ["ospx-smoke-previous", "personal"]]
+        replies = [Namespace(stdout=json.dumps({"sandboxes": [{"name": n} for n in names]}))
+                   for names in states]
+        with patch.object(host, "run", side_effect=replies), patch.object(host.time, "sleep") as sleep:
+            self.assertEqual(host.openshell_leftovers(["owner"], existing, attempts=2), [])
+        sleep.assert_called_once_with(2)
+
+    def test_openshell_cleanup_reports_a_stuck_deletion(self):
+        reply = Namespace(stdout=json.dumps({"sandboxes": [{"name": "policy-deny-current"}]}))
+        with patch.object(host, "run", return_value=reply), patch.object(host.time, "sleep"):
+            self.assertEqual(host.openshell_leftovers(["owner"], set(), attempts=2),
+                             ["policy-deny-current"])
+
+    def test_openshell_probe_uses_the_installed_provider(self):
+        self.assertEqual(host.openshell_inference({"mock": True}),
+                         ["OPENSHELL_MODEL_ID=fixture"])
+        self.assertEqual(host.openshell_inference({"mock": False, "ready": True}),
+                         ["OPENSHELL_MODEL_ID=qwen3-8b", "PRAXIS_API_PREFIX=/vllm"])
+        with self.assertRaises(ValueError):
+            host.openshell_inference({"mock": False, "ready": False})
+
     def test_cpu_harness_has_a_longer_bounded_deadline_without_affecting_mocks(self):
         with tempfile.TemporaryDirectory() as directory:
             mode = Path(directory) / "mode"

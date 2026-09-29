@@ -69,7 +69,8 @@ def render(original, *, vllm, openai, anthropic):
         filters.append({"filter": "load_balancer", "clusters": upstreams})
         chain["filters"] = filters
     if vllm:
-        config.setdefault("insecure_options", {})["allow_private_endpoints"] = True
+        config.setdefault("insecure_options", {}).update(
+            allow_private_endpoints=True, allow_private_upstreams=True)
     return config
 
 

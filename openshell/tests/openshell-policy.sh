@@ -14,8 +14,7 @@ cleanup() {
   rm -rf "${td}"
 }
 trap cleanup EXIT
-fixture_ip="$(ip -4 route get 1.1.1.1 | sed -n 's/.* src \([^ ]*\).*/\1/p')"
-[[ -n "${fixture_ip}" ]] || die "cannot determine private fixture address"
+fixture_ip=127.0.0.1
 python3 "${ROOT}/openshell/tests/controlled-http.py" "${td}/requests" "${fixture_ip}" & server=$!
 for ((i=0; i<20; i++)); do
   if curl -s "http://${fixture_ip}:18080" >/dev/null; then break; fi
@@ -33,7 +32,7 @@ cat >>"${td}/allow.yaml" <<'YAML'
 network_policies:
   control:
     name: control
-    endpoints: [{host: host.containers.internal, port: 18080, protocol: rest, enforcement: enforce, access: read-write}]
+    endpoints: [{host: host.openshell.internal, port: 18080, protocol: rest, enforcement: enforce, access: read-write}]
     binaries: [{path: /usr/bin/node-26}]
 YAML
 harness_create "${ALLOW}" "${ODH_OPENCODE_IMAGE}" "${td}/allow.yaml"
@@ -43,7 +42,7 @@ for name in "${ALLOW}" "${DENY}"; do
   harness_ssh "${name}" 'cat >/tmp/probe.mjs' <"${ROOT}/openshell/tests/probe.mjs"
 done
 before="$(wc -l <"${td}/requests")"
-harness_ssh "${ALLOW}" 'node /tmp/probe.mjs http://host.containers.internal:18080/' >"${td}/allow.json"
+harness_ssh "${ALLOW}" 'node /tmp/probe.mjs http://host.openshell.internal:18080/' >"${td}/allow.json"
 python3 - "${td}/allow.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1])); assert r['status']==401 and r['body']=='controlled-reachable-401',r
@@ -51,7 +50,7 @@ PY
 [[ "$(wc -l <"${td}/requests")" -gt "${before}" ]] || die 'positive control did not reach server'
 before="$(wc -l <"${td}/requests")"
 # Connection failures/timeouts are inconclusive, and fail this test.
-harness_ssh "${DENY}" 'node /tmp/probe.mjs http://host.containers.internal:18080/' >"${td}/deny.json"
+harness_ssh "${DENY}" 'node /tmp/probe.mjs http://host.openshell.internal:18080/' >"${td}/deny.json"
 python3 - "${td}/deny.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))
