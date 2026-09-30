@@ -27,6 +27,23 @@ The launcher sets the Praxis URL, provider, model and client limits, then starts
 the chosen CLI with its normal interactive tool approvals. Run
 `praxis-harness --help` to see its options.
 
+<details>
+<summary>What the launcher changes, and using a configuration file instead</summary>
+
+`praxis-harness` starts your installed CLI with settings for this launch. It
+does not start another proxy or change the model installed on the server.
+Codex receives command-line settings, OpenCode receives JSON through
+`OPENCODE_CONFIG_CONTENT`, and Claude receives environment variables and flags.
+The launcher does not rewrite your configuration files or fetch a combined
+provider catalog. The CLI can still load its existing settings.
+
+See the expandable [per-harness configuration examples](../common/harness-configuration.md)
+for the exact routes, limits and file-based alternatives. With local Qwen,
+Claude uses simple mode: automatic `CLAUDE.md`, skill, plugin and hook discovery
+is disabled. Interactive tool approvals remain active.
+
+</details>
+
 Install the CLIs into your own home, once per account:
 
 ```console
@@ -57,27 +74,32 @@ git init -q
 ### Qwen through local vLLM
 
 When installed by the administrator, Qwen needs no cloud credentials. Start
-with OpenCode:
+with OpenCode. Read the single installed model from the gateway:
 
 ```console
-praxis-harness opencode --provider vllm
+VLLM_MODEL=$(curl -fsS http://127.0.0.1:8080/vllm/v1/models |
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])')
+printf 'Model: %s\n' "$VLLM_MODEL"
+praxis-harness opencode --provider vllm --model "$VLLM_MODEL"
 ```
 
-The launcher selects `qwen3-8b` through Praxis's `/vllm/v1` route, with thinking
-enabled and reasoning separated from the final answer. The local model has a
-16k context; OpenCode and Claude reserve up to 4096 output tokens including
-thinking. CPU responses can take several minutes. All three clients support this workflow
-with the current configuration; GPU is faster. Context remains limited compared
-with hosted models, and model/tool reliability varies.
+The launcher selects that model through Praxis's `/vllm/v1` route, with thinking
+enabled and reasoning separated from the final answer. The 8B preset serves a
+16,384-token context with a 4,096-token OpenCode/Claude output budget; 27B uses
+32,768 and 8,192 respectively, including thinking. Use the matching updated
+server and launcher. The larger 27B budgets still need a RHEL rerun; existing
+passes used 16k/4k. Both supplied model presets support these three clients. CPU responses
+can take several minutes; GPU is faster for interactive use. Context remains
+limited compared with hosted models, and model/tool reliability varies.
 
 Or choose another harness:
 
 ```console
-praxis-harness codex --provider vllm
+praxis-harness codex --provider vllm --model "$VLLM_MODEL"
 ```
 
 ```console
-praxis-harness claude --provider vllm
+praxis-harness claude --provider vllm --model "$VLLM_MODEL"
 ```
 
 ### OpenAI
@@ -123,9 +145,10 @@ praxis-harness opencode --provider anthropic --model "$ANTHROPIC_MODEL"
 OpenCode uses `/models`; Claude and Codex use `/model`. With these launchers,
 OpenCode lists the configured Praxis model and Claude maps its configured Qwen
 aliases. Codex's current menu omits Qwen: keep the model selected by
-`praxis-harness codex --provider vllm`. None of these commands displays an
-automatically aggregated inventory of all Praxis providers. Other built-in
-entries are not a list of administrator-approved models; use the supplied IDs.
+`praxis-harness codex --provider vllm --model "$VLLM_MODEL"`. None of these
+commands displays an automatically aggregated inventory of all Praxis providers.
+Other built-in entries are not a list of administrator-approved models; use the
+supplied IDs.
 
 Interactive clients keep their normal tool approvals. Cloud calls use the administrator's provider account.
 The launcher configures each native API; it does not enable API translation.

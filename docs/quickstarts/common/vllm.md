@@ -1,6 +1,6 @@
 # vLLM administration on RHEL
 
-Install private Qwen3-8B on CPU or one NVIDIA L4, with cloud providers optional.
+Install private Qwen inference on CPU or one NVIDIA L4, with cloud providers optional.
 The administrator manages inference; ordinary users run their own harnesses.
 
 ## Requirements
@@ -9,19 +9,43 @@ Use RHEL 9 x86_64 with SELinux enforcing. Step 2 prepares a new Praxis
 gateway or reuses an installed memory/Valkey profile. Choose one backend:
 
 - **GPU:** one NVIDIA L4, at least 32 GiB RAM and 200 GiB disk.
-- **CPU:** AVX-512, at least 32 GiB RAM; 64 GiB RAM and 100 GiB disk recommended.
+- **CPU:** AVX-512 and 100 GiB disk. Use 64 GiB RAM for quantized 27B;
+  the 8B preset accepts 32 GiB, with 64 GiB recommended.
 
-The installer uses pinned vLLM images, model revision and chat template from
-`configs/vllm/`. It downloads model weights into the service account's persistent
-cache. vLLM joins Praxis's private container network; port 8000 is never
-published on the host. `qwen3.jinja` preserves the pinned model template's
-thinking-enabled default; the server uses the `qwen3` reasoning parser and
-`hermes` tool parser. The harness launcher configures Qwen's reasoning format
-and 16k context; OpenCode and Claude reserve up to 4096 output tokens, including
-thinking. Long reasoning can exhaust that budget before answering. These are
-deployment defaults, not the model's maximum context. CPU tasks can take
-several minutes. Start with OpenCode; GPU is faster for interactive use.
-Thinking does not imply the same answers or reliability as a cloud model.
+The installer pins the vLLM image and model revision, preserves downloaded
+weights in the service account's cache, and keeps port 8000 on Praxis's private
+container network. One model runs at a time; changing the model restarts only
+vLLM. Existing Praxis routes and cloud providers are retained.
+
+| Model option | Weights and template | Intended use |
+| --- | --- | --- |
+| `qwen3-8b` (default) | Qwen3-8B BF16, pinned Qwen3 template, Hermes tool parser | Existing CPU/GPU baseline |
+| `qwen3.8-27b-int4` | RedHatAI Qwen3.8-27B INT4, model revision's native template, Qwen XML tool parser | Larger text-only model; CPU/GPU qualification is recorded separately |
+
+Both keep thinking enabled and one concurrent inference request.
+
+| Mutable RHEL preset | Served context | OpenCode / Claude output, including thinking | Codex auto-compaction threshold |
+| --- | --- | --- | --- |
+| `qwen3-8b` | 16,384 | 4,096 | 12,288 |
+| `qwen3.8-27b-int4` | 32,768 | 8,192 | 24,576 |
+
+Context includes input and output. Codex's compaction headroom is not a separate
+generation cap; Claude and OpenCode use their own compaction logic with the
+configured context/output limits. Claude uses `medium` effort for Qwen3.8
+because that model rejects `high`, and the launcher disables misleading 1M
+context variants for local Qwen. CPU tasks can take minutes.
+
+The recorded 27B RHEL passes used the earlier 16,384 / 4,096 budgets. The larger
+budgets require a fresh CPU/GPU run, including long-session compaction and tool
+continuation. See the [result ledger](../../testing/compatibility.md#cpugpu-limits-and-measured-performance).
+These are deployment limits, not the model's native maximum. For full-context
+hardware estimates and Flash variants, see [instance sizing](../../testing/aws.md#model-and-context-sizing).
+
+The 27B preset uses quantized weights rather than the roughly 54 GB BF16
+weights. Total runtime memory also includes cache and working buffers;
+quantized model size alone is not a RAM/VRAM requirement.
+[Model definition](../../../configs/vllm/qwen3.8-27b-int4.env),
+[upstream quantization](https://huggingface.co/RedHatAI/Qwen3.8-27B-INT4).
 
 ## 1. Transfer the deployment files
 
@@ -88,18 +112,33 @@ sudo scripts/vllm/prepare-gpu
 sudo systemctl reboot
 ```
 
-Reconnect, run `cd ~/secure-single-server-deploy`, then install:
+Reconnect and run `cd ~/secure-single-server-deploy`. Select **one model**:
 
 ```console
-nvidia-smi
-sudo scripts/vllm/install gpu
+VLLM_MODEL=qwen3-8b
 ```
 
-**CPU only:**
+Or select quantized Qwen3.8-27B:
 
 ```console
-sudo scripts/vllm/install cpu
+VLLM_MODEL=qwen3.8-27b-int4
 ```
+
+Then install on the matching hardware:
+
+```console
+# GPU:
+sudo scripts/vllm/install --model "$VLLM_MODEL" gpu
+```
+
+```console
+# CPU:
+sudo scripts/vllm/install --model "$VLLM_MODEL" cpu
+```
+
+To switch back, repeat with `VLLM_MODEL=qwen3-8b`. The old weights remain cached.
+The model is selected during application installation; AWS VM configuration
+continues to select hardware and gateway role.
 
 Installation waits up to 30 minutes for the model. Repeating it preserves the
 cache and replaces only its managed service/template. The GPU container alone
@@ -120,6 +159,23 @@ For all-in-one, [create ordinary user logins](../all-in-one/accounts.md) and
 follow [user setup](../all-in-one/users.md). Remote clients follow
 [HTTPS/JWT user setup](../remote-gateway/users.md).
 
+### Update an existing installation's budgets
+
+Transfer the updated files from the same reviewed checkout, then rerun the
+installer above for the installed model and backend. Wait for it to succeed
+before refreshing the shared launcher on an all-in-one host:
+
+```console
+sudo install -m 0755 scripts/common/harness.py /usr/local/bin/praxis-harness
+```
+
+Restart interactive harness sessions so they load the new limits. Remote
+clients must update their launcher copy too. Updating a client alone does not
+increase the server's context. The RHEL `real-test` phase also refreshes the
+shared launcher, but it does not reinstall vLLM; rerun `real-setup` first on a
+matching test installation without real cloud credentials. Preserve manual
+projects and earlier result files.
+
 ## Inspect the backend
 
 ```console
@@ -129,7 +185,7 @@ sudo bash -c 'source scripts/common/lib.sh; as_service podman port praxis-vllm'
 ```
 
 The port command should print nothing. If the GPU driver is unavailable after a
-kernel update, rerun `prepare-gpu`, reboot and repeat `install gpu`.
+kernel update, rerun `prepare-gpu`, reboot and repeat the install command with the intended `--model`.
 
 ## Remove vLLM
 

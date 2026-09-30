@@ -38,7 +38,8 @@ Continue to [real Qwen setup](rhel-real.md) when both steps pass.
 
 ## Optional Valkey
 
-To test durable quotas, switch the mock installation and repeat lifecycle:
+To exercise the Valkey installation and service recovery, switch the mock
+installation and repeat lifecycle:
 
 ```console
 python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
@@ -48,6 +49,9 @@ python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
 ```
 
 Retain `--profile valkey` on subsequent commands for this VM.
+This does not measure quota persistence across reboot. Use
+[gateway feature testing](gateway-features.md) for counter and harness-error
+acceptance.
 
 ## Optional OpenShell
 

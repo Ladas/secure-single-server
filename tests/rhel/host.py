@@ -252,6 +252,13 @@ def restore_production(args, secrets, account, config=Path("/etc/praxis")):
         run(*command)
 
 
+def installed_model(path=Path("/etc/praxis-vllm/model")):
+    model = path.read_text().strip() if path.exists() else "qwen3-8b"
+    if model not in ("qwen3-8b", "qwen3.8-27b-int4"):
+        raise ValueError("unknown installed vLLM model preset")
+    return model
+
+
 def real_setup(args):
     state_path = STATE / "state.json"
     previous = json.loads(state_path.read_text())
@@ -287,9 +294,11 @@ def real_setup(args):
     fixture = STATE / "bundle"
     if fixture.exists():
         shutil.rmtree(fixture)
-    previous.update(mock=False, ready=False, inference=args.inference, secrets={})
+    model = args.model or "qwen3-8b"
+    previous.update(mock=False, ready=False, inference=args.inference, model=model, secrets={})
     state_path.write_text(json.dumps(previous) + "\n")
-    run("scripts/vllm/install", *(["--image", args.vllm_image] if args.vllm_image else []), args.inference)
+    run("scripts/vllm/install", "--model", model,
+        *(["--image", args.vllm_image] if args.vllm_image else []), args.inference)
     assert not service_output("podman", "ps", "--filter", "label=rhel-smoke=true", "--format", "{{.Names}}")
     run("scripts/common/verify", "--host")
     previous["ready"] = True
@@ -312,7 +321,7 @@ def openshell_inference(state):
         return ["OPENSHELL_MODEL_ID=fixture"]
     if not state.get("ready"):
         raise ValueError("complete real-setup before OpenShell inference")
-    return ["OPENSHELL_MODEL_ID=qwen3-8b", "PRAXIS_API_PREFIX=/vllm"]
+    return ["OPENSHELL_MODEL_ID=" + state.get("model", "qwen3-8b"), "PRAXIS_API_PREFIX=/vllm"]
 
 
 def openshell_names(owner_command):
@@ -338,9 +347,12 @@ def main():
     parser.add_argument("--phase", required=True, choices=("install", "mock", "test", "check", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "all"))
     parser.add_argument("--inference", choices=("cpu", "gpu"))
     parser.add_argument("--vllm-image")
+    parser.add_argument("--model", choices=("qwen3-8b", "qwen3.8-27b-int4"))
     parser.add_argument("--harness", choices=("codex", "opencode", "claude"))
     parser.add_argument("--hostname", required=True)
     args = parser.parse_args()
+    if args.model is not None and args.phase != "real-setup":
+        parser.error("--model applies only to real-setup")
     if args.vllm_image is not None and (args.phase != "real-setup" or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", args.vllm_image)):
         parser.error("--vllm-image requires real-setup and an immutable NAME@sha256:DIGEST")
     if os.geteuid() != 0:

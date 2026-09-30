@@ -7,11 +7,12 @@ an ordinary OS user outside OpenShell; OpenClaw is included only in OpenShell.
 | Section / columns | Test procedure and recorded coverage |
 | --- | --- |
 | All-in-one: Mock | [Native mock smoke](rhel-smoke.md#1-install-and-test): recorded tool queries passed; native rerun with the current Praxis image is pending |
-| All-in-one: Real CPU / Real GPU | [Real Qwen runner](rhel-real.md#2-test-real-inference): API checks and native file/test tasks on each VM; [interactive model selectors](harnesses.md#model-selector-checks) checked separately |
+| All-in-one: Real CPU / Real GPU, each Qwen model | [Real Qwen runner](rhel-real.md#2-test-real-inference): API checks and native file/test tasks on each VM; [interactive model selectors](harnesses.md#model-selector-checks) checked separately |
 | All-in-one: Real OpenAI / Real Anthropic | [Provider setup](rhel-real.md#3-add-openai-to-existing-praxis), then [manual tool task](harnesses.md#acceptance-task) and [selector checks](harnesses.md#model-selector-checks); not run |
 | Remote-gateway: all columns | [External client setup](harnesses.md#remote-gateway-client), then the same manual task and selector checks; not run |
 | OpenShell: Mock / Real CPU / Real GPU / cloud | [Sandbox tool task](openshell-manual.md#2-qualify-actual-sandboxed-harnesses) and [selectors](harnesses.md#model-selector-checks); only real Qwen OpenCode has native task results |
 | OpenShell: infrastructure | [Installation, API and policy probes](openshell-manual.md#1-run-installation-inference-and-policy-probes); these do not qualify native harness rows |
+| Gateway features | [Accounting contracts and RHEL checklist](gateway-features.md); container results and remaining host/harness checks are summarized [below](#gateway-feature-qualification) |
 
 **Tool query** requires streamed inference, tool execution, continuation after
 the tool result, generated files and independently passing tests. **`/model`**
@@ -53,6 +54,36 @@ All six native API probes (Chat, Responses and Messages, each JSON/SSE) and
 finds streamed/final tool-ID drift, also reproduced directly against vLLM.
 See the [current bug and fix candidate](vllm-debugging.md#responses-tool-ids-change-between-stream-and-final-response).
 
+**Qwen3.8-27B INT4 / vLLM**
+
+The following recorded results used 16,384 context / 4,096 output tokens.
+The updated 32,768 / 8,192 preset has not yet been rerun on RHEL; these passes
+remain evidence for the earlier settings only.
+
+| Harness | Check | Real CPU | Real GPU |
+| --- | --- | --- | --- |
+| Codex | Tool query | Passed | Passed |
+| Codex | `/model` | Failed [1] | Failed [1] |
+| Claude Code | Tool query | Passed [2] | Passed [2] |
+| Claude Code | `/model` | Passed [3] | Passed [3] |
+| OpenCode | Tool query | Passed | Passed |
+| OpenCode | `/models` | Passed [3] | Passed [3] |
+
+1. The Codex menu still shows its built-in catalog, without Qwen. Explicit
+   `--model qwen3.8-27b-int4` works.
+2. The launcher sets Claude effort to `medium`. Its default `high` is rejected
+   by this model's template; thinking remains enabled.
+3. These are configured model entries, not automatic provider discovery.
+   The captured Claude menu displayed a `[1m]` alias despite a 16,384-token
+   server. The updated launcher disables 1M variants; fresh menu captures and
+   inference after selecting a menu entry are still required.
+
+Model listing and all six Chat/Responses/Messages JSON/SSE probes passed on
+both hosts. Native tasks ran as `praxis-smoke`, used real tool calls and passed
+independent file/function tests. Separate results above retain the 8B baseline.
+Mock routing was not rerun with the new alias. Strict Responses tool-ID replay,
+reboot recovery and sandbox tasks have not been repeated with 27B.
+
 **OpenAI models**
 
 | Harness | Check | Mock | Real OpenAI |
@@ -88,7 +119,8 @@ have no local CPU/GPU distinction. API translation is not enabled or tested.
 
 An ordinary user runs the harness on a **separate client machine**, through
 HTTPS/JWT to Praxis. CPU/GPU identifies the gateway's vLLM backend. No current
-RHEL variant has completed this external-client qualification. The RHEL runner's
+RHEL variant has completed this external-client qualification. This includes
+both Qwen3-8B and the new Qwen3.8-27B INT4 preset. The RHEL runner's
 on-gateway CLI checks and separate public API probes do not qualify these rows.
 
 **Qwen3-8B / vLLM**
@@ -134,6 +166,8 @@ on-gateway CLI checks and separate public API probes do not qualify these rows.
 (enrollment and workspace ownership). The results below use the locked
 `openshell-svc` management identity; harnesses run as the sandbox user.
 They qualify service-operator testing only, not personal-user access.
+Qwen3.8-27B INT4 has not yet been qualified through OpenShell; the recorded
+local-model results below are for Qwen3-8B only.
 
 **All-in-one: Qwen3-8B / vLLM**
 
@@ -218,6 +252,7 @@ real Qwen CPU/GPU, OpenAI and Anthropic routes.
 | Nonstreaming Qwen API probe | Failed [1] | Failed [1] |
 | Controlled network positive control | Passed | Passed |
 | Controlled denial proof | Failed [2] | Failed [2] |
+| Temporary endpoint grant: approve, retry, recreate without grant | Not run | Not run |
 | Effective sandbox and supervisor limits | Not run | Passed: 2 CPU / 4 GiB |
 
 1. Nonstreaming POST closes before a response. The identical GPU request from
@@ -227,6 +262,11 @@ real Qwen CPU/GPU, OpenAI and Anthropic routes.
    recorded there. The denied request returns `ENOTFOUND`, not an explicit policy
    denial. The qualification fails; this does not prove confinement.
 
+The denial result predates the revised fixture in
+[PR #35](https://github.com/redhat-et/secure-single-server/pull/35). Rerun the
+current denial and temporary-grant probes on both hosts; neither is qualified
+by the earlier results.
+
 ### OpenShell blockers and open issues
 
 | Issue | Remaining gap |
@@ -235,9 +275,32 @@ real Qwen CPU/GPU, OpenAI and Anthropic routes.
 | [#13: provider profiles](https://github.com/redhat-et/secure-single-server/issues/13) | Managed provider attachment and credential lifecycle; missing harness adapters remain separate gaps |
 | [#14: endpoint rules/TLS](https://github.com/redhat-et/secure-single-server/issues/14) | Method/path confinement and TLS on the sandbox-to-Praxis hop; basic operator inference remains testable |
 | [#23: structured evidence](https://github.com/redhat-et/secure-single-server/issues/23), [#24: policy proofs](https://github.com/redhat-et/secure-single-server/issues/24) | Reliable evidence for the inconclusive denial check |
+| [#27: temporary grants](https://github.com/redhat-et/secure-single-server/issues/27) | Implementation merged; approval, retry and grant removal need RHEL acceptance |
 
-No focused issue currently tracks the nonstreaming transport failure or missing
-harness adapters. The issues above are not confirmed explanations for that failure.
+The transport failure and missing adapters need focused follow-up. The issues
+above are not confirmed explanations for the nonstreaming failure.
+
+## Gateway feature qualification
+
+These checks qualify shared gateway behavior separately from tool tasks and
+model menus. Follow [gateway feature testing](gateway-features.md) for commands,
+small-limit settings and acceptance criteria. Container results cover both
+roles with memory and Valkey; they do not establish RHEL or native CLI behavior.
+
+| Feature | Container contracts | All-in-one RHEL | Remote-gateway RHEL |
+| --- | --- | --- | --- |
+| Quota settlement/exhaustion, shared allowances (Q1/Q3) | Passed: native cloud API fixtures; vLLM isolation remains untested | Not run | Not run |
+| Harness error, retry and recovery (Q2) | Not run | Not run | Not run |
+| Concurrent admission, reservation expiry, long inference (Q4/Q5) | Not run | Not run: CPU/GPU | Not run: CPU/GPU |
+| Interrupted streams and missing usage (Q6) | Passed: fixture truncation/missing usage only; active client disconnect pending | Not run | Not run |
+| Rolling-window recovery (Q7) | Not run | Not run | Not run |
+| Memory reset / Valkey persistence, outage and recovery (Q8) | Passed: container restarts/outage | Not run | Not run |
+| Non-inference routes do not drain allowance (Q9) | Not run | Not run | Not run |
+| Authentication/error attribution (Q10) | Passed: remote JWT rejection, upstream errors and provider counters | Not run as a quota test | Not run as a quota test |
+
+RHEL service/reboot checks and successful inference alone do not qualify quota
+enforcement or counter persistence. No OpenShell harness has been qualified
+under quota errors; use the same cases once its adapter is available.
 
 ## Tested stack
 
@@ -246,8 +309,13 @@ and memory quotas. API forwarding is native; translation remains untested.
 
 - Praxis: `quay.io/opendatahub/praxis-experimental@sha256:227d421e963c477038a884dc51ec880c5d0afa30098ae31028ecf85e963e40d5`,
   source `019aa849a219e5c881d69e4a40a1fc190bd6c404`.
-- vLLM 0.30.0, Qwen3-8B, **thinking enabled**;
-  [CPU/GPU image and model pins](../../configs/vllm/images.env).
+- vLLM 0.30.0, **thinking enabled** for both Qwen presets;
+  [CPU/GPU images and Qwen3-8B pin](../../configs/vllm/images.env).
+- Qwen3.8-27B INT4: `RedHatAI/Qwen3.8-27B-INT4` at
+  `91bd022d5b49442a868bc35008f6c21e1860edfa`;
+  [preset](../../configs/vllm/qwen3.8-27b-int4.env). Text-only, native pinned
+  template, `qwen3_xml` tool parser and `qwen3` reasoning parser.
+  The existing bootc path still uses its separate Qwen3-8B configuration.
 - Direct CLIs: Codex 0.157.1, Claude Code 2.1.283, OpenCode 1.18.32
   ([pins](../../configs/common/harness-versions.json)).
 - OpenShell 0.1.2-rhaiv.0; sandbox OpenCode 1.18.31 and Node.js 26.9.0
@@ -258,6 +326,8 @@ both gateway roles with memory and Valkey, including TLS/JWT and mocked provider
 additions. They do not populate native CLI, menu or RHEL lifecycle cells.
 
 ## CPU/GPU limits and measured performance
+
+**Qwen3-8B BF16**
 
 | Setting or observation | All-in-one CPU | All-in-one GPU |
 | --- | --- | --- |
@@ -273,6 +343,38 @@ additions. They do not populate native CLI, menu or RHEL lifecycle cells.
 | Claude Code tool query | 11.0 minutes | 2.2 minutes |
 | OpenCode tool query | 6.4 minutes | 1.5 minutes |
 
+**Qwen3.8-27B INT4**
+
+The measurements below used the same hosts, 16,384-token context,
+4,096-token OpenCode/Claude output, concurrency and harness deadlines as the 8B table.
+Model weights use INT4 with BF16 activations; vision is disabled and the
+prefill batch is limited to 2048 tokens.
+
+| Setting or observation | All-in-one CPU | All-in-one GPU |
+| --- | --- | --- |
+| vLLM reported model-loading memory | 24.34 GiB | 16.84 GiB |
+| KV cache at startup | 4 GiB configured | 2.49 GiB available; 90% GPU memory target |
+| Container RAM after tasks (not peak) | 33.39 GB | 9.78 GB |
+| Host RAM available after tasks (`free -h`) | 28 GiB | 24 GiB |
+| Host `buff/cache` after tasks | 27 GiB | 22 GiB |
+| Swap configured | None | None |
+| GPU memory after tasks (not peak) | Not applicable | 20,968 MiB of 23,034 MiB |
+| Codex tool query | 4.0 minutes | 1.6 minutes |
+| Claude Code tool query, medium effort | 10.2 minutes | 2.6 minutes |
+| OpenCode tool query | 4.8 minutes | 1.1 minutes |
+
+The updated preset serves 32,768 context tokens, with 8,192 OpenCode/Claude
+output tokens and a 24,576-token Codex auto-compaction threshold. CPU/GPU task,
+memory, menu and long-session compaction results at those settings are **Not run**.
+Thinking remains enabled; concurrency remains one. The recorded startup cache
+capacities (50,115 GPU / 79,872 CPU tokens) motivate a 32k trial, not a claim
+that long-context performance or memory is qualified. The separate OpenShell
+adapter retains its conservative 16k/4k settings and has no 27B runtime pass.
+
+Model-loading memory excludes additional runtime/cache costs and is not an
+end-to-end peak measurement. A quantized download size does not equal its
+RAM/VRAM requirement. The same model uses different kernels on CPU and GPU.
+
 Durations are one complete direct-host task per harness/backend. Rates are
 single-request samples, not sustained benchmarks; task times also include
 reasoning, prompt processing and tools. Expect minutes per CPU tool task.
@@ -282,8 +384,10 @@ The runner records limits and elapsed times; timeouts fail and thinking stays on
 
 Private workstation evidence lives in `.state/rhel-USER-HOST/`:
 `praxis40-real-evidence.tar.gz` for direct real tasks, `model-menus.log` for
-selectors, `openshell-node-task.log` for sandbox tasks and OpenShell phase logs
-for infrastructure probes. VM logs and result JSON live in
+selectors, `qwen38-rhel-evidence.tar.gz`, `qwen38-runtime.log` and
+`qwen38-model-menus.log` for quantized-model qualification,
+`openshell-node-task.log` for sandbox tasks and OpenShell phase logs for
+infrastructure probes. VM logs and result JSON live in
 `/var/lib/praxis-rhel-smoke/`. Keep private artifacts out of Git.
 
 Record scenario, execution location, user/access mode, provider, CPU/GPU where

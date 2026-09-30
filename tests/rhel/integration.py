@@ -16,11 +16,11 @@ import time
 import urllib.error
 import urllib.request
 
-from host import ROOT, STATE, capture, run, service, service_output
+from host import ROOT, STATE, capture, installed_model, run, service, service_output
 sys.path.insert(0, str(ROOT / "tests/common"))
 from contracts import check
 sys.path.insert(0, str(ROOT / "scripts/common"))
-from harness import configuration, QWEN_CONTEXT, QWEN_OUTPUT
+from harness import configuration, qwen_limits
 
 USER = "praxis-smoke"
 MARKER = "PRAXIS_SMOKE_TOOL_OK"
@@ -61,9 +61,9 @@ def runtime_metadata(inference=Path("/etc/praxis-vllm"), gateway=Path("/etc/prax
     """Record actual deployed versions without environment or configuration contents."""
     containers = json.loads(service_output("podman", "inspect", "praxis-shared-gateway", "praxis-vllm"))
     images, settings = {}, {}
-    flags = ("--revision", "--served-model-name", "--dtype", "--max-model-len",
+    flags = ("--revision", "--served-model-name", "--dtype", "--max-model-len", "--max-num-batched-tokens",
              "--max-num-seqs", "--tool-call-parser", "--reasoning-parser",
-             "--default-chat-template-kwargs", "--gpu-memory-utilization")
+             "--default-chat-template-kwargs", "--gpu-memory-utilization", "--chat-template", "--quantization")
     for container in containers:
         name = container["Name"].lstrip("/")
         config = container["Config"]
@@ -72,11 +72,15 @@ def runtime_metadata(inference=Path("/etc/praxis-vllm"), gateway=Path("/etc/prax
         if name == "praxis-vllm":
             command = config.get("Cmd") or []
             settings = {flag: command[command.index(flag) + 1] for flag in flags if flag in command}
+            settings["model"] = command[0] if command else None
+            settings["--language-model-only"] = "--language-model-only" in command
     packages = service_output("podman", "exec", "praxis-vllm", "python3", "-c",
         'import importlib.metadata as m,json; print(json.dumps({p:m.version(p) for p in ("vllm","torch","openai","pydantic")}))')
     return {"inference": (inference / "mode").read_text().strip(), "kernel": platform.release(),
             "images": images, "settings": settings, "packages": json.loads(packages),
-            "template_sha256": hashlib.sha256((inference / "chat-template.jinja").read_bytes()).hexdigest(),
+            "template_sha256": (hashlib.sha256((inference / "chat-template.jinja").read_bytes()).hexdigest()
+                                if "--chat-template" in settings else None),
+            "template_source": "override" if "--chat-template" in settings else "pinned model revision",
             "gateway_sha256": hashlib.sha256((gateway / "shared-gateway.yaml").read_bytes()).hexdigest()}
 
 
@@ -186,6 +190,8 @@ class InstalledGateway:
         self.timings = {}
         self.prefix = "/vllm" if self.provider == "vllm" else ""
         self.model = "qwen3-8b" if self.provider == "vllm" else "fixture"
+        if self.real and self.provider == "vllm":
+            self.model = installed_model()
         handlers = [urllib.request.ProxyHandler({})]
         if args.scenario == "remote-gateway":
             # Public HTTPS is checked from the workstation by run.py. AWS SGs
@@ -371,6 +377,8 @@ def harnesses(gateway, install=True, selected=None):
         # Credentials in output are replaced before writing test evidence.
         output = (result.stdout + result.stderr).replace(gateway.token, "[caller]")
         tag = f"{'real' if gateway.real else 'mock'}-{gateway.provider}-{name}-{gateway.args.profile}"
+        if gateway.real:
+            tag += "-" + gateway.model + "-" + str(time.time_ns())
         (STATE / (tag + ".log")).write_text(output)
         assert not timed_out, f"{name} exceeded its time limit; partial evidence: {tag}.log"
         records = gateway.control()["records"]
@@ -411,9 +419,10 @@ def main():
         results = {"scenario": args.scenario, "profile": args.profile, "model": gateway.model, "checks": {}}
         try:
             results["runtime"] = runtime_metadata()
-            results["client_limits"] = {"context_tokens": QWEN_CONTEXT,
-                                        "opencode_claude_output_tokens": QWEN_OUTPUT,
-                                        "codex_auto_compact_tokens": QWEN_CONTEXT - QWEN_OUTPUT,
+            context, output = qwen_limits(gateway.model)
+            results["client_limits"] = {"context_tokens": context,
+                                        "opencode_claude_output_tokens": output,
+                                        "codex_auto_compact_tokens": context - output,
                                         "harness_timeout_seconds": harness_timeout(True)}
             results["harness_timings"] = gateway.timings
             started = time.monotonic()

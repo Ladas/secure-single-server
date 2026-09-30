@@ -10,6 +10,26 @@ sudo dnf install -y python3-pyyaml
 sudo scripts/common/providers show
 ```
 
+## How providers share the gateway
+
+There is one Praxis service and one installed `/etc/praxis/shared-gateway.yaml`.
+The installer and provider helper render it from the selected all-in-one or
+remote-gateway template. Enabling vLLM adds routes to its private container;
+enabling OpenAI/Anthropic adds cloud routes and secret references to the same
+configuration. Existing listeners and remote TLS/JWT protection are preserved.
+
+| Client API | All-in-one listener | Remote-gateway listener | Destination |
+| --- | --- | --- | --- |
+| `/vllm/v1/responses`, `/vllm/v1/chat/completions` | Loopback `8080` | HTTPS/JWT `8443` | Private vLLM |
+| `/vllm/v1/messages` | Loopback `8081` | HTTPS/JWT `8443` | Private vLLM |
+| `/v1/responses`, `/v1/chat/completions` | Loopback `8080` | HTTPS/JWT `8443` | OpenAI, when enabled |
+| `/v1/messages` | Loopback `8081` | HTTPS/JWT `8443` | Anthropic, when enabled |
+
+No extra public listener or manual YAML merge is needed. The renderer strips
+`/vllm` before forwarding. `configs/vllm/praxis.yaml` is a separate bootc
+profile; mutable RHEL installation does not combine it with the gateway YAMLs.
+Use the matching deployment checkout: the helper rejects configuration drift.
+
 ## Add OpenAI
 
 ```console

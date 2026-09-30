@@ -13,6 +13,144 @@ and journal. They can run at the same time. AWS deployment prepares the host;
 | `all-in-one-cloud` | Local users, external providers only | No vLLM: `m7i.2xlarge`, 32 GiB RAM, 50 GiB disk |
 | `remote-gateway-cloud` | Remote clients, external providers only | No vLLM: `m7i.2xlarge`, 32 GiB RAM, 50 GiB disk |
 
+## Model and context sizing
+
+Choose a model, total context, output allowance and concurrency before choosing
+hardware. The table below assumes **one text-only request at a time**. Context
+contains input, thinking and the final answer; output is not extra space beyond
+that total. The 27B preset now uses 32,768 context / 8,192 output tokens. Its
+recorded RHEL passes used 16,384 / 4,096; a fresh run is required for the increase.
+
+The larger rows are **planning candidates, not tested deployment presets or
+proven minimum instance sizes**. GPU memory is AWS's advertised GB; host RAM is
+GiB. Region/AZ availability, runtime kernels and measured peak memory still
+need verification before deployment.
+
+| Model and target | Instance candidate | Host RAM / GPU memory | Status and required changes |
+| --- | --- | --- | --- |
+| 27B INT4, 32,768 context / 8,192 output | `g6.2xlarge` | 32 GiB / 1 × L4, 24 GB | Current GPU host; increased budgets need rerun. 200 GiB EBS |
+| 27B INT4, 32,768 context / 8,192 output | `m7i.4xlarge` | 64 GiB / CPU | Current CPU host; increased budgets need rerun. 100 GiB EBS |
+| 27B INT4, full native 262,144 context / 32,768 output trial | `g6e.2xlarge` | 64 GiB / 1 × L40S, 48 GB | First GPU sizing candidate; larger cache and matching client limits. 200 GiB EBS |
+| 27B INT4, full native 262,144 context / 32,768 output trial | `m7i.8xlarge` | 128 GiB / CPU, 32 vCPU | CPU capacity candidate, not a latency recommendation; raise the explicit 4 GiB cache allocation. 200 GiB EBS |
+| 27B INT4, extended 1,000,000 context and large reasoning/output allowances | `g7e.12xlarge` | 512 GiB / 2 × RTX PRO 6000 Blackwell, 192 GB total | Conservative GPU headroom candidate; YaRN, multiple GPUs, cache and client changes required. 300 GiB EBS |
+| 27B INT4, extended 1,000,000 context and large reasoning/output allowances | `r7i.8xlarge` | 256 GiB / CPU, 32 vCPU | CPU memory candidate only; much larger cache and unqualified long-request latency. 300 GiB EBS |
+| Flash-Next official FP8, native 262,144 context / 32,768 output trial | `g7e.24xlarge` | 1,024 GiB / 4 × RTX PRO 6000 Blackwell, 384 GB total | Planning headroom for the much larger model; new model/runtime and multiple-GPU preset required. Start with 1 TiB EBS |
+| Flash-Next NVIDIA NVFP4, native 262,144 context / 32,768 output trial | `g7e.12xlarge` | 512 GiB / 2 × RTX PRO 6000 Blackwell, 192 GB total | Memory candidate only; this GPU/runtime combination is not established by NVIDIA's B200/B300 reference. Start with 1 TiB EBS |
+
+Hardware sources: [G6](https://aws.amazon.com/ec2/instance-types/g6/),
+[G6e](https://aws.amazon.com/ec2/instance-types/g6e/),
+[G7e](https://aws.amazon.com/ec2/instance-types/g7e/),
+[M7i](https://aws.amazon.com/ec2/instance-types/m7i/) and
+[R7i](https://aws.amazon.com/ec2/instance-types/r7i/).
+EBS sizes and candidate selections are project planning estimates.
+
+The current AWS helper accepts **one full NVIDIA L4 only**, and the mutable
+installer uses tensor parallelism one. A larger `g6.4xlarge` increases CPU/RAM
+but retains the same 24 GB L4. G6e/G7e and multiple-GPU rows need a separately
+qualified hardware/runtime profile; they cannot be enabled by changing just
+`--instance-type`. A larger CPU VM alone also leaves the present cache and
+context settings unchanged.
+
+<details>
+<summary>Why cache capacity depends on RAM or VRAM, and what “full context” means</summary>
+
+Linux `buff/cache` includes file cache that can be reclaimed. Judge host memory
+headroom using `MemAvailable` (`free -h`'s `available` column), not just `free`
+or a graph that counts file cache as used. This differs from vLLM's allocated
+inference KV cache. The earlier 16K runs recorded 24 GiB available on the GPU
+host and 28 GiB on the CPU host, despite 22 GiB and 27 GiB of `buff/cache`.
+These are snapshots, not current readings or peak-load measurements.
+[Linux memory accounting](https://docs.kernel.org/filesystems/proc.html#meminfo).
+
+The existing vLLM startup pools held 50,115 tokens on GPU and 79,872 on CPU.
+Both exceed the proposed 32,768-token total window, supporting a trial on the
+current machines without raising memory allocations. vLLM reserves cache at
+startup, so doubling the permitted sequence length need not double its reserved
+memory. Recheck capacity after restarting and exercise a near-limit request;
+the old pool sizes do not qualify the new limits. CPU keeps its explicit
+`VLLM_CPU_KVCACHE_SPACE=4`; GPU keeps its 90% memory target.
+
+On CPU, model weights, cache and working buffers consume host RAM. On GPU,
+weights and the normal inference cache primarily consume GPU VRAM; more host
+RAM does not automatically increase it. Capacity also depends on cache dtype,
+attention layout, recurrent state, sequence count, prefill buffers and the
+memory reserved by the runtime. Weight INT4 does not mean cache INT4.
+
+For the pinned 27B architecture, the full-attention portion has 16 layers,
+four KV heads and head dimension 256. A conservative BF16 KV estimate is:
+
+```text
+2 (K and V) × 16 layers × 4 heads × 256 × 2 bytes = 65,536 bytes/token
+262,144 tokens → 16 GiB of full-attention KV
+1,000,000 tokens → about 61 GiB of full-attention KV
+```
+
+Add recurrent state, allocation overhead, weights and working buffers. FP8 KV
+can reduce that component, but requires its own support/quality qualification;
+the estimate does not assume it. The observed 27B model-loading memory was
+16.84 GiB on GPU and 24.34 GiB on CPU. This explains why the current 24 GB L4
+is a bounded-context host, and why 48 GB is a reasonable first full-native-context
+GPU candidate. These calculations are not an end-to-end memory benchmark.
+[Pinned architecture](https://huggingface.co/RedHatAI/Qwen3.8-27B-INT4/blob/91bd022d5b49442a868bc35008f6c21e1860edfa/config.json),
+[measured baseline](compatibility.md#cpugpu-limits-and-measured-performance).
+
+The current 64 GiB CPU host is not ruled out for a single full-native-context
+request: its measured available RAM could accommodate a larger cache. That
+requires changing the explicit cache allocation and testing peak memory,
+reclaim pressure and latency. The 128 GiB row provides conservative headroom;
+it is not a demonstrated minimum. The current L4's spare host RAM cannot
+extend its VRAM cache without a separately qualified offload strategy.
+
+The native window is 262,144 tokens. A 32,768-token output trial leaves at most
+229,376 tokens for all input, including instructions/tools, before allowing
+for client overhead. That output allowance is a proposed coding-test budget,
+not a model maximum. Qwen describes extending to 1,000,000 with YaRN and, for
+frameworks with separate budgets, up to 262,144 reasoning plus 131,072 final
+tokens. Those combined allowances leave at most 606,784 input tokens inside
+1,000,000. Our current launcher does not expose those separate budgets;
+harness/API output ceilings must also be qualified. A larger instance cannot
+remove a client's output cap.
+[Qwen context and output guidance](https://huggingface.co/Qwen/Qwen3.8-27B#best-practices).
+
+Before recommending a larger profile, record the engine's cache capacity,
+peak RAM/VRAM, a request near the chosen total window, thinking/final usage,
+tool continuation and compaction recovery. Test each additional simultaneous
+sequence separately. Larger memory does not establish acceptable CPU latency.
+
+</details>
+
+<details>
+<summary>Qwen3.8 Flash: downloadable quantizations versus the hosted service</summary>
+
+The self-hosted model is **Qwen3.8-Flash-Next**. Its language model has 125B
+parameters with 6B active per token, plus a 51B n-gram embedding and 4B MTP.
+Low active-parameter count reduces computation, not the need to store the
+other weights. Its native window is 262,144; 1M is an extension.
+[Qwen model card](https://huggingface.co/Qwen/Qwen3.8-Flash-Next).
+
+Quantizations exist: Qwen publishes
+[Flash-Next-FP8](https://huggingface.co/Qwen/Qwen3.8-Flash-Next-FP8), and NVIDIA
+publishes [Flash-Next-NVFP4](https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4).
+NVIDIA's artifact mixes NVFP4 experts, BF16 layers and FP8 MTP/embedding data;
+it is not uniformly four-bit. Neither artifact fits the current L4 as a normal
+all-GPU deployment. The G7e rows above are estimates for a new qualification.
+
+NVIDIA's published reference uses eight B200/B300 GPUs and a specific minimum
+vLLM source revision. An AWS counterpart is `p6-b200.48xlarge` (eight B200,
+2,048 GiB host RAM), not a claim that eight GPUs are the minimum. Two RTX PRO
+GPUs may have sufficient memory for the NVFP4 candidate, but the reference
+does not prove its kernels, tensor parallelism or performance there.
+[AWS P6 hardware](https://aws.amazon.com/ec2/instance-types/p6/).
+
+The hosted **Qwen3.8-Flash** service is based on Flash-Next and supplies its own
+production features and 1M window. Calling that service needs gateway capacity,
+not local model GPU memory, but its provider integration is not implemented by
+these vLLM presets. The FP8 card distinguishes the hosted and downloadable
+versions. Flash installation, pins and acceptance remain future work; this PR
+only adds sizing guidance.
+
+</details>
+
 Run these commands from the repository root on your workstation, in Bash or
 zsh. Install AWS CLI v2, Python 3.9+, `jq`, `curl` and OpenSSH first.
 
@@ -75,7 +213,9 @@ before retrying. For `InsufficientInstanceCapacity`, use the
 [placement check and recovery steps](aws-operations.md#capacity-errors).
 Nothing is cleaned up automatically.
 
-The config chooses hardware; `--scenario` chooses the gateway role. To change
+The config chooses hardware; `--scenario` chooses the gateway role. Select
+Qwen3-8B or quantized Qwen3.8-27B later during [vLLM setup](rhel-real.md#1-install-real-qwen);
+AWS deployment itself does not install a model. To change
 hardware or disk size, see [configuration examples](aws-operations.md#direct-cli-and-custom-vm-configurations).
 
 ### All-in-one GPU
