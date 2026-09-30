@@ -75,7 +75,9 @@ before retrying. For `InsufficientInstanceCapacity`, use the
 [placement check and recovery steps](aws-operations.md#capacity-errors).
 Nothing is cleaned up automatically.
 
-The config chooses hardware; `--scenario` chooses the gateway role. To change
+The config chooses hardware; `--scenario` chooses the gateway role. Select
+Qwen3-8B or quantized Qwen3.8-27B later during [vLLM setup](rhel-real.md#1-install-real-qwen);
+AWS deployment itself does not install a model. To change
 hardware or disk size, see [configuration examples](aws-operations.md#direct-cli-and-custom-vm-configurations).
 
 ### All-in-one GPU

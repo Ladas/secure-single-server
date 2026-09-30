@@ -153,8 +153,9 @@ named volume using AOF with `appendfsync everysec`. A sudden failure may lose
 about the last second of writes. Valkey does not store request-rate buckets or
 Switchyard routing decisions.
 
-The local-model workflow pins separate upstream vLLM CPU/GPU images and Qwen3-8B
-weights. Follow [user setup](users.md) for harness selection and context limits.
+The [local-model workflow](../common/vllm.md) pins separate upstream vLLM CPU/GPU
+images and offers Qwen3-8B or quantized Qwen3.8-27B weights. Follow
+[user setup](users.md) for harness selection and context limits.
 
 For sandboxed harnesses, see the [OpenShell add-on](../openshell-praxis/README.md)
 or [bootc deployment](../../../bootc/README.md). Neither qualifies retained

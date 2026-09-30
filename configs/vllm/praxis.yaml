@@ -1,4 +1,6 @@
 # Local Qwen3-8B through vLLM with in-memory shared limits.
+# Bootc profile. Mutable RHEL uses the all-in-one/remote-gateway templates
+# with scripts/common/provider_config.py; this file is not merged into them.
 # Caller authentication is intentionally omitted. Separate OS logins are the
 # admission boundary, and Podman publishes these listeners on host loopback.
 

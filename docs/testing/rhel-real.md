@@ -19,15 +19,31 @@ python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
   --scenario "$RHEL_SCENARIO" --phase lifecycle
 ```
 
-**Both CPU and GPU:**
+**Both CPU and GPU:** choose one model, then run setup.
+
+```console
+VLLM_MODEL=qwen3-8b
+```
+
+Or test quantized Qwen3.8-27B on the selected host:
+
+```console
+VLLM_MODEL=qwen3.8-27b-int4
+```
 
 ```console
 python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
-  --scenario "$RHEL_SCENARIO" --phase real-setup --inference "$RHEL_INFERENCE"
+  --scenario "$RHEL_SCENARIO" --phase real-setup --inference "$RHEL_INFERENCE" \
+  --model "$VLLM_MODEL"
 ```
 
 This removes mocks and synthetic cloud secrets, preserves TLS/JWT and Valkey
-data, and starts pinned Qwen3-8B as `qwen3-8b`. vLLM has no published host port.
+data, and starts the selected pinned model. The served model ID is the preset
+name. vLLM has no published host port. To switch models on this test installation
+before adding cloud keys, repeat setup with the other preset; its downloaded
+cache is retained. After adding real keys, use the
+[administrator installer](../quickstarts/common/vllm.md#3-install-one-backend)
+to change models; the test setup refuses real provider credentials.
 Downloads and CPU startup take several minutes. No cloud key is required.
 Qwen thinking is enabled. The [matrix](compatibility.md) records the current
 tested stack and results for each setup and harness.
@@ -42,8 +58,9 @@ python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
 ```
 
 To test reboot recovery, change `real-test` to `real-lifecycle`. To test all
-three CLIs, omit `--harness opencode`. All three passed on all-in-one CPU/GPU
-vLLM 0.30; limits are recorded in the [compatibility matrix](compatibility.md).
+three CLIs, omit `--harness opencode`. Tests read the installed model and record
+its identity with the results; no `--model` is needed for this phase. Results
+and limits are recorded separately for each model in the [compatibility matrix](compatibility.md).
 Every failure returns nonzero. Logs are under `.state/rhel-USER-HOST/` on your
 workstation and `/var/lib/praxis-rhel-smoke/` on the VM. Real-test JSON records
 the deployed image versions, parser/model settings and configuration hashes.

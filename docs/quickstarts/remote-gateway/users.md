@@ -97,20 +97,28 @@ git init -q
 
 ### Qwen through vLLM
 
-Choose one client. The launcher adds `/vllm` and the model's 16k context settings.
+Enter the model ID supplied by the administrator, `qwen3-8b` or
+`qwen3.8-27b-int4`, then choose one client:
+
+```console
+printf 'Installed vLLM model ID: '
+IFS= read -r VLLM_MODEL
+```
+
+The launcher adds `/vllm` and the model's 16k context settings.
 CPU inference can take several minutes. OpenCode and Claude reserve up to
 4096 output tokens including thinking.
 
 ```console
-"${HARNESS[@]}" opencode --provider vllm "${GATEWAY[@]}"
+"${HARNESS[@]}" opencode --provider vllm --model "$VLLM_MODEL" "${GATEWAY[@]}"
 ```
 
 ```console
-"${HARNESS[@]}" claude --provider vllm "${GATEWAY[@]}"
+"${HARNESS[@]}" claude --provider vllm --model "$VLLM_MODEL" "${GATEWAY[@]}"
 ```
 
 ```console
-"${HARNESS[@]}" codex --provider vllm "${GATEWAY[@]}"
+"${HARNESS[@]}" codex --provider vllm --model "$VLLM_MODEL" "${GATEWAY[@]}"
 ```
 
 ### OpenAI

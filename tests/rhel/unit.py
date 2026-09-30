@@ -22,6 +22,22 @@ import integration
 
 
 class EvidenceTest(unittest.TestCase):
+    def test_installed_model_preserves_legacy_hosts_and_rejects_invalid_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model"
+            self.assertEqual(host.installed_model(path), "qwen3-8b")
+            path.write_text("qwen3.8-27b-int4\n")
+            self.assertEqual(host.installed_model(path), "qwen3.8-27b-int4")
+            path.write_text("unknown\n")
+            with self.assertRaises(ValueError):
+                host.installed_model(path)
+
+    def test_real_gateway_uses_installed_model_but_mock_keeps_fixture_alias(self):
+        for real, expected in ((True, "qwen3.8-27b-int4"), (False, "qwen3-8b")):
+            with patch.object(integration, "installed_model", return_value="qwen3.8-27b-int4"):
+                gateway = integration.InstalledGateway(Namespace(scenario="all-in-one", provider="vllm", real=real))
+            self.assertEqual(gateway.model, expected)
+
     def test_openshell_cleanup_waits_for_owned_deletions_only(self):
         existing = {"ospx-smoke-previous"}
         states = [["ospx-smoke-previous", "policy-deny-current", "personal"],
@@ -43,6 +59,8 @@ class EvidenceTest(unittest.TestCase):
                          ["OPENSHELL_MODEL_ID=fixture"])
         self.assertEqual(host.openshell_inference({"mock": False, "ready": True}),
                          ["OPENSHELL_MODEL_ID=qwen3-8b", "PRAXIS_API_PREFIX=/vllm"])
+        self.assertEqual(host.openshell_inference({"mock": False, "ready": True, "model": "qwen3.8-27b-int4"}),
+                         ["OPENSHELL_MODEL_ID=qwen3.8-27b-int4", "PRAXIS_API_PREFIX=/vllm"])
         with self.assertRaises(ValueError):
             host.openshell_inference({"mock": False, "ready": False})
 
@@ -71,6 +89,7 @@ class EvidenceTest(unittest.TestCase):
                            "Config": {"Env": ["PRIVATE_SECRET=must-not-record"],
                                       "Labels": {"org.opencontainers.image.revision": "revision"},
                                       "Cmd": ["model", "--revision", "model-revision",
+                                              "--chat-template", "/etc/vllm-chat-template.jinja",
                                               "--default-chat-template-kwargs", '{"enable_thinking":true}',
                                               "--api-key", "must-not-record"]}}
                           for name in ("praxis-shared-gateway", "praxis-vllm")]
@@ -91,6 +110,16 @@ class EvidenceTest(unittest.TestCase):
 
 
 class RunnerTest(unittest.TestCase):
+    def test_model_selection_rejects_other_phases_before_ssh(self):
+        args = ["run.py", "--host", "test@example.test", "--ssh-key", "/missing-key",
+                "--scenario", "all-in-one", "--phase", "real-test", "--model", "qwen3.8-27b-int4"]
+        error = io.StringIO()
+        with patch.object(sys, "argv", args), patch.object(sys, "stderr", error), \
+             patch.object(runner, "run") as execute, self.assertRaises(SystemExit):
+            runner.main()
+        self.assertIn("--model applies only to real-setup", error.getvalue())
+        execute.assert_not_called()
+
     def test_candidate_override_rejects_other_phases_and_mutable_tags_before_ssh(self):
         image = "registry.example/vllm@sha256:" + "1" * 64
         for phase, candidate, message in (("real-test", image, "only to real-setup"),

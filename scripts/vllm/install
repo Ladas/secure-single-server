@@ -14,7 +14,7 @@ render() {
   cat <<UNIT
 # Managed by scripts/vllm/install
 [Unit]
-Description=Private Qwen3-8B vLLM ($1)
+Description=Private ${model} vLLM ($1)
 After=network-online.target
 Wants=network-online.target
 [Container]
@@ -27,20 +27,24 @@ User=1001
 Group=1001
 UserNS=keep-id:uid=1001,gid=1001
 Volume=%h/vllm-cache:/cache:Z
-Volume=/etc/praxis-vllm/chat-template.jinja:/etc/vllm-chat-template.jinja:ro
 Environment=HOME=/cache HF_HOME=/cache/huggingface VLLM_CACHE_ROOT=/cache/vllm
 Environment=VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1
 NoNewPrivileges=true
 DropCapability=all
 ShmSize=4g
 UNIT
+  local template_args=''
+  if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
+    printf 'Volume=/etc/praxis-vllm/chat-template.jinja:/etc/vllm-chat-template.jinja:ro\n'
+    template_args='--chat-template /etc/vllm-chat-template.jinja'
+  fi
   if [[ "$1" == gpu ]]; then
     printf 'AddDevice=nvidia.com/gpu=0\nSecurityLabelDisable=true\n'
   else
     printf 'Environment=VLLM_CPU_KVCACHE_SPACE=4 VLLM_CPU_OMP_THREADS_BIND=nobind\n'
   fi
   cat <<UNIT
-Exec=${VLLM_MODEL} --revision ${VLLM_REVISION} --served-model-name qwen3-8b --host 0.0.0.0 --port 8000 --dtype bfloat16 --tensor-parallel-size 1 --max-model-len 16384 --max-num-seqs 1 --enforce-eager --enable-auto-tool-choice --tool-call-parser hermes --reasoning-parser qwen3 --chat-template /etc/vllm-chat-template.jinja --default-chat-template-kwargs '{"enable_thinking":true}' ${extra}
+Exec=${VLLM_MODEL} --revision ${VLLM_REVISION} --served-model-name ${model} --host 0.0.0.0 --port 8000 --dtype bfloat16 --tensor-parallel-size 1 --max-model-len 16384 --max-num-seqs 1 --enforce-eager --enable-auto-tool-choice --tool-call-parser ${VLLM_TOOL_PARSER} --reasoning-parser qwen3 ${template_args} --default-chat-template-kwargs '{"enable_thinking":true}' ${VLLM_MODEL_ARGS} ${extra}
 [Service]
 Restart=on-failure
 RestartSec=10
@@ -52,14 +56,17 @@ UNIT
 }
 
 if [[ "${1:-}" == --help || "$#" == 0 ]]; then
-  printf 'Usage: sudo scripts/vllm/install [--image NAME@sha256:DIGEST] cpu|gpu\n       scripts/vllm/install --render [--image NAME@sha256:DIGEST] cpu|gpu\n'
+  printf 'Usage: sudo scripts/vllm/install [--model qwen3-8b|qwen3.8-27b-int4] [--image NAME@sha256:DIGEST] cpu|gpu\n       Add --render to print the service without installing it. Default model: qwen3-8b.\n'
   exit 0
 fi
-mode='' image_override='' render_only=false
+mode='' model='' image_override='' render_only=false
 while (( $# )); do
   case "$1" in
     cpu|gpu) [[ -z "${mode}" ]] || die 'select one inference mode'; mode="$1"; shift ;;
     --render) render_only=true; shift ;;
+    --model)
+      [[ "$#" -ge 2 && -n "$2" && -z "${model}" ]] || die '--model requires one preset name'
+      model="$2"; shift 2 ;;
     --image)
       [[ "$#" -ge 2 && -z "${image_override}" ]] || die '--image requires one immutable image reference'
       image_override="$2"; validate_digest_image "${image_override}"; shift 2 ;;
@@ -67,6 +74,17 @@ while (( $# )); do
   esac
 done
 [[ -n "${mode}" ]] || die 'expected cpu or gpu'
+model="${model:-qwen3-8b}"
+VLLM_TOOL_PARSER=hermes
+VLLM_CHAT_TEMPLATE="${ROOT}/configs/vllm/qwen3.jinja"
+VLLM_MODEL_ARGS=''
+case "${model}" in
+  qwen3-8b) ;;
+  qwen3.8-27b-int4)
+    # shellcheck source=configs/vllm/qwen3.8-27b-int4.env
+    source "${ROOT}/configs/vllm/qwen3.8-27b-int4.env" ;;
+  *) die 'unknown model preset; choose qwen3-8b or qwen3.8-27b-int4' ;;
+esac
 if "${render_only}"; then render "${mode}"; exit 0; fi
 require_root
 [[ "$(uname -m)" == x86_64 ]] || die 'vLLM requires x86_64'
@@ -113,25 +131,28 @@ require_linux_image_platform vLLM "$(as_service podman image inspect "${image}" 
   "$(as_service podman image inspect "${image}" --format '{{.Architecture}}')" amd64
 as_service mkdir -p "$(service_home)/vllm-cache"
 install -d -o root -g "${gid}" -m 0750 "${state}"
-install -o root -g "${gid}" -m 0640 "${ROOT}/configs/vllm/qwen3.jinja" "${state}/chat-template.jinja"
-if ! semanage fcontext -a -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$' 2>/dev/null; then
-  semanage fcontext -m -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$'
+if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
+  install -o root -g "${gid}" -m 0640 "${VLLM_CHAT_TEMPLATE}" "${state}/chat-template.jinja"
+  if ! semanage fcontext -a -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$' 2>/dev/null; then
+    semanage fcontext -m -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$'
+  fi
+  restorecon -F "${state}/chat-template.jinja"
+  sha256_file "${state}/chat-template.jinja" >"${state}/template.sha256"
 fi
-restorecon -F "${state}/chat-template.jinja"
-sha256_file "${state}/chat-template.jinja" >"${state}/template.sha256"
 temporary="$(mktemp)"
 trap 'rm -f "${temporary}"' EXIT
 render "${mode}" >"${temporary}"
 install -o root -g "${gid}" -m 0640 "${temporary}" "${unit}"
 sha256_file "${unit}" >"${state}/manifest"
 printf '%s\n' "${mode}" >"${state}/mode"
+printf '%s\n' "${model}" >"${state}/model"
 as_service systemctl --user daemon-reload
 as_service systemctl --user restart praxis-vllm.service
 for (( attempt=0; attempt<360; attempt++ )); do
   if as_service podman exec praxis-vllm python3 -c \
-    'import json,urllib.request; r=json.load(urllib.request.urlopen("http://127.0.0.1:8000/v1/models", timeout=3)); assert any(m["id"] == "qwen3-8b" for m in r["data"])' 2>/dev/null; then
+    'import json,sys,urllib.request; r=json.load(urllib.request.urlopen("http://127.0.0.1:8000/v1/models", timeout=3)); assert any(m["id"] == sys.argv[1] for m in r["data"])' "${model}" 2>/dev/null; then
     [[ -z "$(as_service podman port praxis-vllm)" ]] || die 'vLLM unexpectedly publishes a host port'
-    note "vLLM ${mode} ready: qwen3-8b, private container port 8000; no host publication"
+    note "vLLM ${mode} ready: ${model}, private container port 8000; no host publication"
     exit 0
   fi
   if (( attempt % 6 == 0 )); then note 'waiting for vLLM model download/startup; inspect praxis-vllm container logs for progress'; fi

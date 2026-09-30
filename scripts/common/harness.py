@@ -59,6 +59,9 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
                        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1", CLAUDE_CODE_SIMPLE="1",
                        CLAUDE_CODE_MAX_CONTEXT_TOKENS=str(QWEN_CONTEXT), CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(QWEN_OUTPUT))
         command = ["claude", *(["-p"] if prompt else []), "--model", model]
+        if provider == "vllm" and model == "qwen3.8-27b-int4":
+            # This model's template rejects Claude's default "high" effort.
+            command += ["--effort", "medium"]
         if prompt:
             command += ["--output-format", "stream-json", "--verbose", "--allowedTools", "Bash(python3 *)",
                         "Read", "Write", "Edit", "--max-turns", "8"]

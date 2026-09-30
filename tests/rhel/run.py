@@ -34,7 +34,9 @@ def public_https(hostname, ca, caller, real=False):
                 raise ValueError(f"public HTTPS: expected {expected}, received {response.status}")
             if expected == 200:
                 body = response.read().decode()
-                if ("qwen3-8b" if real else "mock answer") not in body:
+                valid = (any(model.get("id") in ("qwen3-8b", "qwen3.8-27b-int4")
+                             for model in json.loads(body).get("data", [])) if real else "mock answer" in body)
+                if not valid:
                     raise ValueError("public HTTPS did not reach the expected provider")
         time.sleep(1)
     print("PASS: workstation → public verified TLS → JWT denial/acceptance → installed Praxis → " + ("real Qwen model list" if real else "mock"), flush=True)
@@ -97,8 +99,12 @@ def main():
     parser.add_argument("--phase", choices=("install", "mock", "test", "check", "lifecycle", "real-lifecycle", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "all"), default="all")
     parser.add_argument("--inference", choices=("cpu", "gpu"))
     parser.add_argument("--vllm-image", help="real-setup: candidate NAME@sha256:DIGEST for the selected CPU/GPU mode")
+    parser.add_argument("--model", choices=("qwen3-8b", "qwen3.8-27b-int4"),
+                        help="real-setup: vLLM preset (default: qwen3-8b); tests use the installed model")
     parser.add_argument("--harness", choices=("codex", "opencode", "claude"), help="real-test/real-lifecycle: API checks plus one native harness")
     args = parser.parse_args()
+    if args.model is not None and args.phase != "real-setup":
+        parser.error("--model applies only to real-setup; real-test reads the installed model")
     if args.phase == "real-setup" and not args.inference:
         parser.error("real-setup needs --inference cpu|gpu")
     if args.vllm_image is not None:
@@ -151,6 +157,8 @@ def main():
         command += ["--inference", args.inference]
     if args.vllm_image:
         command += ["--vllm-image", args.vllm_image]
+    if args.model:
+        command += ["--model", args.model]
     if args.harness:
         command += ["--harness", args.harness]
     started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
