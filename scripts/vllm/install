@@ -44,7 +44,7 @@ UNIT
     printf 'Environment=VLLM_CPU_KVCACHE_SPACE=4 VLLM_CPU_OMP_THREADS_BIND=nobind\n'
   fi
   cat <<UNIT
-Exec=${VLLM_MODEL} --revision ${VLLM_REVISION} --served-model-name ${model} --host 0.0.0.0 --port 8000 --dtype bfloat16 --tensor-parallel-size 1 --max-model-len 16384 --max-num-seqs 1 --enforce-eager --enable-auto-tool-choice --tool-call-parser ${VLLM_TOOL_PARSER} --reasoning-parser qwen3 ${template_args} --default-chat-template-kwargs '{"enable_thinking":true}' ${VLLM_MODEL_ARGS} ${extra}
+Exec=${VLLM_MODEL} --revision ${VLLM_REVISION} --served-model-name ${model} --host 0.0.0.0 --port 8000 --dtype bfloat16 --tensor-parallel-size 1 --max-model-len ${VLLM_CONTEXT} --max-num-seqs 1 --enforce-eager --enable-auto-tool-choice --tool-call-parser ${VLLM_TOOL_PARSER} --reasoning-parser qwen3 ${template_args} --default-chat-template-kwargs '{"enable_thinking":true}' ${VLLM_MODEL_ARGS} ${extra}
 [Service]
 Restart=on-failure
 RestartSec=10
@@ -75,6 +75,7 @@ while (( $# )); do
 done
 [[ -n "${mode}" ]] || die 'expected cpu or gpu'
 model="${model:-qwen3-8b}"
+VLLM_CONTEXT=16384
 VLLM_TOOL_PARSER=hermes
 VLLM_CHAT_TEMPLATE="${ROOT}/configs/vllm/qwen3.jinja"
 VLLM_MODEL_ARGS=''

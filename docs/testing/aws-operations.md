@@ -2,6 +2,10 @@
 
 **To deploy CPU/GPU all-in-one or remote-gateway VMs, follow [aws.md](aws.md).**
 This page is the reference for custom configuration, recovery and cleanup.
+Use [model/context sizing](aws.md#model-and-context-sizing) to distinguish the
+current L4/CPU presets from estimated full-context and Flash-Next hardware.
+Increasing the instance size does not change the model's configured context,
+cache allocation or harness output limits.
 
 ## Resource boundary and permissions
 

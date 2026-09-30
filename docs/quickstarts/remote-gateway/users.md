@@ -105,9 +105,26 @@ printf 'Installed vLLM model ID: '
 IFS= read -r VLLM_MODEL
 ```
 
-The launcher adds `/vllm` and the model's 16k context settings.
-CPU inference can take several minutes. OpenCode and Claude reserve up to
-4096 output tokens including thinking.
+The launcher adds `/vllm` and the model's context settings: 16,384 tokens for
+8B, or 32,768 for 27B. OpenCode and Claude allow up to 4,096 or 8,192 output
+tokens respectively, including thinking. Update the server and client together;
+the larger 27B budgets need fresh qualification. CPU inference can take minutes.
+
+<details>
+<summary>Per-launch settings, configuration files and remote credentials</summary>
+
+This is the same [launcher and per-harness configuration](../common/harness-configuration.md)
+used on all-in-one hosts, with your gateway URL, caller JWT and CA added.
+Codex gets command-line configuration, OpenCode gets `OPENCODE_CONFIG_CONTENT`,
+and Claude gets environment variables and flags. The helper starts the CLI;
+Praxis remains the proxy on the server.
+
+File-based alternatives are shown in that reference. Replace loopback addresses
+with your HTTPS gateway and retain `/vllm` for local inference. Keep caller JWTs
+out of committed files; never put upstream provider keys in a harness config.
+Model discovery and switching are separate checks from configuring a route.
+
+</details>
 
 ```console
 "${HARNESS[@]}" opencode --provider vllm --model "$VLLM_MODEL" "${GATEWAY[@]}"

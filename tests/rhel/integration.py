@@ -20,7 +20,7 @@ from host import ROOT, STATE, capture, installed_model, run, service, service_ou
 sys.path.insert(0, str(ROOT / "tests/common"))
 from contracts import check
 sys.path.insert(0, str(ROOT / "scripts/common"))
-from harness import configuration, QWEN_CONTEXT, QWEN_OUTPUT
+from harness import configuration, qwen_limits
 
 USER = "praxis-smoke"
 MARKER = "PRAXIS_SMOKE_TOOL_OK"
@@ -419,9 +419,10 @@ def main():
         results = {"scenario": args.scenario, "profile": args.profile, "model": gateway.model, "checks": {}}
         try:
             results["runtime"] = runtime_metadata()
-            results["client_limits"] = {"context_tokens": QWEN_CONTEXT,
-                                        "opencode_claude_output_tokens": QWEN_OUTPUT,
-                                        "codex_auto_compact_tokens": QWEN_CONTEXT - QWEN_OUTPUT,
+            context, output = qwen_limits(gateway.model)
+            results["client_limits"] = {"context_tokens": context,
+                                        "opencode_claude_output_tokens": output,
+                                        "codex_auto_compact_tokens": context - output,
                                         "harness_timeout_seconds": harness_timeout(True)}
             results["harness_timings"] = gateway.timings
             started = time.monotonic()

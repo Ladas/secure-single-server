@@ -27,6 +27,23 @@ The launcher sets the Praxis URL, provider, model and client limits, then starts
 the chosen CLI with its normal interactive tool approvals. Run
 `praxis-harness --help` to see its options.
 
+<details>
+<summary>What the launcher changes, and using a configuration file instead</summary>
+
+`praxis-harness` starts your installed CLI with settings for this launch. It
+does not start another proxy or change the model installed on the server.
+Codex receives command-line settings, OpenCode receives JSON through
+`OPENCODE_CONFIG_CONTENT`, and Claude receives environment variables and flags.
+The launcher does not rewrite your configuration files or fetch a combined
+provider catalog. The CLI can still load its existing settings.
+
+See the expandable [per-harness configuration examples](../common/harness-configuration.md)
+for the exact routes, limits and file-based alternatives. With local Qwen,
+Claude uses simple mode: automatic `CLAUDE.md`, skill, plugin and hook discovery
+is disabled. Interactive tool approvals remain active.
+
+</details>
+
 Install the CLIs into your own home, once per account:
 
 ```console
@@ -67,9 +84,11 @@ praxis-harness opencode --provider vllm --model "$VLLM_MODEL"
 ```
 
 The launcher selects that model through Praxis's `/vllm/v1` route, with thinking
-enabled and reasoning separated from the final answer. The local model has a
-16k context; OpenCode and Claude reserve up to 4096 output tokens including
-thinking. Both supplied model presets support these three clients. CPU responses
+enabled and reasoning separated from the final answer. The 8B preset serves a
+16,384-token context with a 4,096-token OpenCode/Claude output budget; 27B uses
+32,768 and 8,192 respectively, including thinking. Use the matching updated
+server and launcher. The larger 27B budgets still need a RHEL rerun; existing
+passes used 16k/4k. Both supplied model presets support these three clients. CPU responses
 can take several minutes; GPU is faster for interactive use. Context remains
 limited compared with hosted models, and model/tool reliability varies.
 

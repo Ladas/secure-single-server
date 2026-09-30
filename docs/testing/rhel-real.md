@@ -47,6 +47,11 @@ to change models; the test setup refuses real provider credentials.
 Downloads and CPU startup take several minutes. No cloud key is required.
 Qwen thinking is enabled. The [matrix](compatibility.md) records the current
 tested stack and results for each setup and harness.
+The 27B preset now serves 32,768 context tokens with an 8,192-token
+OpenCode/Claude output budget; earlier recorded passes used 16k/4k. Reapply
+setup before testing these limits on an existing test VM. `real-test` refreshes
+the shared launcher but does not upgrade the inference service. For a host with
+real provider keys, follow [the managed update instructions](../quickstarts/common/vllm.md#update-an-existing-installations-budgets).
 
 ## 2. Test real inference
 

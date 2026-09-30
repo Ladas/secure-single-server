@@ -7,13 +7,16 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
-QWEN_CONTEXT = 16384
-QWEN_OUTPUT = 4096
+
+def qwen_limits(model):
+    """Match the served context in scripts/vllm/install, not the native maximum."""
+    return (32768, 8192) if model == "qwen3.8-27b-int4" else (16384, 4096)
 
 
 def configuration(name, provider, model, base, caller, *, prompt=None, messages_base=None):
     if (name, provider) in (("codex", "anthropic"), ("claude", "openai")):
         raise ValueError("this harness requires a different native API; no provider translation is configured")
+    context, output = qwen_limits(model) if provider == "vllm" else (128000, 4096)
     base = base.rstrip("/")
     messages_base = (messages_base or base).rstrip("/")
     if provider == "vllm":
@@ -28,8 +31,8 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
             "-c", 'model_providers.praxis.env_key="PRAXIS_PLACEHOLDER_KEY"',
             "-c", 'model_providers.praxis.wire_api="responses"', "-c", 'web_search="disabled"', "--model", model]
         if provider == "vllm":
-            command += ["-c", f"model_context_window={QWEN_CONTEXT}",
-                        "-c", f"model_auto_compact_token_limit={QWEN_CONTEXT - QWEN_OUTPUT}",
+            command += ["-c", f"model_context_window={context}",
+                        "-c", f"model_auto_compact_token_limit={context - output}",
                         "-c", "show_raw_agent_reasoning=true"]
     elif name == "opencode":
         anthropic = provider == "anthropic"
@@ -37,8 +40,7 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
             "provider": {"praxis": {"npm": "@ai-sdk/anthropic" if anthropic else "@ai-sdk/openai-compatible", "name": "Praxis",
                 "options": {"baseURL": (messages_base if anthropic else base) + "/v1", "apiKey": caller,
                             "headers": {"Authorization": "Bearer " + caller}},
-                "models": {model: {"name": model, "limit": {"context": QWEN_CONTEXT if provider == "vllm" else 128000,
-                                                               "output": QWEN_OUTPUT if provider == "vllm" else 4096}}}}}}
+                "models": {model: {"name": model, "limit": {"context": context, "output": output}}}}}}
         if provider == "vllm":
             config["provider"]["praxis"]["models"][model].update(
                 reasoning=True, interleaved={"field": "reasoning"})
@@ -57,7 +59,8 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
             env.update(ANTHROPIC_API_KEY=caller, ANTHROPIC_DEFAULT_OPUS_MODEL=model,
                        ANTHROPIC_DEFAULT_SONNET_MODEL=model, ANTHROPIC_DEFAULT_HAIKU_MODEL=model,
                        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1", CLAUDE_CODE_SIMPLE="1",
-                       CLAUDE_CODE_MAX_CONTEXT_TOKENS=str(QWEN_CONTEXT), CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(QWEN_OUTPUT))
+                       CLAUDE_CODE_DISABLE_1M_CONTEXT="1",
+                       CLAUDE_CODE_MAX_CONTEXT_TOKENS=str(context), CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(output))
         command = ["claude", *(["-p"] if prompt else []), "--model", model]
         if provider == "vllm" and model == "qwen3.8-27b-int4":
             # This model's template rejects Claude's default "high" effort.

@@ -8,6 +8,24 @@ For **remote-gateway**, prepare the workstation client below. Provider keys
 remain on the server. The [compatibility matrix](compatibility.md) records
 which combinations passed and which still need fixes or live tests.
 
+<details>
+<summary>What the launcher configures, and how to compare file-based alternatives</summary>
+
+The [configuration reference](../quickstarts/common/harness-configuration.md)
+shows Codex flags/TOML, OpenCode environment JSON/config files, and Claude
+environment/settings files. The normal acceptance path uses `praxis-harness`
+without `--prompt`, preserving interactive approvals. `--prompt` selects the
+bounded automated tool task mode; record that distinction.
+
+When testing a file-based alternative, record the config source and verify the
+same endpoint, model, context/output limits, thinking and authentication before
+running the task below. Record its result separately: launcher passes do not
+qualify a manually maintained file. A generated configuration is not evidence
+that the CLI discovered models from Praxis. Catalog/discovery and post-selection
+inference belong to the feature-matrix follow-up.
+
+</details>
+
 ## Remote-gateway client
 
 On the workstation, select the gateway with `aws_test_verify remote-gateway-cpu`

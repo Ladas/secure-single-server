@@ -56,6 +56,10 @@ See the [current bug and fix candidate](vllm-debugging.md#responses-tool-ids-cha
 
 **Qwen3.8-27B INT4 / vLLM**
 
+The following recorded results used 16,384 context / 4,096 output tokens.
+The updated 32,768 / 8,192 preset has not yet been rerun on RHEL; these passes
+remain evidence for the earlier settings only.
+
 | Harness | Check | Real CPU | Real GPU |
 | --- | --- | --- | --- |
 | Codex | Tool query | Passed | Passed |
@@ -70,8 +74,9 @@ See the [current bug and fix candidate](vllm-debugging.md#responses-tool-ids-cha
 2. The launcher sets Claude effort to `medium`. Its default `high` is rejected
    by this model's template; thinking remains enabled.
 3. These are configured model entries, not automatic provider discovery.
-   Claude's menu can display a `[1m]` alias; the actual server context remains
-   16,384 tokens. Selecting a menu entry and then issuing inference is not tested.
+   The captured Claude menu displayed a `[1m]` alias despite a 16,384-token
+   server. The updated launcher disables 1M variants; fresh menu captures and
+   inference after selecting a menu entry are still required.
 
 Model listing and all six Chat/Responses/Messages JSON/SSE probes passed on
 both hosts. Native tasks ran as `praxis-smoke`, used real tool calls and passed
@@ -340,7 +345,8 @@ additions. They do not populate native CLI, menu or RHEL lifecycle cells.
 
 **Qwen3.8-27B INT4**
 
-Same hosts, context, concurrency and harness deadlines as the 8B table.
+The measurements below used the same hosts, 16,384-token context,
+4,096-token OpenCode/Claude output, concurrency and harness deadlines as the 8B table.
 Model weights use INT4 with BF16 activations; vision is disabled and the
 prefill batch is limited to 2048 tokens.
 
@@ -349,10 +355,21 @@ prefill batch is limited to 2048 tokens.
 | vLLM reported model-loading memory | 24.34 GiB | 16.84 GiB |
 | KV cache at startup | 4 GiB configured | 2.49 GiB available; 90% GPU memory target |
 | Container RAM after tasks (not peak) | 33.39 GB | 9.78 GB |
+| Host RAM available after tasks (`free -h`) | 28 GiB | 24 GiB |
+| Host `buff/cache` after tasks | 27 GiB | 22 GiB |
+| Swap configured | None | None |
 | GPU memory after tasks (not peak) | Not applicable | 20,968 MiB of 23,034 MiB |
 | Codex tool query | 4.0 minutes | 1.6 minutes |
 | Claude Code tool query, medium effort | 10.2 minutes | 2.6 minutes |
 | OpenCode tool query | 4.8 minutes | 1.1 minutes |
+
+The updated preset serves 32,768 context tokens, with 8,192 OpenCode/Claude
+output tokens and a 24,576-token Codex auto-compaction threshold. CPU/GPU task,
+memory, menu and long-session compaction results at those settings are **Not run**.
+Thinking remains enabled; concurrency remains one. The recorded startup cache
+capacities (50,115 GPU / 79,872 CPU tokens) motivate a 32k trial, not a claim
+that long-context performance or memory is qualified. The separate OpenShell
+adapter retains its conservative 16k/4k settings and has no 27B runtime pass.
 
 Model-loading memory excludes additional runtime/cache costs and is not an
 end-to-end peak measurement. A quantized download size does not equal its
