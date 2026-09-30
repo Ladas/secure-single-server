@@ -2,10 +2,10 @@ name: Validate OpenShell demos
 
 on:
   pull_request:
-    paths: ["openshell/**", "configs/openshell-praxis/**", "configs/vllm/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
+    paths: ["openshell/**", "configs/openshell-praxis/**", "configs/vllm/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "tests/policy-boundary/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
   push:
     branches: [main]
-    paths: ["openshell/**", "configs/openshell-praxis/**", "configs/vllm/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
+    paths: ["openshell/**", "configs/openshell-praxis/**", "configs/vllm/**", "scripts/openshell-praxis/**", "scripts/common/**", "tests/openshell-praxis/**", "tests/policy-boundary/**", "bootc/**", ".github/workflows/openshell-validate.yml", ".github/actionlint.yaml"]
   workflow_dispatch:
 
 permissions:
@@ -37,6 +37,17 @@ jobs:
           tar -C /tmp -xf /tmp/sc.tar.xz
           install -m 0755 "/tmp/shellcheck-${SC_VER}/shellcheck" /usr/local/bin/shellcheck
           shellcheck --version
+      - name: Install pinned OpenShell policy prover
+        run: |
+          OPENSHELL_PROVER_VERSION=v0.1.2
+          OPENSHELL_PROVER_SHA256=e1c9db66ae459850cab43765d7ad569effe2ac0a338c902a1b895d0cc361fbb0
+          curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 10 --max-time 120 \
+            "https://github.com/NVIDIA/OpenShell/releases/download/${OPENSHELL_PROVER_VERSION}/openshell-prover-x86_64-unknown-linux-musl.tar.gz" \
+            -o /tmp/openshell-prover.tar.gz
+          printf '%s  /tmp/openshell-prover.tar.gz\n' "${OPENSHELL_PROVER_SHA256}" | sha256sum -c -
+          tar -xzf /tmp/openshell-prover.tar.gz -C /tmp
+          install -m 0755 /tmp/openshell-prover /usr/local/bin/openshell-prover
+          openshell-prover --version
       - name: Static checks
         run: |
           bash openshell/tests/openshell-static.sh
