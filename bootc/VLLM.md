@@ -1,5 +1,9 @@
 # Optional Qwen3-8B inference
 
+This guide is the implementation half of the story. If you want to understand
+why the layers are separated before enabling them, start with the
+[architecture value walkthrough](../docs/quickstarts/architecture-walkthrough/README.md).
+
 This optional deployment runs `Qwen/Qwen3-8B` in a rootless vLLM container on the
 bootc host. It uses the same pull-before-start, immutable image references,
 Quadlet/systemd lifecycle, and persistent container storage as the other
