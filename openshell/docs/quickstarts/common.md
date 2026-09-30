@@ -29,6 +29,22 @@ sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
   "$PWD/openshell/harnesses/$harness/create.sh" --profile dev
 ```
 
+For a one-off network need, create with `--policy-advisor`. This keeps the
+shipped policy file unchanged and places each proposal in a manual review
+queue. After the harness reports a denial and proposal, review it as the same
+service owner:
+
+```bash
+openshell/scripts/policy-approve.sh list HARNESS-dev
+openshell/scripts/policy-approve.sh approve HARNESS-dev --chunk-id PROPOSAL-ID
+```
+
+Type `APPROVE` at the prompt. The grant applies only to that sandbox instance
+and resets when the sandbox is recreated. Successful approvals are appended to
+`/var/lib/openshell/approvals.jsonl` (mode 0600); override that path for a
+disposable test with `OPENSHELL_APPROVAL_AUDIT_FILE`. This local JSONL record is
+an experimental audit trail, not an OCSF event stream.
+
 The checkout and its parent directories must be readable by that account.
 On bootc, use `sudo sss-bootc harness create --profile dev` instead.
 Creation is detached and returns after structured Ready status; this does not

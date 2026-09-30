@@ -431,13 +431,14 @@ def main():
                 *openshell_inference(json.loads((STATE / "state.json").read_text()))]
             existing = openshell_names(owner_command)
             result = subprocess.run([*owner_command, "bash", str(Path(directory) / "tests/openshell-praxis/smoke.sh")], cwd="/")
+            advisor = subprocess.run([*owner_command, "bash", str(Path(directory) / "openshell/tests/policy-advisor.sh")], cwd="/")
             if result.returncode:
                 print("Integrated inference failed; checking independent policy positive control separately", flush=True)
                 policy = subprocess.run([*owner_command, "bash", str(Path(directory) / "openshell/tests/openshell-policy.sh")], cwd="/")
                 print(f"Independent policy suite exit code: {policy.returncode}", flush=True)
             leftovers = openshell_leftovers(owner_command, existing)
             print("OpenShell test sandbox leftovers: " + json.dumps(leftovers), flush=True)
-            if result.returncode or leftovers:
+            if result.returncode or advisor.returncode or leftovers:
                 raise ValueError("OpenShell qualification failed; keep experimental support and retain the evidence")
 
 

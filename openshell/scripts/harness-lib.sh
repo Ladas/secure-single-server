@@ -60,12 +60,34 @@ _wait_ready() {  # <sandbox>
   die "sandbox ${name} did not reach Ready in time"
 }
 
+harness_enable_policy_advisor() {  # <sandbox>
+  _os settings set "$1" \
+    --key agent_policy_proposals_enabled \
+    --value true
+}
+
+harness_wait_policy_advisor() {  # <sandbox>
+  local name="$1" _
+  for _ in $(seq 1 30); do
+    if printf '%s\n' \
+'const response = await fetch("http://policy.local/v1/policy/current", {signal: AbortSignal.timeout(5000)});' \
+'if (response.status !== 200) process.exit(1);' \
+      | harness_ssh "${name}" 'node --input-type=module' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "policy advisor did not become ready for sandbox ${name}"
+}
+
 # Single-phase create: harness is pre-installed in <image_ref>.
-harness_create() {  # <name> <image_ref> <policy_file>
-  local name="$1" image="$2" policy="$3" provider="${4:-}"
+harness_create() {  # <name> <image_ref> <policy_file> [provider] [policy_advisor]
+  local name="$1" image="$2" policy="$3" provider="${4:-}" policy_advisor="${5:-no}"
   if [[ -n "${provider}" ]]; then
     [[ "${provider}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || die "invalid provider name"
   fi
+  [[ "${policy_advisor}" == yes || "${policy_advisor}" == no ]] \
+    || die "invalid policy-advisor value"
   require_command ssh
   [[ -f "${policy}" ]] || die "policy file not found: ${policy}"
   validate_sandbox_resources
@@ -76,8 +98,15 @@ harness_create() {  # <name> <image_ref> <policy_file>
   if [[ -n "${provider}" ]]; then
     create_args+=(--provider "${provider}")
   fi
+  if [[ "${policy_advisor}" == yes ]]; then
+    create_args+=(--approval-mode manual)
+  fi
   _os sandbox create "${create_args[@]}"
   _wait_ready "${name}"
+  if [[ "${policy_advisor}" == yes ]]; then
+    harness_enable_policy_advisor "${name}"
+    harness_wait_policy_advisor "${name}"
+  fi
   note "Sandbox ${name} ready"
 }
 

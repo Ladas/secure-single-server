@@ -30,7 +30,7 @@ def main():
     def invoke(target):
         return subprocess.run([engine, "run", "--rm", "--network", "none",
                 "--read-only", "--cap-drop", "all", "--security-opt", "no-new-privileges",
-                "--mount", f"type=bind,source={target},target=/policy.yaml,readonly", image,
+                "--volume", f"{target}:/policy.yaml:ro,Z", image,
                 "policy", "set", "schema-only", "--policy", "/policy.yaml",
                 "--gateway-endpoint", "http://127.0.0.1:9"], capture_output=True, text=True, timeout=20)
     try:
