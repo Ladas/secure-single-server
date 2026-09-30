@@ -62,6 +62,10 @@ def render(original, *, vllm, openai, anthropic, vllm_endpoint=""):
                     "/v1/responses", "/v1/chat/completions", "/v1/models"]
                 for path in paths:
                     routes.append({"path_prefix" if path == "/v1/responses" else "path": prefix + path, "cluster": name})
+                # The Messages listener also needs model discovery. A shared
+                # cloud URL retains OpenAI's catalog when both clouds are on.
+                if api == "anthropic" and (not remote or (not local and not openai)):
+                    routes.append({"path": prefix + "/v1/models", "cluster": name})
                 conditions = [{"when": {"methods": ["POST"]}}]
                 if api == "anthropic":
                     conditions.append({"when": {"path": prefix + "/v1/messages"}})

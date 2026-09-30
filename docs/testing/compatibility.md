@@ -12,7 +12,6 @@ an ordinary OS user outside OpenShell; OpenClaw is included only in OpenShell.
 | Remote-gateway: all columns | [External client setup](harnesses.md#remote-gateway-client), then the same manual task and selector checks; not run |
 | OpenShell: Mock / Real CPU / Real GPU / cloud | [Sandbox tool task](openshell-manual.md#2-qualify-actual-sandboxed-harnesses) and [selectors](harnesses.md#model-selector-checks); only real Qwen OpenCode has native task results |
 | OpenShell: infrastructure | [Installation, API and policy probes](openshell-manual.md#1-run-installation-inference-and-policy-probes); these do not qualify native harness rows |
-| Gateway features | [Accounting contracts and RHEL checklist](gateway-features.md); container results and remaining host/harness checks are summarized [below](#gateway-feature-qualification) |
 
 **Tool query** requires streamed inference, tool execution, continuation after
 the tool result, generated files and independently passing tests. **`/model`**
@@ -24,6 +23,8 @@ alone does not qualify a menu. Praxis has no combined catalog across providers.
 **Passed** = the named check succeeded. **Failed** = it ran and failed.
 **Unverified** = attempted, but evidence is inconclusive. **Not run** = no result
 on this stack. **Blocked [n]** = a prerequisite is missing; reasons follow the table.
+
+Feature support and feature-test results live in [gateway feature testing](gateway-features.md).
 
 ## All-in-one
 
@@ -45,7 +46,7 @@ the current image; model-selector checks are separate.
 | OpenCode | `/models` | Not run | Passed [2] | Passed [2] |
 
 1. Codex shows its built-in OpenAI catalog; Qwen is absent. Explicit
-   `--model qwen3-8b` works. A custom catalog integration is still needed.
+   `--model qwen3-8b` works. The new generated catalog needs a RHEL rerun; see [feature testing](gateway-features.md#codex).
 2. Claude shows configured Qwen aliases; OpenCode shows configured
    `praxis/qwen3-8b`. These are configured entries, not automatic discovery.
 
@@ -279,28 +280,6 @@ by the earlier results.
 
 The transport failure and missing adapters need focused follow-up. The issues
 above are not confirmed explanations for the nonstreaming failure.
-
-## Gateway feature qualification
-
-These checks qualify shared gateway behavior separately from tool tasks and
-model menus. Follow [gateway feature testing](gateway-features.md) for commands,
-small-limit settings and acceptance criteria. Container results cover both
-roles with memory and Valkey; they do not establish RHEL or native CLI behavior.
-
-| Feature | Container contracts | All-in-one RHEL | Remote-gateway RHEL |
-| --- | --- | --- | --- |
-| Quota settlement/exhaustion, shared allowances (Q1/Q3) | Passed: native cloud API fixtures; vLLM isolation remains untested | Not run | Not run |
-| Harness error, retry and recovery (Q2) | Not run | Not run | Not run |
-| Concurrent admission, reservation expiry, long inference (Q4/Q5) | Not run | Not run: CPU/GPU | Not run: CPU/GPU |
-| Interrupted streams and missing usage (Q6) | Passed: fixture truncation/missing usage only; active client disconnect pending | Not run | Not run |
-| Rolling-window recovery (Q7) | Not run | Not run | Not run |
-| Memory reset / Valkey persistence, outage and recovery (Q8) | Passed: container restarts/outage | Not run | Not run |
-| Non-inference routes do not drain allowance (Q9) | Not run | Not run | Not run |
-| Authentication/error attribution (Q10) | Passed: remote JWT rejection, upstream errors and provider counters | Not run as a quota test | Not run as a quota test |
-
-RHEL service/reboot checks and successful inference alone do not qualify quota
-enforcement or counter persistence. No OpenShell harness has been qualified
-under quota errors; use the same cases once its adapter is available.
 
 ## Tested stack
 

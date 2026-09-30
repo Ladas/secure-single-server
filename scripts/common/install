@@ -386,6 +386,11 @@ if (( providers == 1 )); then
   python3 "${SCRIPT_DIR}/provider_config.py" "${provider_args[@]}"
 fi
 
+if [[ -f "${CONFIG_DIR}/quota-overrides.json" ]]; then
+  python3 "${SCRIPT_DIR}/quota_config.py" --config "${tmp_dir}/shared-gateway.yaml" \
+    --overrides "${CONFIG_DIR}/quota-overrides.json"
+fi
+
 cp "${REPO_DIR}/configs/common/quadlet/praxis.network" "${tmp_dir}/praxis.network"
 
 install_managed() {
@@ -459,6 +464,9 @@ managed_paths=(
 )
 if (( providers == 1 )); then
   managed_paths+=("${CONFIG_DIR}/providers.json")
+fi
+if [[ -f "${CONFIG_DIR}/quota-overrides.json" ]]; then
+  managed_paths+=("${CONFIG_DIR}/quota-overrides.json")
 fi
 if [[ "${scenario}" == remote-gateway ]]; then
   managed_paths+=("${remote_paths[@]}")

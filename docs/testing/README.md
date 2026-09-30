@@ -23,7 +23,7 @@ Remote clients use [the HTTPS/JWT harness guide](harnesses.md#remote-gateway-cli
 References, as needed:
 
 - [Compatibility matrix](compatibility.md): direct and OpenShell results by scenario/backend.
-- [Gateway feature testing](gateway-features.md): token limits, harness recovery and persistence.
+- [Gateway feature testing](gateway-features.md): model selection, limits, quotas and recovery by harness.
 - [AWS operations](aws-operations.md): access choices, custom hardware, recovery and cleanup.
 - [vLLM administration](../quickstarts/common/vllm.md): installation without the smoke runner and maintenance.
 - [vLLM debugging](vllm-debugging.md): known failures, upstream leads and fix qualification.

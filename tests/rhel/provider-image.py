@@ -11,11 +11,14 @@ sys.path[:0] = [str(ROOT / "tests/common"), str(ROOT / "scripts/common")]
 from gateway import ENGINE, Gateway, run, request_body
 from contracts import check
 from provider_config import render
+import quota_config
+from quota_manage import plan as quota_plan
 
 
 class ProvidersGateway(Gateway):
     openai = False
     anthropic = False
+    quota_overrides = None
 
     def boot(self):
         # One fixture namespace, with no host publication of any upstream port.
@@ -30,6 +33,7 @@ class ProvidersGateway(Gateway):
                 'p=Provider(ports=(8000,8001,19001),model="qwen3-8b",local=True); '
                 'p.start(); threading.Event().wait()')
         self.config = render(self.baseline, vllm=True, openai=self.openai, anthropic=self.anthropic)
+        self.config = quota_config.apply(self.config, self.quota_overrides or {})
         for chain in self.config["filter_chains"]:
             for f in chain["filters"]:
                 if f["filter"] == "load_balancer":
@@ -67,6 +71,17 @@ def exercise(gateway):
     for openai, anthropic in ((False, False), (True, False), (True, True), (False, True)):
         if (gateway.openai, gateway.anthropic) != (openai, anthropic):
             gateway.change(openai, anthropic)
+        old_port = gateway.openai_port
+        if gateway.scenario == "all-in-one":
+            gateway.openai_port = gateway.anthropic_port
+        try:
+            status, payload, _ = gateway.request("/vllm/v1/models?limit=1000", method="GET")
+            assert status == 200 and json.loads(payload)["data"][0]["id"] == "qwen3-8b"
+            status, _, _ = gateway.request("/v1/models?limit=1000", method="GET")
+            enabled = (openai or anthropic) if gateway.scenario == "remote" else anthropic
+            assert status == (200 if enabled else 404), ("model discovery", status)
+        finally:
+            gateway.openai_port = old_port
         for path in ("/v1/responses", "/v1/chat/completions", "/v1/messages"):
             for stream in (False, True):
                 body = request_body(path, stream, tools=True)
@@ -86,12 +101,38 @@ def exercise(gateway):
         print(f"PASS {gateway.scenario}/{gateway.profile}: Qwen + OpenAI={openai}, Anthropic={anthropic}", flush=True)
 
 
+def exercise_capacities(gateway):
+    path = "/vllm/v1/responses"
+    body = request_body("/v1/responses")
+    body["model"] = "qwen3-8b"
+
+    def capacity(value):
+        gateway.quota_overrides, _ = quota_plan(gateway.config, gateway.quota_overrides or {},
+                                               value, provider="vllm")
+        gateway.change(gateway.openai, gateway.anthropic)
+
+    capacity(20)
+    for _ in range(3):
+        status, payload, _ = gateway.request(path, body=body)
+        assert status == 200, (status, payload[:400])
+    assert gateway.request(path, body=body)[0] == 429, "small capacity was not enforced"
+    capacity(100)
+    assert gateway.request(path, body=body)[0] == 200, "increase did not restore admission"
+    capacity(20)
+    expected = 429 if gateway.profile == "valkey" else 200
+    assert gateway.request(path, body=body)[0] == expected, "unexpected restart accounting"
+    # Restore room for the provider matrix, retaining explicit overrides.
+    capacity(10000)
+    print(f"PASS {gateway.scenario}/{gateway.profile}: quota decrease, increase and restart accounting", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", choices=("all-in-one", "remote"), default="all-in-one")
     parser.add_argument("--valkey", action="store_true")
     args = parser.parse_args()
     with ProvidersGateway(args.scenario, "valkey" if args.valkey else "memory") as gateway:
+        exercise_capacities(gateway)
         exercise(gateway)
 
 

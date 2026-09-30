@@ -155,6 +155,7 @@ class Provider:
                     pass
 
                 def do_GET(self):
+                    self.path = self.path.split("?", 1)[0]
                     if self.server.provider_index == 2:
                         if self.path == "/state":
                             with fixture.lock:

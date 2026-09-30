@@ -22,6 +22,13 @@ import integration
 
 
 class EvidenceTest(unittest.TestCase):
+    def test_interruption_stops_child_tools_before_restoring_gateway(self):
+        with patch.object(integration.subprocess.Popen, "communicate", side_effect=[KeyboardInterrupt(), ("", "")]), \
+             patch.object(integration.os, "killpg", wraps=os.killpg) as killed:
+            with self.assertRaises(KeyboardInterrupt):
+                integration.run_captured([sys.executable, "-c", "import time; time.sleep(60)"], timeout=1)
+            killed.assert_called()
+
     def test_installed_model_preserves_legacy_hosts_and_rejects_invalid_state(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model"
@@ -119,6 +126,18 @@ class RunnerTest(unittest.TestCase):
             runner.main()
         self.assertIn("--model applies only to real-setup", error.getvalue())
         execute.assert_not_called()
+
+    def test_deployment_bundle_includes_quota_commands_and_dependencies(self):
+        data, manifest = runner.bundle()
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            for name in ("scripts/common/quota-status", "scripts/common/quota_status.py",
+                         "scripts/common/quota-set", "scripts/common/quota_manage.py",
+                         "scripts/common/quota_config.py", "scripts/common/provider_manage.py",
+                         "scripts/common/provider_config.py", "scripts/common/lib.sh", "scripts/common/install"):
+                self.assertIn(name, manifest)
+                self.assertEqual(archive.extractfile(name).read(), (runner.ROOT / name).read_bytes())
+            self.assertTrue(archive.getmember("scripts/common/quota-status").mode & 0o111)
+            self.assertTrue(archive.getmember("scripts/common/quota-set").mode & 0o111)
 
     def test_candidate_override_rejects_other_phases_and_mutable_tags_before_ssh(self):
         image = "registry.example/vllm@sha256:" + "1" * 64

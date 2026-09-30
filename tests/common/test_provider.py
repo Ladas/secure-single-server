@@ -9,6 +9,13 @@ from contracts import check
 
 
 class ProviderTest(unittest.TestCase):
+    def test_model_discovery_query_parameters_are_supported(self):
+        request = urllib.request.Request(f"http://127.0.0.1:{self.fixture.ports[0]}/v1/models?limit=1000",
+                                         headers={"Authorization": "Bearer synthetic-openai"})
+        with urllib.request.urlopen(request, timeout=2) as response:
+            self.assertEqual(json.load(response)["data"][0]["id"], "fixture")
+        self.assertEqual(self.fixture.records[-1]["path"], "/v1/models")
+
     def test_anthropic_beta_query(self):
         with self.request("/v1/messages?beta=true", {"model": "fixture",
                 "messages": [{"role": "user", "content": "hello"}]}, provider=1) as response:

@@ -153,6 +153,9 @@ supplied IDs.
 Interactive clients keep their normal tool approvals. Cloud calls use the administrator's provider account.
 The launcher configures each native API; it does not enable API translation.
 
+On `429`, stop repeated retries and ask the administrator to
+[check the shared token quota and request throttle](../common/token-quotas.md#read-accounting-and-identify-a-429).
+
 For an installed Switchyard profile, OpenCode can use its Chat listener by
 adding `--url http://127.0.0.1:8082` to the OpenAI command. The administrator
 controls judge/Weak/Strong routing; Codex Responses and Claude Messages cannot

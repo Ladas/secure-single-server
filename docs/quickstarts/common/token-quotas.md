@@ -1,50 +1,164 @@
 # Token quotas
 
-A token quota is an allowance over a usage window. These profiles use the
-`token_rate_limit` filter for **rolling daily quotas**, not just short bursts.
-Request throttling (`rate_limit`) is separate.
+Run as the server administrator, separately on each gateway.
 
-| Setting | Shipped value | Meaning |
-| --- | --- | --- |
-| Algorithm | `sliding_window` | Usage in the previous window consumes capacity |
-| `window` | `24h` | Rolling day; use `168h` for a rolling week |
-| `capacity` | `1000000` | One million total tokens per provider/API quota |
-| `reserved_tokens` | `10000` | Admission reserves this estimate per request |
-| `reservation_timeout` | `300s` | Reservation lifetime; qualify long-running requests |
-| Accounting | Reported input + output | Actual usage settles the reservation when available |
-| Backend | Valkey for persistent deployment | Memory resets quota state on Praxis restart |
+## Check installed limits
 
-There are **two independent allowances**: OpenAI and Anthropic. All callers
-share them, including authenticated JWT callers. The OpenAI allowance covers
-Responses and Chat Completions together; it is not one allowance per harness.
-An insufficient allowance rejects admission with `429`.
+```console
+cd ~/secure-single-server-deploy
+sudo scripts/common/quota-status
+```
 
-## Administrator configuration
+Status shows backend, capacity, reservation and available usage metrics. It also
+prints the command for listing adjustable rules. For refresh or JSON:
 
-Before installation, edit the scenario's supplied gateway YAML in the reviewed
-workstation checkout. Change the named quota's window, capacity and reservation
-together; reserve no more than the capacity. Transfer the reviewed bundle again
-and use the documented same-profile upgrade workflow. Do not edit live managed
-files behind the installer's manifest.
+```console
+sudo watch -n 5 ./scripts/common/quota-status
+```
 
-For a small **disposable** quota-exhaustion test, use capacity `20`, reservation
-`10`, and a short rolling window. Do not consume a million paid tokens merely
-to test denial. Validate settlement as well as admission: reservations are
-estimates, not hard maximum-output caps.
+```console
+sudo scripts/common/quota-status --json
+```
 
-## Persistence and gaps
+> After a restart, `no samples` is normal until inference emits accounting
+> metrics for that rule. Refresh after a harness request; listing models may
+> not generate usage. Memory quotas reset on restart. **Valkey retains quota
+> usage, but process metrics still restart.** Missing samples do not mean an
+> unused allowance.
 
-| Topic | Current behavior / gap |
+## List providers and rules
+
+```console
+sudo scripts/common/quota-set --list
+sudo scripts/common/quota-set --list --provider vllm
+sudo scripts/common/quota-set --list --rule vllm-openai-rolling-day
+```
+
+The list shows enabled providers, current and minimum capacities, and whether
+each rule is settable. It prints a copyable setting command for each selected
+rule. Add `--json` for structured output. Listing works without inference metrics.
+
+Disabled providers have no active rules to adjust. Inspect their configuration
+with `sudo scripts/common/providers show`; enable them using [provider setup](providers.md).
+
+## Adjust capacities
+
+List and preview both vLLM API allowances:
+
+```console
+sudo scripts/common/quota-set --list --provider vllm
+sudo scripts/common/quota-set --provider vllm --capacity 10000000
+```
+
+Stop active tasks before applying: Praxis restarts, interrupting requests and
+resetting memory quotas and process metrics. Valkey usage survives; vLLM keeps running.
+
+```console
+sudo scripts/common/quota-set --provider vllm --capacity 10000000 --apply
+sudo scripts/common/quota-set --list --provider vllm
+sudo scripts/common/quota-status
+```
+
+For an enabled cloud provider, choose its block. Append `--apply` to save the
+previewed capacity, then rerun its list command:
+
+```console
+sudo scripts/common/quota-set --list --provider openai
+sudo scripts/common/quota-set --provider openai --capacity 2000000
+```
+
+```console
+sudo scripts/common/quota-set --list --provider anthropic
+sudo scripts/common/quota-set --provider anthropic --capacity 2000000
+```
+
+To change one rule, use its exact name; `--rule` can be repeated:
+
+```console
+sudo scripts/common/quota-set --list --rule vllm-openai-rolling-day
+sudo scripts/common/quota-set --rule vllm-openai-rolling-day --capacity 5000000
+```
+
+Capacity must cover the reservation shown by the list (`10000` by default).
+An unchanged capacity does not restart services. Saved capacities survive
+provider changes and same-profile upgrades; other providers' allowances,
+credentials, images and quota windows stay unchanged.
+
+## Rules, persistence and display limits
+
+| Rule | Shared allowance |
 | --- | --- |
-| Restart | Private Valkey retains quota state. AOF `everysec` can lose roughly the last second of writes on sudden failure; this is not zero-loss durability. Test outage/recovery and fail-closed behavior before acceptance. |
-| Per-model rules | These quickstarts ship catch-all provider/API quotas. Ordered model-specific rules need trusted model classification and qualification. First-match rules are independent; a model rule does not also charge a catch-all. |
-| Per-user quotas | A JWT authenticates its bearer; it does not add per-user counters to these configurations. |
-| Token types | Input/output are combined; no separate input, output or cached-token allowance is configured. Verify each API's usage reporting. |
-| Missing usage | The estimate can remain charged; do not assume a refund. Cancellation, streaming and long requests need accounting tests. |
-| Batch APIs | Remote gateway blocks batch endpoints. A batch-creation response is not final inference usage; admitting asynchronous jobs needs separate reservation and settlement support. |
-| Calendar resets | Rolling `24h`/`168h` does not reset at midnight/Monday. |
-| Price | Different models and token types have different prices. Token quotas are not dollar budgets; USD enforcement is later work. |
-| Routing | Switchyard's current profile has one separate catch-all quota; selected-model quotas and judge accounting remain gaps. |
+| `vllm-openai-rolling-day` | Local Qwen Chat/Responses: OpenCode and Codex |
+| `vllm-anthropic-rolling-day` | Local Qwen Messages: Claude Code |
+| `openai-rolling-day` | Enabled OpenAI routes |
+| `anthropic-rolling-day` | Enabled Anthropic routes |
 
-Valkey is one standalone container, not Valkey plus Redis. It persists token
-quota data only: request-rate buckets and Switchyard decisions remain in memory.
+All users share these allowances. Shipped values are `1000000` tokens per
+rolling `24h`, a `10000` reservation and a `300s` reservation timeout. Use the
+list for installed values. Input, output and repeated prompt/history tokens count.
+
+| Status / backend | Meaning |
+| --- | --- |
+| `memory` | Usage is lost on Praxis restart |
+| `valkey` | Usage persists; process metrics still start again |
+| `first window` | Unchanged global memory balance reconstructed before usage ages out: estimated − refunded + overage |
+| `unknown` | Metrics cannot establish the balance: no samples, aged window, changed configuration or persistent Valkey state |
+
+The deployed image has no remaining-budget gauge. Fresh inference makes process
+metrics available, but cannot reconstruct retained Valkey usage. `Reconciled
+tokens` excludes retained estimates after missing usage or failed settlement.
+Valkey may correctly deny requests while remaining capacity displays `unknown`.
+Use the [Valkey profile](../all-in-one/valkey.md) for restart persistence; changing
+from memory starts a new ledger, not a transfer of old usage.
+
+## Read accounting and identify a 429
+
+A token quota denies admission when remaining capacity cannot cover its
+reservation. Stop repeated retries, inspect status, then check recent rejections:
+
+```console
+sudo bash -c '
+  source scripts/common/lib.sh
+  as_service podman logs --since 30m --tail 5000 praxis-shared-gateway 2>&1
+' | sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g' \
+  | grep -E 'token_rate_limit: rejecting request|request rejected by filter' | tail -n 20
+```
+
+`token_rate_limit` names the quota rule; wait for usage to age out or raise its
+capacity. `rate_limit` is the separate request throttle (shipped at 2 requests/s,
+burst 10). Raising token capacity does not change that throttle. Upstream providers
+can also return 429; correlate logs with the request time/path.
+
+## Other settings and gaps
+
+Capacities are stored in managed `/etc/praxis/quota-overrides.json`; do not edit
+it by hand. Failed activation restores the previous configuration, with backups
+under `/etc/praxis/rollback/quotas-*`. Rollback cannot recover lost memory usage.
+
+For windows, reservations or Switchyard rules, edit source YAML and use the
+[all-in-one](../all-in-one/in-memory.md#operate-the-service) or
+[remote-gateway](../remote-gateway/install.md#operations) upgrade procedure,
+retaining its provider/image/security arguments. Saved capacity overrides take
+precedence over source capacities.
+
+Quotas are shared token allowances, not per-user, per-model or dollar budgets.
+Reservation expiry does not guarantee a refund. Valkey uses AOF `everysec`,
+which can lose roughly a second of writes on sudden failure. See
+[feature testing](../../testing/gateway-features.md) for qualification.
+
+## Update the helpers on an existing VM
+
+New deployments include them. For an older deployment, run from the reviewed
+workstation checkout with its administrator login and SSH key:
+
+```console
+scp -p -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" \
+  scripts/common/quota-status scripts/common/quota_status.py \
+  scripts/common/quota-set scripts/common/quota_manage.py scripts/common/quota_config.py \
+  scripts/common/provider_manage.py scripts/common/provider_config.py \
+  scripts/common/lib.sh scripts/common/install \
+  "$RHEL_HOST:~/secure-single-server-deploy/scripts/common/"
+```
+
+This updates scripts without changing running services. They use Python/PyYAML
+and keep the admin listener private.

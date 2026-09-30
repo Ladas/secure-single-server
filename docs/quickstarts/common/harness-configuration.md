@@ -6,8 +6,10 @@ explains the installed `praxis-harness` launcher and file-based alternatives.
 It configures the selected CLI; Praxis is the server handling inference.
 
 The launcher builds settings for each invocation and replaces itself with the
-CLI. It does not write client configuration files, install a model, or discover
-an aggregated model catalog. Existing CLI settings can still apply. Pass the
+CLI. It does not rewrite your client settings, install a model, or discover
+an aggregated model catalog. For local Codex it writes a generated catalog
+under `~/.cache/praxis-harness/` and passes its path to the CLI. Existing CLI
+settings can still apply. Pass the
 served model explicitly; omitting `--model` on vLLM selects `qwen3-8b`.
 
 | Provider | Codex | OpenCode | Claude Code |
@@ -42,6 +44,8 @@ passes `--model`, disables web search, and selects the `workspace-write`
 sandbox. It sets context to 32,768 and auto-compaction to 24,576, and enables
 raw reasoning display. The 8,192-token difference is headroom, not an enforced
 generation cap. Normal interactive approvals remain active.
+For Qwen, the generated catalog contains the selected model with matching
+context limits, medium reasoning and a concise coding instruction template.
 
 To maintain these settings in `~/.codex/config.toml` instead:
 
@@ -50,6 +54,7 @@ model = "qwen3.8-27b-int4"
 model_provider = "praxis"
 model_context_window = 32768
 model_auto_compact_token_limit = 24576
+model_reasoning_effort = "medium"
 show_raw_agent_reasoning = true
 web_search = "disabled"
 sandbox_mode = "workspace-write"
@@ -69,9 +74,16 @@ PRAXIS_PLACEHOLDER_KEY=local-placeholder codex
 
 The helper's `-c` overrides select these settings for that launch without
 rewriting the TOML file. Neither `--model` nor the TOML `model` key adds an
-entry to `/model`. The recorded Codex menu omits Qwen. A supported
-`model_catalog_json` integration is follow-up work, including selection and
-inference after restarting the client.
+entry to `/model`. The helper now passes `model_catalog_json` for local Qwen.
+Inspect its generated path with:
+
+```console
+praxis-harness codex --provider vllm --model qwen3.8-27b-int4 --print-config
+```
+
+For the file alternative, add `model_catalog_json = "/absolute/path/to/catalog.json"`
+using that generated catalog or a maintained copy. It is read at startup.
+Keep caller credentials out of the catalog.
 [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 </details>
@@ -170,6 +182,10 @@ model and environment settings:
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "qwen3.8-27b-int4",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "qwen3.8-27b-int4",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qwen3.8-27b-int4",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION": "qwen3.8-27b-int4",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "qwen3.8-27b-int4",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Local Qwen through Praxis",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "0",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
     "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
@@ -186,11 +202,11 @@ CLAUDE_CODE_SIMPLE=1 claude --settings "$HOME/.config/praxis/claude-qwen38.json"
   --model qwen3.8-27b-int4 --effort medium
 ```
 
-The aliases account for the configured Qwen entry in `/model`. Automatic gateway
-discovery through `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` is a separate
-opt-in capability; the launcher does not enable it. Qualifying its returned
-catalog, quota effects and post-selection requests belongs to the feature-matrix
-follow-up. Merely moving the same aliases into a file does not enable discovery.
+`ANTHROPIC_CUSTOM_MODEL_OPTION` adds the exact Qwen ID to the picker.
+Managed `availableModels` restrictions still apply. `--gateway-model-discovery`
+opts into Claude's native discovery; it is disabled by default and filters out
+Qwen IDs. For remote gateways with both clouds, the shared model-list route
+returns OpenAI's catalog, so use configured Claude entries there.
 [Claude settings](https://code.claude.com/docs/en/settings),
 [environment variables](https://code.claude.com/docs/en/env-vars) and
 [gateway discovery](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery).
@@ -207,8 +223,12 @@ environment references supported by the client, never in committed project
 files. No TLS verification bypass is needed.
 
 The launcher removes inherited `OPENAI_*`, `ANTHROPIC_*` and `PRAXIS_*`
-environment values before adding its own. Launching a CLI directly does not
+environment values and Claude's `CLAUDE_CODE_USE_*` cloud selectors before adding
+its own settings, keeping Claude on the Messages gateway route. Launching a CLI directly does not
 provide that cleanup; check for conflicting provider/authentication settings.
+`--print-config` prints the command and generated environment with the caller
+credential replaced by `[caller]`; it starts no CLI. It is an inspection aid,
+not a complete runnable configuration export.
 
 `--prompt` changes execution mode: Codex uses ephemeral JSON `exec`, OpenCode
 uses JSON `run` with bounded build steps and tool permissions, and Claude uses

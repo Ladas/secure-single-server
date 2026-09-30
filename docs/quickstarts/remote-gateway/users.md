@@ -184,9 +184,11 @@ The gateway survives your logout. The harness follows your client machine's
 normal lifecycle: resume a saved session using its own resume command, or
 use `tmux` on a remote client host if the process must survive SSH disconnects.
 
-On `401`, obtain a replacement JWT and repeat connection setup. On `429`, the
-shared quota or request-rate protection may be exhausted. When finished,
-close the harness and remove only the temporary caller file created above:
+On `401`, obtain a replacement JWT and repeat connection setup. On `429`, stop
+repeated retries and ask the administrator to
+[check the shared quota and request throttle](../common/token-quotas.md#read-accounting-and-identify-a-429).
+When finished, close the harness and remove only the temporary caller file
+created above:
 
 ```console
 rm -- "$CALLER_JWT"

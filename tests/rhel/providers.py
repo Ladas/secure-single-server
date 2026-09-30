@@ -28,6 +28,21 @@ class ProvidersTest(unittest.TestCase):
         self.assertIn('exec 9>"$(gateway_lock_path "${SERVICE_USER}")"', source)
         self.assertNotIn("/run/lock/praxis-gateway.lock", source)
 
+    def test_messages_listener_lists_models_without_duplicate_remote_routes(self):
+        for scenario in ("all-in-one", "remote-gateway"):
+            for openai in (False, True):
+                config = providers.render(source(scenario), vllm=True, openai=openai, anthropic=True)
+                for chain in config["filter_chains"]:
+                    routes = next(f["routes"] for f in chain["filters"] if f["filter"] == "router")
+                    local = [r for r in routes if r.get("path") == "/vllm/v1/models"]
+                    self.assertEqual(local, [{"path": "/vllm/v1/models", "cluster": "vllm"}])
+                    clouds = [r for r in routes if r.get("path") == "/v1/models"]
+                    expected = "openai" if (scenario == "remote-gateway" and openai) or chain["name"] == "openai" else "anthropic"
+                    if chain["name"] == "openai" and not openai:
+                        self.assertEqual(clouds, [])
+                    else:
+                        self.assertEqual(clouds, [{"path": "/v1/models", "cluster": expected}])
+
     def test_prompted_credentials_use_existing_secret_helper_stdin_only(self):
         execute = Mock()
         manager.create_cloud_secret("openai", "new-version", reader=lambda prompt: "synthetic-private-key", execute=execute)

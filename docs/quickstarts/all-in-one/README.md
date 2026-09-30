@@ -164,6 +164,9 @@ after reconnecting or `tmux`.
 
 ### Request-rate protection and token quotas
 
+To investigate `429` responses, [inspect installed limits and accounting](../common/token-quotas.md#check-installed-limits)
+as the administrator.
+
 Each protocol chain has independent limiter instances:
 
 | Control | Current configuration | Restart behavior |

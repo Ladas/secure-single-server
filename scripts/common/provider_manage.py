@@ -16,6 +16,7 @@ import time
 import uuid
 
 from provider_config import SingleValueAction, render, validate_vllm_endpoint
+import quota_config
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = Path(os.environ.get("PRAXIS_CONFIG_DIR", "/etc/praxis"))
@@ -30,14 +31,14 @@ def create_cloud_secret(provider, version, *, reader=getpass.getpass, execute=su
             input=value, text=True, check=True)
 
 
-def updated_config(template, installed, previous, selected, *, legacy=False):
+def updated_config(template, installed, previous, selected, *, legacy=False, overrides=None):
     """Never reset settings from a different checkout during a provider change."""
     def configured(state):
-        return render(template, vllm=state["vllm"], openai=bool(state["openai_secret"]),
+        return quota_config.apply(render(template, vllm=state["vllm"], openai=bool(state["openai_secret"]),
                       anthropic=bool(state["anthropic_secret"]),
-                      vllm_endpoint=state.get("vllm_endpoint", ""))
+                      vllm_endpoint=state.get("vllm_endpoint", "")), overrides or {})
 
-    expected = template if legacy else configured(previous)
+    expected = quota_config.apply(template, overrides or {}) if legacy else configured(previous)
     if installed != expected:
         raise ValueError("installed settings differ from these templates; use the matching checkout before changing providers")
     return None if previous == selected else configured(selected)
@@ -58,7 +59,7 @@ def restart():
         if status == "healthy":
             return
         time.sleep(1)
-    raise RuntimeError("Praxis did not become healthy after provider change")
+    raise RuntimeError("Praxis did not become healthy after configuration change")
 
 
 def atomic_write(path, data, uid, gid, mode):
@@ -75,12 +76,12 @@ def atomic_write(path, data, uid, gid, mode):
         Path(temp).unlink(missing_ok=True)
 
 
-def transaction(changes, manifest, gid, activate=restart, relabel=None):
+def transaction(changes, manifest, gid, activate=restart, relabel=None, label="providers"):
     """Retain a recovery copy; restore files and the old service on any failure."""
     import stat
     paths = [*changes, manifest]
     previous = {p: (p.read_bytes(), p.stat()) if p.exists() else None for p in paths}
-    recovery = manifest.parent / "rollback" / ("providers-" + str(time.time_ns()))
+    recovery = manifest.parent / "rollback" / (label + "-" + str(time.time_ns()))
     recovery.mkdir(mode=0o700, parents=True)
     (recovery.parent).chmod(0o700)
     for index, (path, entry) in enumerate(previous.items()):
@@ -89,7 +90,7 @@ def transaction(changes, manifest, gid, activate=restart, relabel=None):
             backup.write_bytes(entry[0])
             backup.chmod(0o600)
     (recovery / "paths.json").write_text(json.dumps([str(p) for p in paths], indent=2))
-    print("Provider rollback files: " + str(recovery), flush=True)
+    print("Rollback files: " + str(recovery), flush=True)
     try:
         for path, data in changes.items():
             atomic_write(path, data, os.geteuid(), gid, 0o640)
@@ -194,7 +195,8 @@ def main():
                 f["backend"] = {"kind": "valkey", "url": "${TOKEN_RATE_LIMIT_VALKEY_URL}",
                                 "namespace": "secure-single-server:limits:" + provider}
     config = updated_config(config, yaml.safe_load((CONFIG / "shared-gateway.yaml").read_text()),
-                            previous, state, legacy=not state_file.exists())
+                            previous, state, legacy=not state_file.exists(),
+                            overrides=quota_config.load(CONFIG / "quota-overrides.json"))
     if config is None:
         print("Provider configuration is unchanged.")
         return
