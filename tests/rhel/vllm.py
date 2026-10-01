@@ -139,42 +139,73 @@ class VllmTest(unittest.TestCase):
             self.assertIn('ip -4 -o address show', install_source)
             self.assertIn('--remote address ${remote_listen} is not assigned to this server', install_source)
 
-    def test_remote_network_creation_rolls_back_before_the_manifest_is_committed(self):
+    def test_remote_install_rolls_back_staged_unit_and_network(self):
         source = (ROOT / 'scripts/vllm/install').read_text()
         cleanup = source[source.index('cleanup_install() {'):source.index('trap cleanup_install EXIT')]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             state = root / "state"
+            unit = root / "praxis-vllm.container"
+            unit_backup = root / "praxis-vllm.container.previous"
             network_unit = root / "praxis.network"
             temporary = root / "rendered"
+            manifest = state / "manifest"
+            manifest_backup = state / "manifest.previous"
+            manifest_new = state / "manifest.new"
             state.mkdir()
+            unit.write_text("new unit\n")
             network_unit.write_text("network\n")
             temporary.write_text("rendered\n")
             (state / "network-owned").write_text("")
             script = f"""
 set -euo pipefail
 state={shlex.quote(str(state))}
+unit={shlex.quote(str(unit))}
+unit_backup={shlex.quote(str(unit_backup))}
 network_unit={shlex.quote(str(network_unit))}
 temporary={shlex.quote(str(temporary))}
+manifest_new={shlex.quote(str(manifest_new))}
+manifest_backup={shlex.quote(str(manifest_backup))}
+unit_staged=1
 network_staged=1
 {cleanup}
 cleanup_install
 """
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(unit.exists())
+            self.assertFalse(manifest.exists())
             self.assertFalse(network_unit.exists())
             self.assertFalse((state / "network-owned").exists())
             self.assertFalse(temporary.exists())
 
             network_unit.write_text("network\n")
+            unit.write_text("committed unit\n")
             temporary.write_text("rendered\n")
             (state / "network-owned").write_text("")
-            (state / "manifest").write_text("committed\n")
+            manifest.write_text("committed\n")
+            script = script.replace("unit_staged=1", "unit_staged=0")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(network_unit.exists())
+            self.assertTrue(unit.exists())
+            self.assertTrue(manifest.exists())
             self.assertTrue((state / "network-owned").exists())
             self.assertFalse(temporary.exists())
+
+            unit.write_text("replacement unit\n")
+            manifest.write_text("replacement manifest\n")
+            unit_backup.write_text("committed unit\n")
+            manifest_backup.write_text("committed manifest\n")
+            manifest_new.write_text("replacement manifest\n")
+            script = script.replace("unit_staged=0", "unit_staged=1")
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(unit.read_text(), "committed unit\n")
+            self.assertEqual(manifest.read_text(), "committed manifest\n")
+            self.assertFalse(manifest_new.exists())
+            self.assertFalse(unit_backup.exists())
+            self.assertFalse(manifest_backup.exists())
 
     def test_model_selection_rejects_unknown_and_duplicate_presets(self):
         for args in (("--model", "unknown", "cpu"), ("--model", "../qwen3-8b", "cpu"),

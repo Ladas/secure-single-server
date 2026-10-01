@@ -572,13 +572,40 @@ class PlanTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ingress differs"):
                 vm.check_ingress(broad_private_group, vllm_state)
 
-            extra_group_state = {**vllm_state, "ManagedGrants": ["sg-client", "sg-other"]}
+            extra_group_state = {**vllm_state, "ManagedGrants": ["sg-client"]}
             extra_group_rule = {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
                                 "UserIdGroupPairs": [{"GroupId": "sg-client"}, {"GroupId": "sg-other"}]}
             extra_group = {"GroupId": "sg-vllm", "IpPermissions": [
                 *vllm_state["Ingress"], extra_group_rule]}
             with self.assertRaisesRegex(ValueError, "unexpected non-IPv4 ingress"):
                 vm.check_ingress(extra_group, extra_group_state)
+            tracked_group_state = {**vllm_state, "ManagedGrants": ["sg-client", "sg-other"]}
+            vm.check_ingress(extra_group, tracked_group_state)
+
+            missing_grant_state = {**vllm_state, "ManagedGrants": ["sg-client", "sg-other"]}
+            missing_grant_group = {"GroupId": "sg-vllm", "IpPermissions": [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                 "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            with self.assertRaisesRegex(ValueError, "managed vLLM grants differ"):
+                vm.check_ingress(missing_grant_group, missing_grant_state)
+
+            missing_journal_state = dict(vllm_state)
+            missing_journal_path = root / "missing-journal.json"
+            vm.save_state(missing_journal_path, missing_journal_state)
+            missing_journal_group = {"GroupId": "sg-vllm", "Tags": group["Tags"], "IpPermissions": [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                 "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            missing_journal_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                                   client_state_file=client_state_path,
+                                                   vllm_state_file=missing_journal_path, apply=True)
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2],
+                                                        {"SecurityGroups": [missing_journal_group]}]), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                vm.vllm_grant(aws, missing_journal_args)
+            self.assertIn("already granted", output.getvalue())
+            self.assertEqual(json.loads(missing_journal_path.read_text())["ManagedGrants"], ["sg-client"])
 
             all_traffic_group = {"GroupId": "sg-vllm", "IpPermissions": [{"IpProtocol": "-1",
                                   "FromPort": -1, "ToPort": -1, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]}

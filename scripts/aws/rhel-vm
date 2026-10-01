@@ -262,7 +262,7 @@ def source_group_grant_exists(group, source_group_id):
         if not port_matches:
             continue
         pairs = permission.get("UserIdGroupPairs", [])
-        if (len(pairs) == 1 and pairs[0].get("GroupId") == source_group_id
+        if (any(item.get("GroupId") == source_group_id for item in pairs)
                 and not permission.get("IpRanges") and not permission.get("Ipv6Ranges")
                 and not permission.get("PrefixListIds")):
             return True
@@ -283,9 +283,13 @@ def vllm_grant(aws, args):
     if len(groups) != 1 or not owned_tags(groups[0], vllm_state["Prefix"], "vllm-server"):
         raise ValueError("vLLM security-group ownership/scenario tags do not match")
     group = groups[0]
-    check_ingress(group, vllm_state)
-    check_no_public_vllm_ingress(groups)
     existing = source_group_grant_exists(group, client_state["SecurityGroupId"])
+    validation_state = vllm_state
+    if existing and client_state["SecurityGroupId"] not in vllm_state.get("ManagedGrants", []):
+        validation_state = {**vllm_state, "ManagedGrants": [
+            *vllm_state.get("ManagedGrants", []), client_state["SecurityGroupId"]]}
+    check_ingress(group, validation_state, require_managed_grants=False)
+    check_no_public_vllm_ingress(groups)
     proposal = {"ClientInstanceId": client["InstanceId"], "VllmInstanceId": vllm["InstanceId"],
                 "ClientSecurityGroupId": client_state["SecurityGroupId"],
                 "VllmSecurityGroupId": vllm_state["SecurityGroupId"], "Port": VLLM_PORT,
@@ -574,19 +578,21 @@ def retry_state(args):
     return state
 
 
-def check_ingress(group, state):
+def check_ingress(group, state, *, require_managed_grants=True):
     managed_grants = set(state.get("ManagedGrants", []))
+    observed_grants = set()
     normalized = []
     for permission in group["IpPermissions"]:
         pairs = permission.get("UserIdGroupPairs", [])
         if pairs:
             pair_groups = {item.get("GroupId") for item in pairs}
-            grant_matches = (len(pair_groups) == 1 and next(iter(pair_groups)) in managed_grants and
+            grant_matches = (bool(pair_groups) and pair_groups <= managed_grants and
                              permission.get("IpProtocol") == "tcp" and
                               permission.get("FromPort") == VLLM_PORT and
                               permission.get("ToPort") == VLLM_PORT)
             if (grant_matches and not permission.get("IpRanges") and not permission.get("Ipv6Ranges")
                     and not permission.get("PrefixListIds")):
+                observed_grants.update(pair_groups)
                 continue
             raise ValueError("unexpected non-IPv4 ingress")
         if permission.get("Ipv6Ranges") or permission.get("PrefixListIds"):
@@ -594,6 +600,8 @@ def check_ingress(group, state):
         normalized.append({key: permission[key] for key in ["IpProtocol", "FromPort", "ToPort", "IpRanges"]})
     if sorted(normalized, key=lambda rule: rule["FromPort"]) != state["Ingress"]:
         raise ValueError("security-group ingress differs from the recorded plan")
+    if require_managed_grants and managed_grants != observed_grants:
+        raise ValueError("managed vLLM grants differ from the recorded journal")
 
 
 def check_owned(resource, state):

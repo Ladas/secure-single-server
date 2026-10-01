@@ -83,6 +83,13 @@ admin "$@"
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('usage-error', result.stderr)
 
+    def test_inference_checks_survive_python_optimization(self):
+        source = (ROOT / 'bootc/scripts/inference-check').read_text()
+        self.assertNotIn('assert model ', source)
+        self.assertNotIn('assert completion', source)
+        self.assertIn("raise RuntimeError(f'{name}: expected model", source)
+        self.assertIn("raise RuntimeError(f'{name}: empty completion", source)
+
     def test_local_quadlet_cannot_require_cloud_secrets_or_publish_public_ports(self):
         unit = (ROOT / 'configs/vllm/praxis.container.in').read_text()
         self.assertIn('Network=host', unit)
