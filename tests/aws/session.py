@@ -169,6 +169,7 @@ ACCOUNT=123456789012 AWS_TEST_CREDENTIALS=ready REGION=eu-central-1 RUN_PREFIX=g
 if aws_test_vllm_grant all-in-one vllm-server; then printf 'GRANT_PLAN_OK\n'; fi
 if aws_test_vllm_grant_apply all-in-one vllm-server; then printf 'GRANT_APPLY_OK\n'; fi
 RHEL_VPC_ID=vpc-test
+RHEL_SCENARIO=remote-gateway
 if aws_test_vllm_endpoint vllm-server; then printf 'ENDPOINT_OK\n'; fi
 printf 'SHELL_ALIVE\n'
 """)
@@ -199,6 +200,18 @@ printf 'SHELL_ALIVE\\n'
             output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
 ACCOUNT=123456789012 AWS_TEST_CREDENTIALS=ready REGION=eu-central-1 RUN_PREFIX=gateway-test
 unset RHEL_VPC_ID
+if aws_test_vllm_endpoint vllm-server; then printf 'UNEXPECTED_ENDPOINT\\n'; fi
+printf 'SHELL_ALIVE\\n'
+""")
+            self.assertNotIn("VM_CALL:", output)
+            self.assertNotIn("UNEXPECTED_ENDPOINT", output)
+            self.assertIn("Verify the single server first so vLLM endpoint discovery can check the VPC.", output)
+
+    def test_vllm_endpoint_rejects_a_verified_vllm_server_as_client(self):
+        for shell in SHELLS:
+            output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
+ACCOUNT=123456789012 AWS_TEST_CREDENTIALS=ready REGION=eu-central-1 RUN_PREFIX=gateway-test
+RHEL_VPC_ID=vpc-test RHEL_SCENARIO=vllm-server
 if aws_test_vllm_endpoint vllm-server; then printf 'UNEXPECTED_ENDPOINT\\n'; fi
 printf 'SHELL_ALIVE\\n'
 """)
