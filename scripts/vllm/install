@@ -112,13 +112,13 @@ fi
 source /etc/os-release
 [[ "${ID}" == rhel && "${VERSION_ID}" == 9.* ]] || die 'mutable RHEL 9 is required'
 [[ "$(getenforce)" == Enforcing ]] || die 'SELinux must remain enforcing'
-if [[ -z "${remote_listen}" ]]; then
-  verify_managed_manifest
-fi
 exec 8>/run/lock/praxis-vllm.lock
 flock -n 8 || die 'another vLLM install is running'
 exec 9>"$(gateway_lock_path "${SERVICE_USER}")"
 flock -n 9 || die 'another gateway installation/provider change is running'
+if [[ -z "${remote_listen}" ]]; then
+  verify_managed_manifest
+fi
 image="${VLLM_CPU_IMAGE}"
 if [[ "${mode}" == gpu ]]; then
   require_command nvidia-smi
@@ -144,18 +144,20 @@ state=/etc/praxis-vllm
 network_staged=0
 unit_staged=0
 template_staged=0
+fcontext_staged=0
 service_touched=0
 service_was_active=0
 temporary=''
-unit_backup="${unit}.previous"
-manifest_backup="${state}/manifest.previous"
+unit_backup=''
+manifest_backup=''
 manifest_new="${state}/manifest.new"
-template_backup="${state}/chat-template.jinja.previous"
-template_hash_backup="${state}/template.sha256.previous"
+fcontext_regex='^/etc/praxis-vllm/chat-template\.jinja$'
+template_backup=''
+template_hash_backup=''
 # shellcheck disable=SC2329
 cleanup_install() {
   if (( unit_staged )); then
-    if [[ -f "${unit_backup}" ]]; then
+    if [[ -n "${unit_backup}" ]]; then
       mv -f "${unit_backup}" "${unit}"
       mv -f "${manifest_backup}" "${state}/manifest"
     else
@@ -163,16 +165,19 @@ cleanup_install() {
     fi
   fi
   if (( template_staged )); then
-    if [[ -f "${template_backup}" ]]; then
+    if [[ -n "${template_backup}" ]]; then
       mv -f "${template_backup}" "${state}/chat-template.jinja"
     else
       rm -f "${state}/chat-template.jinja"
     fi
-    if [[ -f "${template_hash_backup}" ]]; then
+    if [[ -n "${template_hash_backup}" ]]; then
       mv -f "${template_hash_backup}" "${state}/template.sha256"
     else
       rm -f "${state}/template.sha256"
     fi
+  fi
+  if (( fcontext_staged )); then
+    semanage fcontext -d "${fcontext_regex}" >/dev/null 2>&1 || true
   fi
   if (( service_touched )); then
     as_service systemctl --user stop praxis-vllm.service || true
@@ -206,6 +211,7 @@ commit_install_state() {
   fi
   unit_staged=0
   template_staged=0
+  fcontext_staged=0
   network_staged=0
   service_touched=0
 }
@@ -237,15 +243,21 @@ else
 fi
 if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
   if [[ -e "${state}/chat-template.jinja" ]]; then
+    template_backup="$(mktemp "${state}/chat-template.jinja.previous.XXXXXX")"
     cp -p "${state}/chat-template.jinja" "${template_backup}"
   fi
   if [[ -e "${state}/template.sha256" ]]; then
+    template_hash_backup="$(mktemp "${state}/template.sha256.previous.XXXXXX")"
     cp -p "${state}/template.sha256" "${template_hash_backup}"
   fi
   template_staged=1
   install -o root -g "${gid}" -m 0640 "${VLLM_CHAT_TEMPLATE}" "${state}/chat-template.jinja"
-  if ! semanage fcontext -a -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$' 2>/dev/null; then
-    semanage fcontext -m -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$'
+  existing_context="$(semanage fcontext -l | awk -v regex="${fcontext_regex}" '$1 == regex { print $NF; exit }')"
+  if [[ -z "${existing_context}" ]]; then
+    semanage fcontext -a -t container_file_t "${fcontext_regex}"
+    fcontext_staged=1
+  elif [[ "${existing_context}" != *:container_file_t:* ]]; then
+    die "unexpected SELinux context for vLLM chat template: ${existing_context}"
   fi
   restorecon -F "${state}/chat-template.jinja"
   sha256_file "${state}/chat-template.jinja" >"${state}/template.sha256"
@@ -256,6 +268,8 @@ if [[ -e "${unit}" ]]; then
   if as_service systemctl --user is-active --quiet praxis-vllm.service; then
     service_was_active=1
   fi
+  unit_backup="$(mktemp "${unit}.previous.XXXXXX")"
+  manifest_backup="$(mktemp "${state}/manifest.previous.XXXXXX")"
   cp -p "${unit}" "${unit_backup}"
   cp -p "${state}/manifest" "${manifest_backup}"
 fi

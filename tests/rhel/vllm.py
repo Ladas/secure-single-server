@@ -157,6 +157,7 @@ class VllmTest(unittest.TestCase):
             template_hash = state / "template.sha256"
             template_hash_backup = state / "template.sha256.previous"
             network_rm_marker = root / "network-rm"
+            fcontext_rm_marker = root / "fcontext-rm"
             state.mkdir()
             unit.write_text("new unit\n")
             network_unit.write_text("network\n")
@@ -166,11 +167,11 @@ class VllmTest(unittest.TestCase):
 set -euo pipefail
 state={shlex.quote(str(state))}
 unit={shlex.quote(str(unit))}
-unit_backup={shlex.quote(str(unit_backup))}
+unit_backup=''
 network_unit={shlex.quote(str(network_unit))}
 temporary={shlex.quote(str(temporary))}
 manifest_new={shlex.quote(str(manifest_new))}
-manifest_backup={shlex.quote(str(manifest_backup))}
+manifest_backup=''
 template_backup={shlex.quote(str(template_backup))}
 template_hash_backup={shlex.quote(str(template_hash_backup))}
 unit_staged=1
@@ -178,6 +179,13 @@ template_staged=0
 network_staged=1
 service_touched=0
 service_was_active=0
+fcontext_staged=0
+fcontext_regex='^/etc/praxis-vllm/chat-template\\.jinja$'
+semanage() {{
+  if [[ "$1" == fcontext && "$2" == -d ]]; then
+    touch {shlex.quote(str(fcontext_rm_marker))}
+  fi
+}}
 as_service() {{
   if [[ "$1" == podman && "$2" == network && "$3" == rm ]]; then
     touch {shlex.quote(str(network_rm_marker))}
@@ -215,6 +223,8 @@ cleanup_install
             unit_backup.write_text("committed unit\n")
             manifest_backup.write_text("committed manifest\n")
             manifest_new.write_text("replacement manifest\n")
+            script = script.replace("unit_backup=''", f"unit_backup={shlex.quote(str(unit_backup))}")
+            script = script.replace("manifest_backup=''", f"manifest_backup={shlex.quote(str(manifest_backup))}")
             script = script.replace("unit_staged=0", "unit_staged=1")
             script = script.replace("network_staged=0", "network_staged=1")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
@@ -230,7 +240,9 @@ cleanup_install
             template_hash.write_text("new hash\n")
             template_backup.write_text("old template\n")
             template_hash_backup.write_text("old hash\n")
+            script = script.replace("unit_staged=1", "unit_staged=0")
             script = script.replace("template_staged=0", "template_staged=1")
+            script = script.replace("fcontext_staged=0", "fcontext_staged=1")
             script = script.replace("service_touched=0", "service_touched=1")
             script = script.replace("service_was_active=0", "service_was_active=1")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
@@ -244,6 +256,7 @@ cleanup_install
             self.assertIn('SERVICE systemctl --user restart praxis-vllm.service', result.stdout)
             self.assertIn('SERVICE systemctl --user stop praxis-network.service', result.stdout)
             self.assertTrue(network_rm_marker.exists())
+            self.assertTrue(fcontext_rm_marker.exists())
 
     def test_remote_install_commits_state_and_clears_staging(self):
         source = (ROOT / 'scripts/vllm/install').read_text()
@@ -267,9 +280,10 @@ unit_staged=1
 template_staged=1
 network_staged=1
 service_touched=1
+fcontext_staged=1
 {commit}
 commit_install_state
-printf '%s\\n' "$unit_staged" "$template_staged" "$network_staged" "$service_touched"
+printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$network_staged" "$service_touched"
 """
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -277,7 +291,7 @@ printf '%s\\n' "$unit_staged" "$template_staged" "$network_staged" "$service_tou
             self.assertEqual((state / "model").read_text(), "test-model\n")
             self.assertEqual((state / "listen-address").read_text(), "10.0.1.10\n")
             self.assertTrue((state / "network-owned").exists())
-            self.assertEqual(result.stdout, "0\n0\n0\n0\n")
+            self.assertEqual(result.stdout, "0\n0\n0\n0\n0\n")
 
             gateway_unit.write_text("gateway\n")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
