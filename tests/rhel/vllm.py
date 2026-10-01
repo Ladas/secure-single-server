@@ -360,8 +360,13 @@ printf '%s\\n' "$remove_network"
             block = block.replace(
                 'network_unit="/etc/containers/systemd/users/$(service_uid)/praxis.network"',
                 f'network_unit={shlex.quote(str(network_unit))}')
+            block = block.replace('vllm_state="/etc/praxis-vllm"',
+                                  f'vllm_state={shlex.quote(str(root / "state"))}')
 
             def run_uninstall(preserve_network):
+                vllm_state = root / 'state'
+                vllm_state.mkdir(exist_ok=True)
+                (vllm_state / 'network-owned').unlink(missing_ok=True)
                 network_unit.write_text('network\n')
                 other_file.write_text('other\n')
                 manifest.write_text(f'file {network_unit}\nfile {other_file}\n')
@@ -381,12 +386,14 @@ vllm_uses_praxis_network() {{ return {0 if preserve_network else 1}; }}
             result = run_uninstall(True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(network_unit.exists())
+            self.assertTrue((root / 'state' / 'network-owned').exists())
             self.assertFalse(other_file.exists())
             self.assertNotIn('stop praxis-network.service', result.stdout)
 
             result = run_uninstall(False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(network_unit.exists())
+            self.assertFalse((root / 'state' / 'network-owned').exists())
             self.assertFalse(other_file.exists())
             self.assertIn('stop praxis-network.service', result.stdout)
 
@@ -397,7 +404,6 @@ vllm_uses_praxis_network() {{ return {0 if preserve_network else 1}; }}
             root = Path(directory)
             state = root / "state"
             state.mkdir()
-            (state / "network-owned").write_text("")
             script = f"""
 set -euo pipefail
 state={shlex.quote(str(state))}
@@ -408,6 +414,7 @@ uid=1001
 unit_staged=1
 template_staged=1
 network_staged=1
+network_adopted=0
 service_touched=1
 fcontext_staged=1
 fcontext_owned_staged=1
@@ -425,6 +432,14 @@ printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$fcontext_o
 
             (state / "network-owned").unlink()
             script = script.replace("network_staged=1", "network_staged=0")
+            script = script.replace("network_adopted=0", "network_adopted=1")
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((state / "network-owned").exists())
+            self.assertEqual(result.stdout, "0\n0\n0\n0\n0\n0\n")
+
+            (state / "network-owned").unlink()
+            script = script.replace("network_adopted=1", "network_adopted=0")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((state / "network-owned").exists())

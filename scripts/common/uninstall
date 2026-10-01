@@ -24,9 +24,11 @@ done
 verify_managed_manifest
 
 network_unit="/etc/containers/systemd/users/$(service_uid)/praxis.network"
+vllm_state="/etc/praxis-vllm"
 preserve_network=0
 if vllm_uses_praxis_network; then
   preserve_network=1
+  touch "${vllm_state}/network-owned"
 fi
 
 as_service systemctl --user stop praxis.service 2>/dev/null || true

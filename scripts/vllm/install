@@ -142,6 +142,7 @@ quadlet_dir="/etc/containers/systemd/users/${uid}"
 network_unit="/etc/containers/systemd/users/${uid}/praxis.network"
 state=/etc/praxis-vllm
 network_staged=0
+network_adopted=0
 unit_staged=0
 template_staged=0
 fcontext_staged=0
@@ -205,6 +206,9 @@ cleanup_install() {
 commit_install_state() {
   printf '%s\n' "${mode}" >"${state}/mode"
   printf '%s\n' "${model}" >"${state}/model"
+  if (( network_staged || network_adopted )); then
+    touch "${state}/network-owned"
+  fi
   if [[ -n "${remote_listen}" ]]; then
     printf '%s\n' "${remote_listen}" >"${state}/listen-address"
   else
@@ -239,10 +243,10 @@ install -d -o root -g "${gid}" -m 0750 "${quadlet_dir}"
 if [[ -e "${network_unit}" ]]; then
   cmp -s "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}" ||
     die 'praxis.network drifted; inspect it before installing remote vLLM'
+  network_adopted=1
 else
   network_staged=1
   install -o root -g "${gid}" -m 0640 "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}"
-  touch "${state}/network-owned"
 fi
 if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
   if [[ -e "${state}/chat-template.jinja" ]]; then

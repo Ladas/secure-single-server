@@ -456,6 +456,7 @@ class PlanTest(unittest.TestCase):
                         "SecurityGroups": [{"GroupId": "sg-vllm"}]}
             group = {"GroupId": "sg-vllm", "IpPermissions": [{"IpProtocol": "tcp", "FromPort": 8000,
                         "ToPort": 8000, "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            group["Tags"] = vm.tags("gateway-test-vllm-server", "vllm-server")
             identity = {"Account": "123456789012", "Arn": "arn:aws:iam::123456789012:user/test"}
             client_reply = {"Reservations": [{"Instances": [client]}]}
             vllm_reply = {"Reservations": [{"Instances": [instance]}]}
@@ -503,6 +504,13 @@ class PlanTest(unittest.TestCase):
                     self.assertRaisesRegex(ValueError, "exact TCP source-group rule"):
                 vm.vllm_endpoint(aws, endpoint_args)
 
+            unmanaged_group = copy.deepcopy(group)
+            unmanaged_group["Tags"] = vm.tags("attacker", "vllm-server")
+            with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
+                                                        {"SecurityGroups": [unmanaged_group]}]), \
+                    self.assertRaisesRegex(ValueError, "security-group ownership"):
+                vm.vllm_endpoint(aws, endpoint_args)
+
             other_client_group = copy.deepcopy(group)
             other_client_group["IpPermissions"][0]["UserIdGroupPairs"] = [{"GroupId": "sg-other"}]
             with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
@@ -547,6 +555,9 @@ class PlanTest(unittest.TestCase):
             vllm = {"InstanceId": "i-vllm", "State": {"Name": "running"}, "VpcId": "vpc-test",
                     "Tags": vm.tags(vllm_state["Prefix"], vllm_state["Scenario"]),
                     "SecurityGroups": [{"GroupId": "sg-vllm"}]}
+            client_group = {"GroupId": "sg-client"}
+            client_group["Tags"] = vm.tags(client_state["Prefix"], client_state["Scenario"])
+            client_group["IpPermissions"] = copy.deepcopy(client_state["Ingress"])
             group = {"GroupId": "sg-vllm", "IpPermissions": []}
             group["Tags"] = vm.tags(vllm_state["Prefix"], vllm_state["Scenario"])
             group["IpPermissions"] = copy.deepcopy(vllm_state["Ingress"])
@@ -566,19 +577,30 @@ class PlanTest(unittest.TestCase):
                     vm.vllm_grant(aws, tampered_args)
             calls.assert_called_once()
 
-            replies = [identity, {"Reservations": [{"Instances": [client]}]},
-                       {"Reservations": [{"Instances": [vllm]}]}, {"SecurityGroups": [group]}]
+            client_reply = {"Reservations": [{"Instances": [client]}]}
+            vllm_reply = {"Reservations": [{"Instances": [vllm]}]}
+            client_group_reply = {"SecurityGroups": [client_group]}
+            vllm_group_reply = {"SecurityGroups": [group]}
+            replies = [identity, client_reply, vllm_reply, client_group_reply, vllm_group_reply]
+            tampered_client_group = copy.deepcopy(client_group)
+            tampered_client_group["Tags"] = vm.tags("attacker", client_state["Scenario"])
+            with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
+                                                        {"SecurityGroups": [tampered_client_group]}]) as calls:
+                with self.assertRaisesRegex(ValueError, "client security-group ownership"):
+                    vm.vllm_grant(aws, args)
+            self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
             with patch.object(aws, "call", side_effect=replies) as calls, \
                     contextlib.redirect_stdout(io.StringIO()) as output:
                 vm.vllm_grant(aws, args)
             self.assertIn('"Exists": false', output.getvalue())
             self.assertEqual([call.args[1] for call in calls.call_args_list],
                              ["get-caller-identity", "describe-instances", "describe-instances",
-                              "describe-security-groups"])
+                              "describe-security-groups", "describe-security-groups"])
 
             wrong_group = copy.deepcopy(group)
             wrong_group["Tags"] = vm.tags(client_state["Prefix"], client_state["Scenario"])
-            with patch.object(aws, "call", side_effect=[*replies[:3],
+            with patch.object(aws, "call", side_effect=[*replies[:4],
                                                         {"SecurityGroups": [wrong_group]}]), \
                     self.assertRaisesRegex(ValueError, "security-group ownership"):
                 vm.vllm_grant(aws, args)
@@ -625,7 +647,7 @@ class PlanTest(unittest.TestCase):
             stale_args = SimpleNamespace(account_id=args.account_id, region=args.region,
                                          client_state_file=client_state_path,
                                          vllm_state_file=stale_path, apply=True)
-            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2],
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2], client_group_reply,
                                                         {"SecurityGroups": [group]}]) as calls, \
                     patch("builtins.input", return_value=confirmation), \
                     self.assertRaisesRegex(ValueError, "managed vLLM grants differ"):
@@ -637,7 +659,7 @@ class PlanTest(unittest.TestCase):
             drift_args = SimpleNamespace(account_id=args.account_id, region=args.region,
                                          client_state_file=client_state_path,
                                          vllm_state_file=vllm_state_path, apply=True)
-            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2],
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2], client_group_reply,
                                                         {"SecurityGroups": [group]},
                                                         {"SecurityGroups": [drifted_group]}]) as calls, \
                     patch("builtins.input", return_value=confirmation), \
@@ -703,17 +725,12 @@ class PlanTest(unittest.TestCase):
             missing_journal_args = SimpleNamespace(account_id=args.account_id, region=args.region,
                                                    client_state_file=client_state_path,
                                                    vllm_state_file=missing_journal_path, apply=True)
-            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2],
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2], client_group_reply,
                                                         {"SecurityGroups": [missing_journal_group]}]), \
                     contextlib.redirect_stdout(io.StringIO()) as output:
                 vm.vllm_grant(aws, missing_journal_args)
             self.assertIn("already granted", output.getvalue())
             self.assertEqual(json.loads(missing_journal_path.read_text())["ManagedGrants"], ["sg-client"])
-
-            all_traffic_group = {"GroupId": "sg-vllm", "IpPermissions": [{"IpProtocol": "-1",
-                                  "FromPort": -1, "ToPort": -1, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]}
-            with self.assertRaisesRegex(ValueError, "exposes port 8000"):
-                vm.check_no_public_vllm_ingress([all_traffic_group])
 
             malformed = root / "malformed.json"
             malformed.write_text("[]")

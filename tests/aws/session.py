@@ -227,6 +227,7 @@ printf 'SHELL_ALIVE\\n'
             output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
 ACCOUNT=123456789012 AWS_TEST_CREDENTIALS=ready REGION=eu-central-1 RUN_PREFIX=gateway-test
 RHEL_VPC_ID=vpc-test RHEL_SCENARIO=vllm-server
+RHEL_STATE_FILE="$AWS_TEST_REPO/.state/gateway-test-vllm-server.json"
 if aws_test_vllm_endpoint vllm-server; then printf 'UNEXPECTED_ENDPOINT\\n'; fi
 printf 'SHELL_ALIVE\\n'
 """)
