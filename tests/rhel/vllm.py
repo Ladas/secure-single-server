@@ -150,8 +150,6 @@ class VllmTest(unittest.TestCase):
             self.assertIn('--remote address ${remote_listen} is not assigned to this server', install_source)
 
     def test_remote_install_rolls_back_staged_unit_and_network(self):
-        source = (ROOT / 'scripts/vllm/install').read_text()
-        cleanup = source[source.index('cleanup_install() {'):source.index('trap cleanup_install EXIT')]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             state = root / "state"
@@ -176,6 +174,7 @@ class VllmTest(unittest.TestCase):
             (state / "network-owned").write_text("")
             script = f"""
 set -euo pipefail
+source {shlex.quote(str(ROOT / 'scripts/vllm/lib.sh'))}
 state={shlex.quote(str(state))}
 unit={shlex.quote(str(unit))}
 unit_backup=''
@@ -205,7 +204,6 @@ as_service() {{
   fi
   printf 'SERVICE %s\\n' "$*"
 }}
-{cleanup}
 cleanup_install
 """
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
@@ -398,14 +396,13 @@ vllm_uses_praxis_network() {{ return {0 if preserve_network else 1}; }}
             self.assertIn('stop praxis-network.service', result.stdout)
 
     def test_remote_install_commits_state_and_clears_staging(self):
-        source = (ROOT / 'scripts/vllm/install').read_text()
-        commit = source[source.index('commit_install_state() {'):source.index('trap cleanup_install EXIT')]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             state = root / "state"
             state.mkdir()
             script = f"""
 set -euo pipefail
+source {shlex.quote(str(ROOT / 'scripts/vllm/lib.sh'))}
 state={shlex.quote(str(state))}
 mode=gpu
 model=test-model
@@ -418,7 +415,6 @@ network_adopted=0
 service_touched=1
 fcontext_staged=1
 fcontext_owned_staged=1
-{commit}
 commit_install_state
 printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$fcontext_owned_staged" "$network_staged" "$service_touched"
 """

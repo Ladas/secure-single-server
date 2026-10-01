@@ -629,10 +629,10 @@ def check_ingress(group, state, *, require_managed_grants=True):
         if pairs:
             pair_groups = {item.get("GroupId") for item in pairs}
             grant_matches = (state.get("Scenario") == "vllm-server" and bool(pair_groups)
-                             and pair_groups <= managed_grants and
-                             permission.get("IpProtocol") == "tcp" and
-                              permission.get("FromPort") == VLLM_PORT and
-                              permission.get("ToPort") == VLLM_PORT)
+                             and pair_groups <= managed_grants
+                             and permission.get("IpProtocol") == "tcp"
+                             and permission.get("FromPort") == VLLM_PORT
+                             and permission.get("ToPort") == VLLM_PORT)
             if (grant_matches and not permission.get("IpRanges") and not permission.get("Ipv6Ranges")
                     and not permission.get("PrefixListIds")):
                 observed_grants.update(pair_groups)
