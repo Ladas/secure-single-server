@@ -17,5 +17,5 @@ network_policies:
     binaries: [{path: /usr/sbin/node}, {path: /usr/sbin/git}]
   npm_registry:
     name: npm-registry
-    endpoints: [{host: registry.npmjs.org, port: 443, enforcement: enforce}]
+    endpoints: [{host: registry.npmjs.org, port: 443}]
     binaries: [{path: /usr/sbin/node}, {path: /usr/sbin/npm}]
