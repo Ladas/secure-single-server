@@ -20,11 +20,9 @@ sudo watch -n 5 ./scripts/common/quota-status
 sudo scripts/common/quota-status --json
 ```
 
-> After a restart, `no samples` is normal until inference emits accounting
-> metrics for that rule. Refresh after a harness request; listing models may
-> not generate usage. Memory quotas reset on restart. **Valkey retains quota
-> usage, but process metrics still restart.** Missing samples do not mean an
-> unused allowance.
+> Valkey usage is read directly from its persisted ledger, including after a
+> Praxis restart. The separate process counters restart and may show `unknown`.
+> Memory quotas reset on restart; refresh after inference for new samples.
 
 ## List providers and rules
 
@@ -100,14 +98,16 @@ list for installed values. Input, output and repeated prompt/history tokens coun
 | Status / backend | Meaning |
 | --- | --- |
 | `memory` | Usage is lost on Praxis restart |
-| `valkey` | Usage persists; process metrics still start again |
+| `valkey ledger` | Current persisted window charges plus outstanding reservations, read without changing quotas |
 | `first window` | Unchanged global memory balance reconstructed before usage ages out: estimated − refunded + overage |
-| `unknown` | Metrics cannot establish the balance: no samples, aged window, changed configuration or persistent Valkey state |
+| `unknown` | Balance cannot be established; check the reported reason |
 
-The deployed image has no remaining-budget gauge. Fresh inference makes process
-metrics available, but cannot reconstruct retained Valkey usage. `Reconciled
-tokens` excludes retained estimates after missing usage or failed settlement.
-Valkey may correctly deny requests while remaining capacity displays `unknown`.
+The Valkey reader supports the pinned Praxis image's global sliding-window rules
+and managed local backend. Other images, key scopes and algorithms display
+`unknown` until qualified. Charges include estimates retained after missing usage
+or reservation expiry; they are not necessarily provider-reported token usage.
+The image omits Valkey settlement/refund counters, so cumulative reserved tokens
+must not be treated as net charges. Use the first table for the current allowance.
 Use the [Valkey profile](../all-in-one/valkey.md) for restart persistence; changing
 from memory starts a new ledger, not a transfer of old usage.
 

@@ -15,6 +15,26 @@ from harness import configuration
 
 
 class ClientsTest(unittest.TestCase):
+    def test_claude_code_public_name_preserves_messages_routing_and_executable(self):
+        with patch.object(sys, "argv", ["praxis-harness", "claude-code", "--model", "qwen3.8-27b-int4"]), \
+             patch.object(os, "execvpe") as execute:
+            harness.main()
+        executable, command, environment = execute.call_args.args
+        self.assertEqual(executable, "claude")
+        self.assertEqual(environment["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8081/vllm")
+        self.assertEqual(command[command.index("--permission-mode") + 1], "default")
+        self.assertEqual(configuration("claude-code", "vllm", "qwen3-8b", "http://localhost:8081", "caller"),
+                         configuration("claude", "vllm", "qwen3-8b", "http://localhost:8081", "caller"))
+
+    def test_local_claude_uses_manual_approval_not_the_cloud_auto_classifier(self):
+        for name in ("claude-code", "claude"):
+            for prompt in (None, "task"):
+                command, _ = configuration(name, "vllm", "qwen3.8-27b-int4", "http://localhost:8081", "caller", prompt=prompt)
+                self.assertEqual(command[command.index("--permission-mode") + 1], "default")
+                self.assertNotIn("--dangerously-skip-permissions", command)
+        command, _ = configuration("claude-code", "anthropic", "claude-model", "http://localhost:8081", "caller")
+        self.assertNotIn("--permission-mode", command)
+
     def test_claude_gateway_launch_clears_inherited_cloud_provider_selectors(self):
         with patch.dict(os.environ, {"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1"}), \
              patch.object(sys, "argv", ["praxis-harness", "claude", "--model", "qwen3-8b"]), \

@@ -27,6 +27,9 @@ The launcher sets the Praxis URL, provider, model and client limits, then starts
 the chosen CLI with its normal interactive tool approvals. Run
 `praxis-harness --help` to see its options.
 
+Use `claude-code` as its launcher name; the installed executable is still
+`claude`. The older `praxis-harness claude` spelling remains an alias.
+
 <details>
 <summary>What the launcher changes, and using a configuration file instead</summary>
 
@@ -41,6 +44,8 @@ See the expandable [per-harness configuration examples](../common/harness-config
 for the exact routes, limits and file-based alternatives. With local Qwen,
 Claude uses simple mode: automatic `CLAUDE.md`, skill, plugin and hook discovery
 is disabled. Interactive tool approvals remain active.
+Local Qwen starts Claude Code in Manual mode: approve tool requests yourself.
+Auto mode requires a separate classifier that is not qualified with Qwen.
 
 </details>
 
@@ -99,7 +104,7 @@ praxis-harness codex --provider vllm --model "$VLLM_MODEL"
 ```
 
 ```console
-praxis-harness claude --provider vllm --model "$VLLM_MODEL"
+praxis-harness claude-code --provider vllm --model "$VLLM_MODEL"
 ```
 
 ### OpenAI
@@ -133,7 +138,7 @@ IFS= read -r ANTHROPIC_MODEL
 ```
 
 ```console
-praxis-harness claude --provider anthropic --model "$ANTHROPIC_MODEL"
+praxis-harness claude-code --provider anthropic --model "$ANTHROPIC_MODEL"
 ```
 
 ```console

@@ -420,8 +420,10 @@ def main():
     parser.add_argument("--hostname", required=True)
     parser.add_argument("--provider", choices=("cloud", "vllm"), default="cloud")
     parser.add_argument("--real", action="store_true")
-    parser.add_argument("--harness", choices=("codex", "opencode", "claude"))
+    parser.add_argument("--harness", choices=("codex", "opencode", "claude-code", "claude"))
     args = parser.parse_args()
+    if args.harness == "claude-code":
+        args.harness = "claude"
     if not __debug__:
         raise SystemExit("Do not run qualification with Python -O")
     gateway = InstalledGateway(args)

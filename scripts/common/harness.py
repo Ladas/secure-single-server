@@ -47,6 +47,7 @@ def write_codex_catalog(model, directory):
 
 def configuration(name, provider, model, base, caller, *, prompt=None, messages_base=None,
                   catalog_path=None, gateway_discovery=False):
+    name = "claude" if name == "claude-code" else name
     if gateway_discovery and name != "claude":
         raise ValueError("native gateway discovery is a Claude option; Codex/OpenCode use configured catalogs")
     if (name, provider) in (("codex", "anthropic"), ("claude", "openai")):
@@ -103,6 +104,8 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
                        ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION="Local Qwen through Praxis",
                        CLAUDE_CODE_MAX_CONTEXT_TOKENS=str(context), CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(output))
         command = ["claude", *(["-p"] if prompt else []), "--model", model]
+        if provider == "vllm":
+            command += ["--permission-mode", "default"]
         if provider == "vllm" and model == "qwen3.8-27b-int4":
             # This model's template rejects Claude's default "high" effort.
             command += ["--effort", "medium"]
@@ -117,7 +120,8 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("harness", choices=("codex", "opencode", "claude"))
+    parser.add_argument("harness", choices=("codex", "opencode", "claude-code", "claude"),
+                        help="Claude Code: use claude-code (claude remains an alias)")
     parser.add_argument("--provider", choices=("vllm", "openai", "anthropic"), default="vllm")
     parser.add_argument("--model", help="Qwen defaults to qwen3-8b; cloud models must be selected explicitly")
     parser.add_argument("--url", help="gateway origin, without /v1 or /vllm; defaults to the harness's local listener")
@@ -128,6 +132,8 @@ def main():
                         help="Claude: opt in to native gateway discovery (Qwen IDs are filtered by Claude)")
     parser.add_argument("--print-config", action="store_true", help="print generated settings with caller credentials redacted; do not launch")
     args = parser.parse_args()
+    if args.harness == "claude-code":
+        args.harness = "claude"
     model = args.model or ("qwen3-8b" if args.provider == "vllm" else None)
     if not model or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*", model):
         parser.error("supply an available model ID with --model")

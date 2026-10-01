@@ -1,6 +1,7 @@
 """Quota displays must not turn cumulative counters into a false rolling balance."""
 from datetime import datetime, timedelta, timezone
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -55,7 +56,97 @@ class QuotaStatusTest(unittest.TestCase):
             self.assertIsNone(row["remaining"])
             self.assertIsNone(row["room_for_reservation"])
             self.assertEqual(row["actual"], 481986)
-            self.assertEqual(row["net_since_start"], 991986)
+            self.assertEqual(row["net_since_start"], None if row["backend"] == "valkey" else 991986)
+
+    def test_valkey_reserved_counters_are_not_reported_as_net_charges(self):
+        row = self.report(config("valkey"))[0]
+        self.assertEqual(row["estimated_since_start"], 1170000)
+        self.assertIsNone(row["net_since_start"])
+        self.assertIsNone(row["orphaned"])
+
+    def test_valkey_snapshot_counts_settlement_and_held_estimates_at_server_time(self):
+        snapshot = ["1000", "999000",
+                    ["settled:1:45", "995000", "expired:2:20", "999000"],
+                    ["3", "100|1000000", "4", "50|990999"]]
+        result = quota.valkey_balance(snapshot, 10000, 5000)
+        self.assertEqual(result, {"sampled_at_ms": 1000999, "settled_tokens": 65,
+                                  "held_tokens": 100, "charged": 165})
+
+    def test_valkey_expired_reservations_stay_charged_until_the_window_boundary(self):
+        for now, expected in (("1000", 100), ("1009", 100), ("1010", 0)):
+            result = quota.valkey_balance([now, "0", [], ["1", "100|1000000"]], 10000, 5000)
+            self.assertEqual(result["charged"], expected)
+        # An unexpired reservation still counts even when the window is shorter than its timeout.
+        self.assertEqual(quota.valkey_balance(["1010", "0", [], ["1", "100|1000000"]],
+                                             5000, 20000)["charged"], 100)
+
+    def test_valkey_empty_ledger_is_zero_but_unsupported_records_are_not(self):
+        self.assertEqual(quota.valkey_balance(["1000", "0", [], []], 10000, 5000)["charged"], 0)
+        for records, active in ((["new-format", "999000"], []), ([], ["1", "broken"]),
+                                (["settled:1:3", "1.5"], []), ([], ["1"]),
+                                (["settled:1:3", "1000001"], [])):
+            with self.assertRaises(ValueError):
+                quota.valkey_balance(["1000", "0", records, active], 10000, 5000)
+
+    def test_valkey_uses_the_pinned_global_key_and_keeps_auth_out_of_arguments(self):
+        source = config("valkey")
+        item = source["filter_chains"][0]["filters"][0]
+        item["backend"].update(namespace="secure-single-server:limits:test",
+                               url="${TOKEN_RATE_LIMIT_VALKEY_URL}")
+        item["rules"][0]["reservation_timeout"] = "5s"
+        rows = self.report(source, samples="")
+        with patch.object(quota, "service", side_effect=[
+                '"quay.io/opendatahub/praxis-experimental@sha256:227d421e963c477038a884dc51ec880c5d0afa30098ae31028ecf85e963e40d5"',
+                "redis://praxis:private%2Bpassword@praxis-valkey:6379/0",
+                json.dumps(["1000", "0", ["settled:1:75", "999000"], []])]) as service:
+            quota.read_valkey_balances(source, rows)
+        self.assertEqual(rows[0]["charged"], 75)
+        self.assertEqual(rows[0]["remaining"], 999925)
+        self.assertEqual(rows[0]["basis"], "valkey ledger")
+        arguments = service.call_args.args
+        self.assertNotIn("private+password", str(arguments))
+        self.assertEqual(service.call_args.kwargs["input_text"], "private+password\n")
+        self.assertTrue(any(str(arg).startswith("#!lua flags=no-writes") for arg in arguments))
+
+    def test_valkey_unsupported_schema_stays_unknown(self):
+        source = config("valkey", key="authenticated_subject")
+        rows = self.report(source)
+        with patch.object(quota, "service") as service:
+            quota.read_valkey_balances(source, rows)
+        service.assert_not_called()
+        self.assertIsNone(rows[0]["charged"])
+        self.assertIn("global", rows[0]["balance_note"])
+
+    def test_valkey_unknown_image_never_reports_an_empty_ledger(self):
+        source = config("valkey")
+        source["filter_chains"][0]["filters"][0]["backend"]["url"] = "${TOKEN_RATE_LIMIT_VALKEY_URL}"
+        rows = self.report(source)
+        with patch.object(quota, "service", return_value='"unknown-image:latest"') as service:
+            quota.read_valkey_balances(source, rows)
+        self.assertEqual(service.call_count, 1)
+        self.assertIsNone(rows[0]["charged"])
+        self.assertIn("not qualified", rows[0]["balance_note"])
+
+    def test_valkey_default_reservation_timeout_matches_pinned_backend(self):
+        source = config("valkey", window="10s")
+        source["filter_chains"][0]["filters"][0]["backend"]["url"] = "${TOKEN_RATE_LIMIT_VALKEY_URL}"
+        rows = self.report(source, samples="")
+        with patch.object(quota, "service", side_effect=[json.dumps(quota.LEDGER_IMAGE),
+                "redis://praxis:private@praxis-valkey:6379/0",
+                json.dumps(["1000", "0", [], ["1", "100|960000"]])]):
+            quota.read_valkey_balances(source, rows)
+        # 40 seconds old: expired under the backend default 30s, outside this 10s window.
+        self.assertEqual(rows[0]["charged"], 0)
+
+    def test_valkey_connection_rejection_does_not_expose_credentials(self):
+        source = config("valkey")
+        source["filter_chains"][0]["filters"][0]["backend"]["url"] = "${TOKEN_RATE_LIMIT_VALKEY_URL}"
+        rows = self.report(source)
+        with patch.object(quota, "service", side_effect=[json.dumps(quota.LEDGER_IMAGE),
+                "redis://praxis:secret-password@external.example:6379/0"]), \
+             self.assertRaises(ValueError) as raised:
+            quota.read_valkey_balances(source, rows)
+        self.assertNotIn("secret-password", str(raised.exception))
 
     def test_missing_samples_are_unknown_not_an_unused_budget(self):
         row = self.report(samples="")[0]

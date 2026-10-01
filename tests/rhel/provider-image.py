@@ -3,8 +3,12 @@
 import argparse
 import copy
 import json
+import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "tests/common"), str(ROOT / "scripts/common")]
@@ -12,6 +16,7 @@ from gateway import ENGINE, Gateway, run, request_body
 from contracts import check
 from provider_config import render
 import quota_config
+import quota_status
 from quota_manage import plan as quota_plan
 
 
@@ -111,16 +116,47 @@ def exercise_capacities(gateway):
                                                value, provider="vllm")
         gateway.change(gateway.openai, gateway.anthropic)
 
+    def persisted_charge(expected):
+        if gateway.profile != "valkey":
+            return
+
+        def service(*args, input_text=None):
+            if args[:2] == ("podman", "inspect"):
+                return json.dumps(run(ENGINE, "inspect", gateway.name, "--format", "{{.Config.Image}}"))
+            args = [ENGINE, *args[1:]]
+            args = [gateway.name if arg == "praxis-shared-gateway" else
+                    gateway.name + "-valkey" if arg == "praxis-valkey" else arg for arg in args]
+            return subprocess.run(args, input=input_text, text=True, capture_output=True,
+                                  check=True, timeout=15).stdout
+
+        for _ in range(20):
+            now = datetime.now(timezone.utc)
+            rows = quota_status.summarize(gateway.config, "", now, now, now)
+            with patch.object(quota_status, "service", service):
+                quota_status.read_valkey_balances(gateway.config, rows)
+            row = next(row for row in rows if row["rule"] == "vllm-openai-rolling-day")
+            if row["charged"] == expected:
+                assert row["basis"] == "valkey ledger"
+                assert row["remaining"] == max(0, row["capacity"] - expected)
+                assert row["actual"] is None, "ledger must not invent post-restart metrics"
+                return
+            time.sleep(0.1)
+        raise AssertionError(("persisted quota display", expected, rows))
+
     capacity(20)
+    persisted_charge(0)
     for _ in range(3):
         status, payload, _ = gateway.request(path, body=body)
         assert status == 200, (status, payload[:400])
     assert gateway.request(path, body=body)[0] == 429, "small capacity was not enforced"
+    persisted_charge(15)
     capacity(100)
     assert gateway.request(path, body=body)[0] == 200, "increase did not restore admission"
+    persisted_charge(20)
     capacity(20)
     expected = 429 if gateway.profile == "valkey" else 200
     assert gateway.request(path, body=body)[0] == expected, "unexpected restart accounting"
+    persisted_charge(20)
     # Restore room for the provider matrix, retaining explicit overrides.
     capacity(10000)
     print(f"PASS {gateway.scenario}/{gateway.profile}: quota decrease, increase and restart accounting", flush=True)

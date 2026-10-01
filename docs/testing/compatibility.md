@@ -57,9 +57,11 @@ See the [current bug and fix candidate](vllm-debugging.md#responses-tool-ids-cha
 
 **Qwen3.8-27B INT4 / vLLM**
 
-The following recorded results used 16,384 context / 4,096 output tokens.
-The updated 32,768 / 8,192 preset has not yet been rerun on RHEL; these passes
-remain evidence for the earlier settings only.
+The following harness results used 16,384 context / 4,096 output tokens.
+The GPU now runs the 32,768 / 8,192 preset: an 18,075-token input completed
+through Praxis with thinking enabled, and launcher limits were checked for
+all three CLIs. Full harness and compaction reruns at 32K remain pending.
+The CPU remains at 16,384 / 4,096.
 
 | Harness | Check | Real CPU | Real GPU |
 | --- | --- | --- | --- |
@@ -346,8 +348,8 @@ The updated preset serves 32,768 context tokens, with 8,192 OpenCode/Claude
 output tokens and a 24,576-token Codex auto-compaction threshold. CPU/GPU task,
 memory, menu and long-session compaction results at those settings are **Not run**.
 Thinking remains enabled; concurrency remains one. The recorded startup cache
-capacities (50,115 GPU / 79,872 CPU tokens) motivate a 32k trial, not a claim
-that long-context performance or memory is qualified. The separate OpenShell
+capacities (50,115 GPU / 79,872 CPU tokens) do not establish long-context
+performance or peak memory usage. The separate OpenShell
 adapter retains its conservative 16k/4k settings and has no 27B runtime pass.
 
 Model-loading memory excludes additional runtime/cache costs and is not an

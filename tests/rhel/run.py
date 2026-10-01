@@ -102,8 +102,10 @@ def main():
     parser.add_argument("--vllm-image", help="real-setup: candidate NAME@sha256:DIGEST for the selected CPU/GPU mode")
     parser.add_argument("--model", choices=("qwen3-8b", "qwen3.8-27b-int4"),
                         help="real-setup: vLLM preset (default: qwen3-8b); tests use the installed model")
-    parser.add_argument("--harness", choices=("codex", "opencode", "claude"), help="real-test/real-lifecycle: API checks plus one native harness")
+    parser.add_argument("--harness", choices=("codex", "opencode", "claude-code", "claude"), help="real-test/real-lifecycle: API checks plus one native harness; claude is an alias")
     args = parser.parse_args()
+    if args.harness == "claude-code":
+        args.harness = "claude"
     if args.model is not None and args.phase != "real-setup":
         parser.error("--model applies only to real-setup; real-test reads the installed model")
     if args.phase == "real-setup" and not args.inference:

@@ -131,7 +131,7 @@ Model discovery and switching are separate checks from configuring a route.
 ```
 
 ```console
-"${HARNESS[@]}" claude --provider vllm --model "$VLLM_MODEL" "${GATEWAY[@]}"
+"${HARNESS[@]}" claude-code --provider vllm --model "$VLLM_MODEL" "${GATEWAY[@]}"
 ```
 
 ```console
@@ -167,7 +167,7 @@ IFS= read -r ANTHROPIC_MODEL
 ```
 
 ```console
-"${HARNESS[@]}" claude --provider anthropic --model "$ANTHROPIC_MODEL" "${GATEWAY[@]}"
+"${HARNESS[@]}" claude-code --provider anthropic --model "$ANTHROPIC_MODEL" "${GATEWAY[@]}"
 ```
 
 ```console

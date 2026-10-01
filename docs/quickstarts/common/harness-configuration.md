@@ -153,11 +153,13 @@ this is not evidence of discovery from the gateway.
 <summary>Expand: environment and flags, settings-file alternative and model menu</summary>
 
 ```console
-praxis-harness claude --provider vllm --model qwen3.8-27b-int4
+praxis-harness claude-code --provider vllm --model qwen3.8-27b-int4
 ```
 
 The launcher sets the Messages base and local authentication, maps the Opus,
 Sonnet and Haiku aliases to Qwen, and passes the selected model explicitly.
+For local Qwen it selects `--permission-mode default` (Manual) so tool execution
+uses user approval rather than the unavailable auto-mode classifier.
 For 27B it selects `--effort medium`; thinking remains enabled. It supplies a
 32,768-token context and 8,192-token output limit and disables 1M context variants
 so a menu alias cannot override the served limit. Compaction follows Claude's
@@ -199,7 +201,7 @@ Launch with simple mode already in the process environment:
 
 ```console
 CLAUDE_CODE_SIMPLE=1 claude --settings "$HOME/.config/praxis/claude-qwen38.json" \
-  --model qwen3.8-27b-int4 --effort medium
+  --model qwen3.8-27b-int4 --effort medium --permission-mode default
 ```
 
 `ANTHROPIC_CUSTOM_MODEL_OPTION` adds the exact Qwen ID to the picker.

@@ -349,9 +349,11 @@ def main():
     parser.add_argument("--inference", choices=("cpu", "gpu"))
     parser.add_argument("--vllm-image")
     parser.add_argument("--model", choices=("qwen3-8b", "qwen3.8-27b-int4"))
-    parser.add_argument("--harness", choices=("codex", "opencode", "claude"))
+    parser.add_argument("--harness", choices=("codex", "opencode", "claude-code", "claude"))
     parser.add_argument("--hostname", required=True)
     args = parser.parse_args()
+    if args.harness == "claude-code":
+        args.harness = "claude"
     if args.model is not None and args.phase != "real-setup":
         parser.error("--model applies only to real-setup")
     if args.vllm_image is not None and (args.phase != "real-setup" or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", args.vllm_image)):

@@ -8,6 +8,7 @@ in [compatibility.md](compatibility.md).
 | Qwen model selection | Generated catalog; new menu check pending | Configured custom entry | Configured Praxis entry | Blocked: missing Praxis adapter |
 | Gateway model discovery | Uses configured catalog | Opt-in; filters out Qwen IDs | Uses configured catalog | Not qualified |
 | Thinking and context limits | Configured; compaction pending | Medium effort for 27B; compaction pending | Configured; compaction pending | Not qualified |
+| Tool approvals | Native controls | Manual for Qwen; auto classifier blocked | Native controls | Depends on sandbox/adapter |
 | Inspect/change token quota | Praxis administrator commands | Same | Same | Same gateway controls; adapter pending |
 | CLI quota error and recovery | Mock test available; RHEL pending | Mock test available; RHEL pending | Mock test available; RHEL pending | Blocked |
 | Quota persistence | Via Praxis/Valkey | Via Praxis/Valkey | Via Praxis/Valkey | Adapter pending |
@@ -66,19 +67,23 @@ behavior and a successful task after recovery, with no duplicated tool execution
 ### Model selection, discovery and limits
 
 ```console
-praxis-harness claude --provider vllm --model "$MODEL" --print-config
-praxis-harness claude --provider vllm --model "$MODEL"
+praxis-harness claude-code --provider vllm --model "$MODEL" --print-config
+praxis-harness claude-code --provider vllm --model "$MODEL"
 ```
 
 Type `/model`, choose the configured Qwen entry, then run the file/test task.
 Check context/output limits and thinking; repeat after resume and compaction.
 Qwen uses simple mode and basic tools, so this does not qualify Claude's full
 plugin, skill or subagent behavior.
+Local Qwen starts in Manual permission mode. Verify that a shell command asks
+for approval and runs after approval. The auto-mode classifier is **Blocked with
+Qwen**; if an existing session reports the classifier unavailable, use
+Shift+Tab to select Manual or restart with the updated launcher.
 
 For an enabled Anthropic provider, test native discovery separately:
 
 ```console
-praxis-harness claude --provider anthropic --model claude-sonnet-4-6 \
+praxis-harness claude-code --provider anthropic --model claude-sonnet-4-6 \
   --gateway-model-discovery
 ```
 
@@ -92,7 +97,7 @@ Claude entries there.
 ```console
 python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
   --scenario "$RHEL_SCENARIO" --profile valkey --phase features \
-  --feature-provider vllm --harness claude
+  --feature-provider vllm --harness claude-code
 ```
 
 Still test denial during a tool continuation, cancellation and successful
@@ -148,7 +153,7 @@ sudo scripts/common/quota-set --list
 Status links to the list; the list prints commands for setting each quota.
 Use the [quota administration guide](../quickstarts/common/token-quotas.md)
 for list → preview → apply. Valkey retains usage across Praxis restarts;
-process metrics restart, and `unknown` is not an empty allowance.
+the status command reads its current ledger separately from process counters.
 
 For repeatable API contracts without changing a VM, run on the workstation:
 
@@ -174,6 +179,7 @@ python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
 and Messages were admitted, then denied at a small quota. Denial survived
 Praxis and Valkey restarts; raising capacity restored inference. Normal
 capacities and namespaces were restored. This does not qualify CLI retry behavior.
+The status helper also read both hosts' persisted quota balances without restarting services.
 
 Remaining qualification: concurrent reservations, expiry during real CPU/GPU
 requests, active-stream cancellation, exact window boundaries, host reboot,
