@@ -166,6 +166,7 @@ class VllmTest(unittest.TestCase):
             template_hash_backup = state / "template.sha256.previous"
             network_rm_marker = root / "network-rm"
             fcontext_rm_marker = root / "fcontext-rm"
+            fcontext_owned = state / "fcontext-owned"
             state.mkdir()
             unit.write_text("new unit\n")
             network_unit.write_text("network\n")
@@ -180,6 +181,7 @@ network_unit={shlex.quote(str(network_unit))}
 temporary={shlex.quote(str(temporary))}
 manifest_new={shlex.quote(str(manifest_new))}
 manifest_backup=''
+fcontext_owned={shlex.quote(str(fcontext_owned))}
 template_backup={shlex.quote(str(template_backup))}
 template_hash_backup={shlex.quote(str(template_hash_backup))}
 unit_staged=1
@@ -188,8 +190,8 @@ network_staged=1
 service_touched=0
 service_was_active=0
 fcontext_staged=0
+fcontext_owned_staged=0
 fcontext_regex='^/etc/praxis-vllm/chat-template\\.jinja$'
-fcontext_owned=''
 semanage() {{
   if [[ "$1" == fcontext && "$2" == -d ]]; then
     touch {shlex.quote(str(fcontext_rm_marker))}
@@ -267,6 +269,16 @@ cleanup_install
             self.assertIn('SERVICE systemctl --user stop praxis-network.service', result.stdout)
             self.assertTrue(network_rm_marker.exists())
             self.assertTrue(fcontext_rm_marker.exists())
+
+            fcontext_rm_marker.unlink()
+            fcontext_owned.write_text("")
+            script = script.replace("template_staged=1", "template_staged=0")
+            script = script.replace("fcontext_staged=1", "fcontext_staged=0")
+            script = script.replace("fcontext_owned_staged=0", "fcontext_owned_staged=1")
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(fcontext_owned.exists())
+            self.assertFalse(fcontext_rm_marker.exists())
 
     def test_vllm_network_reference_detects_managed_unit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -359,9 +371,10 @@ template_staged=1
 network_staged=1
 service_touched=1
 fcontext_staged=1
+fcontext_owned_staged=1
 {commit}
 commit_install_state
-printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$network_staged" "$service_touched"
+printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$fcontext_owned_staged" "$network_staged" "$service_touched"
 """
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -369,7 +382,7 @@ printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$network_st
             self.assertEqual((state / "model").read_text(), "test-model\n")
             self.assertEqual((state / "listen-address").read_text(), "10.0.1.10\n")
             self.assertTrue((state / "network-owned").exists())
-            self.assertEqual(result.stdout, "0\n0\n0\n0\n0\n")
+            self.assertEqual(result.stdout, "0\n0\n0\n0\n0\n0\n")
 
             gateway_unit.write_text("gateway\n")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)

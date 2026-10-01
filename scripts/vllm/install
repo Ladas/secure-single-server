@@ -145,6 +145,8 @@ network_staged=0
 unit_staged=0
 template_staged=0
 fcontext_staged=0
+fcontext_owned_staged=0
+managed_upgrade=0
 service_touched=0
 service_was_active=0
 temporary=''
@@ -179,6 +181,8 @@ cleanup_install() {
   fi
   if (( fcontext_staged )); then
     semanage fcontext -d "${fcontext_regex}" >/dev/null 2>&1 || true
+  fi
+  if (( fcontext_staged || fcontext_owned_staged )); then
     rm -f "${fcontext_owned}"
   fi
   if (( service_touched )); then
@@ -210,6 +214,7 @@ commit_install_state() {
   unit_staged=0
   template_staged=0
   fcontext_staged=0
+  fcontext_owned_staged=0
   network_staged=0
   service_touched=0
 }
@@ -221,6 +226,7 @@ if [[ -e "${unit}" ]]; then
     [[ "$(sha256_file "${state}/chat-template.jinja")" == "$(cat "${state}/template.sha256")" ]] ||
       die 'vLLM template drifted; inspect before replacing'
   fi
+  managed_upgrade=1
 elif as_service podman container exists praxis-vllm; then
   die 'an unrelated container already uses praxis-vllm'
 fi
@@ -255,8 +261,14 @@ if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
     semanage fcontext -a -t container_file_t "${fcontext_regex}"
     fcontext_staged=1
     touch "${fcontext_owned}"
-  elif [[ "${existing_context}" != *:container_file_t:* || ! -f "${fcontext_owned}" ]]; then
-    die 'vLLM chat-template SELinux rule exists but is not owned by this installer'
+  elif [[ "${existing_context}" != *:container_file_t:* ]]; then
+    die "unexpected SELinux context for vLLM chat template: ${existing_context}"
+  elif [[ ! -f "${fcontext_owned}" ]]; then
+    if (( ! managed_upgrade )); then
+      die 'vLLM chat-template SELinux rule exists but is not owned by this installer'
+    fi
+    touch "${fcontext_owned}"
+    fcontext_owned_staged=1
   fi
   restorecon -F "${state}/chat-template.jinja"
   sha256_file "${state}/chat-template.jinja" >"${state}/template.sha256"
