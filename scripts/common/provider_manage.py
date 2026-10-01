@@ -15,7 +15,7 @@ import tempfile
 import time
 import uuid
 
-from provider_config import render, validate_vllm_endpoint
+from provider_config import SingleValueAction, render, validate_vllm_endpoint
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = Path(os.environ.get("PRAXIS_CONFIG_DIR", "/etc/praxis"))
@@ -126,7 +126,8 @@ def main():
     parser.add_argument("provider", nargs="?", choices=("vllm", "openai", "anthropic"))
     parser.add_argument("--secret", help="use an existing secret NAME; omit to enter a new cloud key at a hidden prompt")
     parser.add_argument("--vllm-endpoint",
-                        help="enable the separate-server route with RFC1918_IP:PORT; omit for deprecated co-located mode")
+                        help="enable the separate-server route with RFC1918_IP:PORT; omit for deprecated co-located mode",
+                        action=SingleValueAction)
     args = parser.parse_args()
     if args.action != "show" and not args.provider:
         parser.error("enable/disable requires a provider")

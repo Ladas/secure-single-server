@@ -198,7 +198,9 @@ if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
   fi
   template_staged=1
   install -o root -g "${gid}" -m 0640 "${VLLM_CHAT_TEMPLATE}" "${state}/chat-template.jinja"
-  existing_context="$(semanage fcontext -l | awk -v regex="${fcontext_regex}" '$1 == regex { print $NF; exit }')"
+  existing_context="$(semanage fcontext -l | awk -v regex="${fcontext_regex}" '
+    $1 == regex && !found { context = $NF; found = 1 }
+    END { print context }')"
   if [[ -z "${existing_context}" ]]; then
     semanage fcontext -a -t container_file_t "${fcontext_regex}"
     fcontext_staged=1

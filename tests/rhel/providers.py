@@ -129,7 +129,23 @@ class ProvidersTest(unittest.TestCase):
         result = subprocess.run(["bash", str(ROOT / "scripts/common/install"),
                                  "--vllm-endpoint", ""], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--vllm-endpoint requires RFC1918_IP:PORT", result.stderr)
+        self.assertIn("--vllm-endpoint may be given only once and requires RFC1918_IP:PORT", result.stderr)
+
+    def test_remote_endpoint_cannot_be_selected_more_than_once(self):
+        commands = [
+            [sys.executable, str(ROOT / "scripts/common/provider_config.py"),
+             "--directory", "/unused", "--vllm", "--vllm-endpoint", "10.0.1.10:8000",
+             "--vllm-endpoint", "10.0.1.11:8000"],
+            [sys.executable, str(ROOT / "scripts/common/provider_manage.py"),
+             "enable", "vllm", "--vllm-endpoint", "10.0.1.10:8000",
+             "--vllm-endpoint", "10.0.1.11:8000"],
+            ["bash", str(ROOT / "scripts/common/install"),
+             "--vllm-endpoint", "10.0.1.10:8000", "--vllm-endpoint", "10.0.1.11:8000"],
+        ]
+        for command in commands:
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("only once", result.stderr)
 
     def test_add_clouds_independently_keeps_qwen_and_valkey_namespaces(self):
         original = source("remote-gateway")

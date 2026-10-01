@@ -73,7 +73,8 @@ while (( "$#" )); do
     --providers) providers=1; shift ;;
     --vllm) providers=1; vllm=1; vllm_explicit=1; shift ;;
     --vllm-endpoint)
-      [[ "$#" -ge 2 && -n "$2" ]] || die '--vllm-endpoint requires RFC1918_IP:PORT'
+      [[ "$#" -ge 2 && -n "$2" && -z "${vllm_endpoint}" ]] ||
+        die '--vllm-endpoint may be given only once and requires RFC1918_IP:PORT'
       vllm_endpoint="$2"; providers=1; vllm=1; shift 2 ;;
     --praxis-image) praxis_image="${2:-}"; shift 2 ;;
     --valkey-image) valkey_image="${2:-}"; shift 2 ;;

@@ -7,6 +7,14 @@ from pathlib import Path
 import re
 
 
+class SingleValueAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest + "_seen", False):
+            parser.error(option_string + " may be given only once")
+        setattr(namespace, self.dest + "_seen", True)
+        setattr(namespace, self.dest, values)
+
+
 def validate_vllm_endpoint(endpoint):
     match = re.fullmatch(
         r"((?:0|[1-9]\d{0,2})(?:\.(?:0|[1-9]\d{0,2})){3}):(0|[1-9]\d{0,4})", endpoint)
@@ -101,7 +109,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--vllm", action="store_true")
-    parser.add_argument("--vllm-endpoint", default=None)
+    parser.add_argument("--vllm-endpoint", default=None, action=SingleValueAction)
     parser.add_argument("--openai-secret", default="")
     parser.add_argument("--anthropic-secret", default="")
     args = parser.parse_args()
