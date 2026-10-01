@@ -1,0 +1,210 @@
+name: Build bootc images
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/bootc-images.yml
+      - bootc/Containerfile
+      - bootc/Containerfile.harness
+      - bootc/Containerfile.praxis
+      - bootc/Containerfile.vllm
+      - bootc/build
+      - bootc/install-nvidia
+      - bootc/test-images
+      - bootc/ci/select-images.py
+      - bootc/harnesses/**
+      - bootc/scripts/**
+      - bootc/systemd/**
+      - configs/**
+      - openshell/configs/**
+      - openshell/harnesses/**
+      - openshell/scripts/**
+      - scripts/common/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/bootc-images.yml
+      - bootc/Containerfile
+      - bootc/Containerfile.harness
+      - bootc/Containerfile.praxis
+      - bootc/Containerfile.vllm
+      - bootc/build
+      - bootc/install-nvidia
+      - bootc/test-images
+      - bootc/ci/select-images.py
+      - bootc/harnesses/**
+      - bootc/scripts/**
+      - bootc/systemd/**
+      - configs/**
+      - openshell/configs/**
+      - openshell/harnesses/**
+      - openshell/scripts/**
+      - scripts/common/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootc-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Select image targets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      praxis: ${{ steps.select.outputs.praxis }}
+      vllm: ${{ steps.select.outputs.vllm }}
+      harnesses: ${{ steps.select.outputs.harnesses }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select changed image groups
+        id: select
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then
+            printf '%s\n' '{"praxis":true,"vllm":true,"harnesses":true}' >selected.json
+          elif [[ "${{ github.event_name }}" == pull_request ]]; then
+            git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" >changed.txt
+            python3 bootc/ci/select-images.py <changed.txt >selected.json
+          else
+            if git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
+              git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" >changed.txt
+            else
+              printf '%s\n' '.github/workflows/bootc-images.yml' >changed.txt
+            fi
+            python3 bootc/ci/select-images.py <changed.txt >selected.json
+          fi
+          {
+            echo "praxis=$(jq -r .praxis selected.json)"
+            echo "vllm=$(jq -r .vllm selected.json)"
+            echo "harnesses=$(jq -r .harnesses selected.json)"
+          } >>"$GITHUB_OUTPUT"
+
+  build:
+    name: Build selected bootc images
+    needs: changes
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.head.repo.fork == false) &&
+        (needs.changes.outputs.praxis == 'true' ||
+         needs.changes.outputs.vllm == 'true' ||
+         needs.changes.outputs.harnesses == 'true')
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'bootc-image-pr' || 'bootc-image-main' }}
+    env:
+      IMAGE_PREFIX: localhost/secure-single-server
+      RHEL_BOOTC_IMAGE: ${{ vars.RHEL_BOOTC_IMAGE }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install container tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman skopeo jq
+      - name: Authenticate to Red Hat Registry
+        shell: bash
+        env:
+          REDHAT_REGISTRY_USERNAME: ${{ secrets.REDHAT_REGISTRY_USERNAME }}
+          REDHAT_REGISTRY_PASSWORD: ${{ secrets.REDHAT_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REDHAT_REGISTRY_PASSWORD" |
+            sudo podman login registry.redhat.io \
+              --username "$REDHAT_REGISTRY_USERNAME" --password-stdin
+      - name: Build shared base
+        if: >-
+          needs.changes.outputs.harnesses == 'true'
+        env:
+          RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID }}
+          RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$RHEL_BOOTC_IMAGE"
+          sudo env \
+            RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" \
+            RHSM_ORG_ID="$RHSM_ORG_ID" \
+            RHSM_ACTIVATION_KEY="$RHSM_ACTIVATION_KEY" \
+            bootc/build base "$IMAGE_PREFIX"
+      - name: Build Praxis image
+        if: needs.changes.outputs.praxis == 'true'
+        env:
+          RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID }}
+          RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
+        run: |
+          set -euo pipefail
+          sudo env \
+            RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" \
+            RHSM_ORG_ID="$RHSM_ORG_ID" \
+            RHSM_ACTIVATION_KEY="$RHSM_ACTIVATION_KEY" \
+            bootc/build praxis "$IMAGE_PREFIX"
+      - name: Build vLLM image
+        if: needs.changes.outputs.vllm == 'true'
+        env:
+          RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID }}
+          RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
+        run: |
+          set -euo pipefail
+          sudo env \
+            RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" \
+            RHSM_ORG_ID="$RHSM_ORG_ID" \
+            RHSM_ACTIVATION_KEY="$RHSM_ACTIVATION_KEY" \
+            bootc/build vllm "$IMAGE_PREFIX"
+      - name: Build harness images
+        if: needs.changes.outputs.harnesses == 'true'
+        run: |
+          set -euo pipefail
+          for harness in codex opencode openclaw; do
+            sudo bootc/build "$harness" "$IMAGE_PREFIX"
+          done
+      - name: Test built images
+        run: |
+          set -euo pipefail
+          variants=()
+          if [[ "${{ needs.changes.outputs.harnesses }}" == true ]]; then
+            variants+=(base)
+          fi
+          [[ "${{ needs.changes.outputs.praxis }}" == true ]] && variants+=(praxis)
+          [[ "${{ needs.changes.outputs.vllm }}" == true ]] && variants+=(vllm)
+          [[ "${{ needs.changes.outputs.harnesses }}" == true ]] && variants+=(codex opencode openclaw)
+          if ((${#variants[@]})); then
+            sudo bootc/test-images "$IMAGE_PREFIX" "${variants[@]}"
+          fi
+      - name: Publish images to Quay
+        if: >-
+          ${{
+            github.ref == 'refs/heads/main' &&
+            github.event_name != 'pull_request'
+          }}
+        shell: bash
+        env:
+          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$QUAY_TOKEN" |
+            sudo podman login quay.io \
+              --username "$QUAY_USERNAME" --password-stdin
+          short_sha="${GITHUB_SHA::12}"
+          variants=()
+          [[ "${{ needs.changes.outputs.praxis }}" == true ]] && variants+=(praxis)
+          [[ "${{ needs.changes.outputs.vllm }}" == true ]] && variants+=(vllm)
+          [[ "${{ needs.changes.outputs.harnesses }}" == true ]] && variants+=(codex opencode openclaw)
+          for variant in "${variants[@]}"; do
+            repository="quay.io/redhat-et/secure-single-server-${variant}"
+            sudo podman tag "${IMAGE_PREFIX}:${variant}" "${repository}:main"
+            sudo podman tag "${IMAGE_PREFIX}:${variant}" "${repository}:sha-${short_sha}"
+            sudo podman push "${repository}:main"
+            sudo podman push "${repository}:sha-${short_sha}"
+          done

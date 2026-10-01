@@ -23,10 +23,11 @@ local adapters are not enabled.
   affinity/NUMA binding.
 - GPU: exactly one NVIDIA L4, a compatible NVIDIA host driver, and
   `nvidia-ctk` installed in the bootc OS image. The reconciler regenerates CDI
-  at boot. Build with `NVIDIA_GPU=1` to include the NVIDIA 580 open driver and
-  Container Toolkit. The build compiles the module for the kernel inside the
-  image and fails if that kernel cannot be supported. Rebuild after kernel
-  updates. Secure Boot with a custom signing key is not configured.
+  at boot. The one `vllm` image includes the NVIDIA 580 open driver and
+  Container Toolkit; CPU hosts can use the same image with GPU mode left
+  disabled. The build compiles the module for the kernel inside the image and
+  fails if that kernel cannot be supported. Rebuild after kernel updates.
+  Secure Boot with a custom signing key is not configured.
 - Persistent disk on the vLLM server: allow space for roughly 16 GB of model
   weights, workload images, and caches. Budget at least 100 GiB for CPU or
   200 GiB for GPU demonstrations and check free space first.
@@ -56,10 +57,11 @@ VLLM_ENDPOINT="$(printf '%s' "${VLLM_INFO:-}" | jq -er '.VllmEndpoint')" \
 printf 'Private vLLM endpoint: %s\n' "${VLLM_ENDPOINT:-unknown}"
 ```
 
-On the dedicated server, use the mutable RHEL vLLM installer with
-`--remote PRIVATE_IP` so port 8000 binds only to its private AWS address. On
-the booted single server, configure Praxis without changing the OpenShell
-harness policy:
+On the dedicated server, boot the `vllm` image on either a CPU instance or the
+L4 instance. Alternatively, use the mutable RHEL vLLM installer with
+`--remote PRIVATE_IP` so port 8000 binds only to its private AWS address. On the
+booted single server, configure Praxis without changing the OpenShell harness
+policy:
 
 ```console
 sudo sss-bootc inference remote-vllm "$VLLM_ENDPOINT"
@@ -72,25 +74,27 @@ Praxis continues listening only on `127.0.0.1:8080`; the sandbox still reaches
 If the remote server stops, Praxis returns an upstream error rather than
 falling back to a cloud provider.
 
-## Deprecated co-located mode
+## Build and boot a dedicated vLLM image
 
 Build and boot the updated OS using the [bootc instructions](README.md).
-For a GPU image, use a distinct image prefix on the RHEL builder:
+The dedicated `vllm` target builds directly from RHEL bootc and excludes
+Praxis and OpenShell. It includes the NVIDIA 580 open driver and Container
+Toolkit so one image can serve CPU or GPU hosts:
 
 ```console
-sudo env NVIDIA_GPU=1 RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" AWS_RHUI_REGION=us-east-1 \
-  bootc/build all localhost/secure-single-server-gpu
+sudo env RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" AWS_RHUI_REGION=us-east-1 \
+  bootc/build vllm localhost/secure-single-server
 ```
 
-The CPU build defaults to `NVIDIA_GPU=0`. GPU drivers are OS components;
-vLLM and model weights remain separate workload containers and persistent data.
-On the booted host, select one profile:
+GPU drivers are OS components; vLLM and model weights remain separate workload
+containers and persistent data. On the booted host, select the mode matching
+the hardware:
 
 ```console
-sudo sss-bootc vllm cpu
-# Or, on the prepared single-L4 host:
-sudo sss-bootc vllm gpu
-sudo sss-bootc vllm status
+sudo sss-vllm select cpu
+# On the prepared single-L4 host:
+sudo sss-vllm select gpu
+sudo sss-vllm status
 sudo journalctl -u secure-single-server-vllm.service -b
 sudo journalctl _SYSTEMD_USER_UNIT=vllm.service -f
 ```
@@ -114,7 +118,7 @@ can call it. Do not publish it externally. Use the Praxis route below for harnes
 configuration; sandbox bypass denial remains a required qualification test.
 
 ```console
-sudo sss-bootc vllm disabled
+sudo sss-vllm select disabled
 ```
 
 Disabling stops the service and removes its generated Quadlet while retaining

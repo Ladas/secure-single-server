@@ -16,6 +16,8 @@ or Podman VM cannot reach the Python mock server's host loopback. Ports 8000,
 
 ```console
 python3 bootc/tests/vllm-lock.py
+python3 bootc/tests/select-images.py
+python3 bootc/tests/praxis.py
 python3 bootc/tests/inference.py
 python3 tests/aws/plan.py
 python3 tests/aws/session.py
@@ -23,6 +25,41 @@ python3 tests/rhel/providers.py
 python3 tests/rhel/vllm.py
 CONTAINER_ENGINE=docker python3 bootc/tests/inference-image.py
 ```
+
+## Bootc image CI
+
+`.github/workflows/bootc-images.yml` builds only the image groups whose inputs
+changed. Pull requests build and test locally but do not publish. Pushes to
+`main` publish the selected images to `quay.io/redhat-et` with immutable
+`sha-<commit>` tags and a movable `main` tag.
+
+The workflow authenticates to `registry.redhat.io` with a Red Hat registry
+service account and uses `RHSM_ORG_ID` plus `RHSM_ACTIVATION_KEY` as ephemeral
+Podman build secrets for package installation. It never copies registry
+credentials, activation keys, entitlement certificates, or subscription state
+into an image layer.
+
+Published repositories:
+
+- `secure-single-server-praxis`
+- `secure-single-server-vllm`
+- `secure-single-server-codex`
+- `secure-single-server-opencode`
+- `secure-single-server-openclaw`
+
+Required GitHub configuration:
+
+- Repository variable: `RHEL_BOOTC_IMAGE`
+- Protected environment `bootc-image-pr` with required reviewers and secrets:
+  `REDHAT_REGISTRY_USERNAME`, `REDHAT_REGISTRY_PASSWORD`, `RHSM_ORG_ID`,
+  and `RHSM_ACTIVATION_KEY`
+- Environment `bootc-image-main` with those secrets plus `QUAY_USERNAME` and
+  `QUAY_TOKEN`
+
+The PR environment gates secret-backed execution behind a reviewer. GitHub
+does not provide repository secrets to fork PRs, and the workflow skips those
+runs explicitly. Restrict write access because a same-repository PR can modify
+the build scripts it executes after approval.
 
 ## Scope
 

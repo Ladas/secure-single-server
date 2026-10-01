@@ -2,14 +2,14 @@
 set -Eeuo pipefail
 export PRAXIS_SERVICE_USER=vllm-svc PRAXIS_CONFIG_DIR=/etc/secure-single-server/vllm
 # shellcheck disable=SC1091
-source /usr/share/secure-single-server/bootc/scripts/common
+source /usr/share/secure-single-server/bootc/scripts/vllm-common
 # shellcheck disable=SC1091
 source "${ROOT}/bootc/scripts/vllm-lib"
 require_root
 cd /
 case "${1:-reconcile}" in
   select)
-    [[ "$#" == 2 ]] || die 'usage: sss-bootc vllm disabled|cpu|gpu'
+    [[ "$#" == 2 ]] || die 'usage: sss-vllm select disabled|cpu|gpu'
     vllm_preflight "$2"
     # Serialize selectors while stopping a reconcile that may be pulling an image.
     # Stop before taking its lock; systemd kills the pull's entire control group.

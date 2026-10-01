@@ -19,7 +19,9 @@ class LockTests(unittest.TestCase):
         self.addCleanup(self.lock.close)
         fcntl.flock(self.lock, fcntl.LOCK_EX)
         source = (ROOT / 'bootc/scripts/vllm').read_text()
-        source = source.replace('source /usr/share/secure-single-server/bootc/scripts/common', ':')
+        source = source.replace(
+            'source /usr/share/secure-single-server/bootc/scripts/vllm-common',
+            'ROOT=/usr/share/secure-single-server')
         source = source.replace('source "${ROOT}/bootc/scripts/vllm-lib"', ':')
         source = source.replace('/run/', str(self.work) + '/')
         source = source.replace('/etc/secure-single-server', str(self.work / 'state'))

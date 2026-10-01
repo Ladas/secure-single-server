@@ -26,13 +26,43 @@ if args[0] == 'info':
     print(os.environ.get('TEST_PLATFORM', 'linux/amd64'))
 elif args[:2] == ['image', 'inspect']:
     print('b' * 64)
+elif args[0] == 'tag':
+    pass
 elif args[0] == 'build':
+    file_index = args.index('-f') + 1
     context = pathlib.Path(args[-1])
     assert not (context / '.git').exists()
     assert not (context / '.state').exists()
     assert not (context / 'evidence').exists()
-    assert (context / 'openshell/configs/images.env').is_file()
-    assert (context / 'bootc/scripts/reconcile').is_file()
+    assert not (context / 'rhsm_org').exists()
+    assert not (context / 'rhsm_activation_key').exists()
+    if args[file_index].endswith('/bootc/Containerfile'):
+        assert (context / 'openshell/configs/images.env').is_file()
+        assert (context / 'bootc/scripts/reconcile').is_file()
+        assert (context / 'bootc/scripts/vllm-common').is_file()
+        assert not (context / 'bootc/scripts/praxis').exists()
+        assert not (context / 'bootc/install-nvidia').exists()
+        assert not (context / 'openshell/harnesses').exists()
+    elif args[file_index].endswith('/bootc/Containerfile.praxis'):
+        assert (context / 'bootc/scripts/praxis').is_file()
+        assert (context / 'scripts/common/secret-set').is_file()
+        assert (context / 'configs/all-in-one/shared-gateway.yaml').is_file()
+        assert not (context / 'bootc/install-nvidia').exists()
+        assert not (context / 'openshell').exists()
+        assert not (context / 'configs/vllm/images.env').exists()
+    elif args[file_index].endswith('/bootc/Containerfile.vllm'):
+        assert (context / 'bootc/install-nvidia').is_file()
+        assert (context / 'bootc/scripts/vllm-common').is_file()
+        assert (context / 'scripts/common/lib.sh').is_file()
+        assert (context / 'configs/vllm/images.env').is_file()
+        assert not (context / 'openshell/configs').exists()
+        assert not (context / 'openshell').exists()
+    elif args[file_index].endswith('/bootc/Containerfile.harness'):
+        harness = next(arg.split('=', 1)[1] for arg in args if arg.startswith('HARNESS='))
+        assert (context / 'bootc/harnesses').is_dir()
+        assert (context / f'bootc/harnesses/{harness}').is_file()
+        assert (context / 'openshell/harnesses').is_dir()
+        assert not (context / 'openshell/configs').exists()
 else:
     sys.exit(3)
 ''')
@@ -44,30 +74,78 @@ else:
         return subprocess.run([str(ROOT / 'bootc/build'), *args], env=self.env,
                               capture_output=True, text=True)
 
-    def test_all_derivatives_use_same_resolved_parent(self):
+    def test_all_builds_direct_images_and_common_base(self):
         import json
         result = self.run_build('all')
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [json.loads(row) for row in self.log.read_text().splitlines()]
         builds = [call for call in calls if call[0] == 'build']
-        self.assertEqual(len(builds), 4)
+        self.assertEqual(len(builds), 6)
         self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[0])
-        for harness, call in zip(('codex', 'opencode', 'openclaw'), builds[1:]):
+        self.assertIn('RHSM=0', builds[0])
+        self.assertIn('--secret', builds[0])
+        self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[1])
+        self.assertIn('RHSM=0', builds[1])
+        self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[2])
+        self.assertIn('RHSM=0', builds[2])
+        for harness, call in zip(('codex', 'opencode', 'openclaw'), builds[3:]):
             self.assertIn('BASE_IMAGE=' + 'b' * 64, call)
             self.assertIn('HARNESS=' + harness, call)
             self.assertIn('--pull=never', call)
 
-    def test_gpu_flag_is_explicit_and_validated(self):
+    def test_praxis_builds_directly_from_rhel_bootc(self):
         import json
-        self.env['NVIDIA_GPU'] = '1'
-        result = self.run_build('base', 'localhost/gpu-test')
+        result = self.run_build('praxis', 'localhost/praxis-test')
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [json.loads(row) for row in self.log.read_text().splitlines()]
-        self.assertIn('NVIDIA_GPU=1', next(c for c in calls if c[0] == 'build'))
-        self.log.unlink()
-        self.env['NVIDIA_GPU'] = 'yes'
-        self.assertNotEqual(self.run_build('base').returncode, 0)
-        self.assertFalse(self.log.exists())
+        builds = [call for call in calls if call[0] == 'build']
+        self.assertEqual(len(builds), 1)
+        self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[0])
+        self.assertIn('RHSM=0', builds[0])
+        self.assertTrue(any('Containerfile.praxis' in arg for arg in builds[0]))
+        self.assertFalse(any(call[:2] == ['image', 'inspect'] for call in calls))
+
+    def test_vllm_builds_directly_from_rhel_bootc(self):
+        import json
+        result = self.run_build('vllm', 'localhost/vllm-test')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(row) for row in self.log.read_text().splitlines()]
+        builds = [call for call in calls if call[0] == 'build']
+        self.assertEqual(len(builds), 1)
+        self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[0])
+        self.assertIn('RHSM=0', builds[0])
+        self.assertTrue(any('Containerfile.vllm' in arg for arg in builds[0]))
+        self.assertIn('localhost/vllm-test:vllm', builds[0])
+        self.assertFalse(any(call[:2] == ['image', 'inspect'] for call in calls))
+
+    def test_rhsm_secrets_are_mounted_without_baking_values(self):
+        import json
+        self.env['RHSM_ORG_ID'] = 'test-org'
+        self.env['RHSM_ACTIVATION_KEY'] = 'test-key'
+        result = self.run_build('base')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(row) for row in self.log.read_text().splitlines()]
+        build = next(call for call in calls if call[0] == 'build')
+        self.assertIn('RHSM=1', build)
+        secret_args = [arg for arg in build if arg.startswith('id=rhsm_')]
+        self.assertEqual(len(secret_args), 2)
+        self.assertTrue(all('src=' in arg for arg in secret_args))
+
+    def test_rhsm_credentials_must_be_paired(self):
+        self.env['RHSM_ORG_ID'] = 'test-org'
+        result = self.run_build('base')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('RHSM_ORG_ID and RHSM_ACTIVATION_KEY must be set together', result.stderr)
+
+    def test_harness_build_does_not_require_rhsm_pairing(self):
+        import json
+        self.env['RHSM_ORG_ID'] = 'test-org'
+        result = self.run_build('codex')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(row) for row in self.log.read_text().splitlines()]
+        build = next(call for call in calls if call[0] == 'build')
+        self.assertNotIn('RHSM=', build)
+        self.assertFalse(any(arg.startswith('id=rhsm_') for arg in build))
 
     def test_rejects_unpinned_or_wrong_distribution(self):
         for image in ('registry.redhat.io/rhel9/rhel-bootc:latest',

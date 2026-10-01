@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 prefix="${1:-localhost/secure-single-server}"
-for variant in base codex opencode openclaw; do
+shift || true
+variants=("$@")
+if [[ "${#variants[@]}" -eq 0 ]]; then
+  variants=(base praxis vllm codex opencode openclaw)
+fi
+for variant in "${variants[@]}"; do
   image="${prefix}:${variant}"
   [[ "$(podman image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')" == linux/amd64 ]] || exit 1
   podman run --rm --network=none --entrypoint /bin/bash "${image}" -euc '
     source /etc/os-release
     [[ "$ID" == rhel && "$VERSION_ID" == 9.* ]]
-    test -x /usr/bin/openshell
-    /usr/bin/openshell --version
     test -x /usr/bin/bootc
     test -x /usr/bin/podman
-    test -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
-    test -L /etc/systemd/system/multi-user.target.wants/secure-single-server-vllm.service
-    test -x /usr/share/secure-single-server/bootc/scripts/vllm
-    test -f /usr/share/secure-single-server/configs/vllm/images.env
     test ! -e /etc/secure-single-server/vllm-mode
     test ! -e /var/lib/openshell/tls/jwt/signing.pem
     test ! -e /etc/secure-single-server/secret-names
@@ -22,9 +21,50 @@ for variant in base codex opencode openclaw; do
     test ! -s /etc/yum.repos.d/bootc-rhui.repo
     root=/usr/share/secure-single-server
     if [[ "$1" == base ]]; then
+      test -x /usr/bin/openshell
+      /usr/bin/openshell --version
+      test -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
+      test -L /etc/systemd/system/multi-user.target.wants/secure-single-server-vllm.service
+      test -x /usr/share/secure-single-server/bootc/scripts/vllm
+      test -f /usr/share/secure-single-server/configs/vllm/images.env
       test ! -e "$root/bootc/harness"
       test ! -d "$root/openshell/harnesses"
+    elif [[ "$1" == praxis ]]; then
+      test ! -e /usr/bin/openshell
+      test ! -e "$root/openshell"
+      test -f "$root/configs/all-in-one/shared-gateway.yaml"
+      test -f "$root/configs/vllm/praxis-remote.yaml"
+      test ! -e "$root/configs/vllm/images.env"
+      test ! -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
+      test ! -L /etc/systemd/system/multi-user.target.wants/secure-single-server-vllm.service
+      test -L /etc/systemd/system/multi-user.target.wants/secure-single-server-praxis.service
+      test -x /usr/bin/sss-praxis
+      test -x "$root/bootc/scripts/praxis"
+      test ! -e "$root/bootc/harness"
+      test ! -d "$root/openshell/harnesses"
+      test ! -x /usr/bin/nvidia-smi
+      test ! -x /usr/bin/nvidia-ctk
+    elif [[ "$1" == vllm ]]; then
+      test ! -e /usr/bin/openshell
+      test ! -e "$root/openshell"
+      test ! -e "$root/configs/all-in-one"
+      test ! -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
+      test -L /etc/systemd/system/multi-user.target.wants/secure-single-server-vllm.service
+      test -x /usr/bin/sss-vllm
+      test -x /usr/share/secure-single-server/bootc/scripts/vllm
+      test -f /usr/share/secure-single-server/configs/vllm/images.env
+      test ! -e "$root/bootc/vllm-profile"
+      test ! -e "$root/bootc/harness"
+      test ! -d "$root/openshell/harnesses"
+      test -x /usr/bin/nvidia-smi
+      test -x /usr/bin/nvidia-ctk
     else
+      test -x /usr/bin/openshell
+      /usr/bin/openshell --version
+      test -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
+      test -L /etc/systemd/system/multi-user.target.wants/secure-single-server-vllm.service
+      test -x /usr/share/secure-single-server/bootc/scripts/vllm
+      test -f /usr/share/secure-single-server/configs/vllm/images.env
       test "$(cat "$root/bootc/harness")" = "$1"
       test -x "$root/openshell/harnesses/$1/create.sh"
       test "$(find "$root/openshell/harnesses" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 1
@@ -34,6 +74,12 @@ for variant in base codex opencode openclaw; do
       fi
       grep -q "no such profile: invalid" /tmp/harness-check
     fi
-    sss-bootc help
+    if [[ "$1" == praxis ]]; then
+      sss-praxis help
+    elif [[ "$1" == vllm ]]; then
+      sss-vllm status
+    else
+      sss-bootc help
+    fi
   ' -- "${variant}"
 done

@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT=/usr/share/secure-single-server
+# shellcheck source=scripts/common/lib.sh
+source "${ROOT}/scripts/common/lib.sh"
+trap 'printf "Praxis reconciliation failed at line %s\n" "${LINENO}" >&2' ERR
+
+pull_missing() {
+  local runner="$1" image="$2" platform
+  validate_digest_image "${image}"
+  if ! "${runner}" podman image exists "${image}"; then
+    "${runner}" podman pull "${image}"
+  fi
+  platform="$("${runner}" podman image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')"
+  [[ "${platform}" == linux/amd64 ]] || die "unexpected image platform: ${platform}"
+}
+
+inference_backend() {
+  local backend=cloud
+  if [[ -f /etc/secure-single-server/inference-backend ]]; then
+    backend="$(cat /etc/secure-single-server/inference-backend)"
+  fi
+  case "${backend}" in cloud|remote-vllm) ;; *) die 'standalone Praxis supports cloud or remote-vllm' ;; esac
+  printf '%s\n' "${backend}"
+}
+
+inference_endpoint() {
+  local endpoint
+  [[ "$(inference_backend)" == remote-vllm ]] || die 'remote vLLM endpoint is only valid with remote-vllm'
+  [[ -r /etc/secure-single-server/vllm-endpoint ]] || die 'remote vLLM endpoint is not configured'
+  endpoint="$(cat /etc/secure-single-server/vllm-endpoint)"
+  validate_vllm_endpoint "${endpoint}"
+  printf '%s\n' "${endpoint}"
+}
+
+praxis_reconcile() {
+  local backend endpoint openai_secret anthropic_secret extra tmp unit
+  require_root
+  cd /
+  [[ "$(uname -m)" == x86_64 ]] || die 'bootc currently targets x86_64 only'
+
+  exec 9>/run/secure-single-server-praxis.lock
+  flock 9
+  "${ROOT}/scripts/common/install" --prepare
+  pull_missing as_service "${DEFAULT_PRAXIS_IMAGE}"
+
+  backend="$(inference_backend)"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "${tmp}"' EXIT
+  if [[ "${backend}" == remote-vllm ]]; then
+    endpoint="$(inference_endpoint)"
+    render_template "${ROOT}/configs/vllm/praxis-remote.yaml" "${tmp}/praxis.yaml" \
+      VLLM_HOST "${endpoint%:*}" VLLM_PORT "${endpoint##*:}"
+    render_template "${ROOT}/configs/vllm/praxis.container.in" "${tmp}/praxis.container" \
+      PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}"
+  else
+    openai_secret=praxis-openai-api-key-v1
+    anthropic_secret=praxis-anthropic-api-key-v1
+    if [[ -f /etc/secure-single-server/secret-names ]]; then
+      read -r openai_secret anthropic_secret extra </etc/secure-single-server/secret-names ||
+        [[ -n "${openai_secret}" ]]
+      [[ -z "${extra}" ]] || die 'expected exactly two secret names'
+    fi
+    validate_secret_name "${openai_secret}"
+    validate_secret_name "${anthropic_secret}"
+    if ! secret_exists "${openai_secret}" || ! secret_exists "${anthropic_secret}"; then
+      as_service systemctl --user stop praxis.service 2>/dev/null || true
+      note 'Praxis awaits provider secrets. See sss-praxis help.'
+      exit 0
+    fi
+    install -m 0640 "${ROOT}/configs/all-in-one/shared-gateway.yaml" "${tmp}/praxis.yaml"
+    render_template "${ROOT}/configs/common/quadlet/praxis.container.in" "${tmp}/praxis.container" \
+      PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}" \
+      OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}"
+  fi
+
+  unit="/etc/containers/systemd/users/$(service_uid)"
+  install -o root -g "$(service_gid)" -m 0640 "${tmp}/praxis.yaml" /etc/praxis/shared-gateway.yaml
+  install -m 0644 "${tmp}/praxis.container" "${unit}/praxis.container"
+  install -m 0644 "${ROOT}/configs/common/quadlet/praxis.network" "${unit}/praxis.network"
+  semanage fcontext -a -t container_file_t "$(selinux_path_regex /etc/praxis/shared-gateway.yaml)" 2>/dev/null || \
+    semanage fcontext -m -t container_file_t "$(selinux_path_regex /etc/praxis/shared-gateway.yaml)"
+  restorecon -F /etc/praxis/shared-gateway.yaml
+  as_service systemctl --user daemon-reload
+  as_service systemctl --user restart praxis.service
+  for ((attempt=0; attempt<60; attempt++)); do
+    health="$(as_service podman inspect praxis-shared-gateway --format '{{.State.Health.Status}}' 2>/dev/null || true)"
+    [[ "${health}" != healthy ]] || { note 'Praxis ready'; exit 0; }
+    sleep 1
+  done
+  die 'Praxis failed its health check'
+}
+
+check_inference() {
+  local vllm_base
+  require_root
+  [[ "$(inference_backend)" == remote-vllm ]] || die 'select inference remote-vllm first'
+  vllm_base="http://$(inference_endpoint)/v1"
+  VLLM_BASE="${vllm_base}" python3 - <<'PY'
+import json
+import os
+import urllib.request
+
+model = 'Qwen/Qwen3-8B'
+client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+for name, base in [('vLLM', os.environ['VLLM_BASE']), ('Praxis', 'http://127.0.0.1:8080/v1')]:
+    with client.open(base + '/models', timeout=30) as response:
+        models = json.load(response)
+    if model not in [entry['id'] for entry in models['data']]:
+        raise RuntimeError(f'{name}: expected model {model!r} not found: {models!r}')
+    data = json.dumps({'model': model, 'messages': [{'role': 'user', 'content': 'Reply with a short greeting.'}],
+                       'max_tokens': 64, 'temperature': 0.7,
+                       'chat_template_kwargs': {'enable_thinking': False}}).encode()
+    request = urllib.request.Request(base + '/chat/completions', data=data,
+                                     headers={'Content-Type': 'application/json'})
+    with client.open(request, timeout=600) as response:
+        completion = json.load(response)
+    if not completion['choices'][0]['message']['content'].strip():
+        raise RuntimeError(f'{name}: empty completion: {completion!r}')
+    print(name + ': model listing and nonempty completion passed')
+PY
+}
+
+case "${1:-help}" in
+  help|--help|-h)
+    cat <<'EOF'
+Usage (run as root except help):
+  sss-praxis inference cloud|remote-vllm RFC1918_IP:PORT|status|check
+  sss-praxis secret openai|anthropic VERSION
+  sss-praxis activate OPENAI_SECRET ANTHROPIC_SECRET
+  sss-praxis status
+The standalone image uses the memory quota profile. Local vLLM belongs on the
+separate vLLM image; select remote-vllm with its private endpoint.
+EOF
+    ;;
+  inference)
+    require_root
+    if [[ "$#" == 3 ]]; then
+      [[ "$2" == remote-vllm ]] || die 'expected inference cloud|remote-vllm RFC1918_IP:PORT|status|check'
+      validate_vllm_endpoint "$3"
+    elif [[ "$#" == 2 && "$2" != remote-vllm ]]; then :
+    else
+      die 'expected inference cloud|remote-vllm RFC1918_IP:PORT|status|check'
+    fi
+    case "$2" in
+      check) check_inference ;;
+      status)
+        printf 'Praxis upstream: %s\n' "$(inference_backend)"
+        [[ "$(inference_backend)" != remote-vllm ]] || printf 'Remote vLLM endpoint: %s\n' "$(inference_endpoint)"
+        ;;
+      cloud|remote-vllm) ;;
+      *) die 'expected inference cloud|remote-vllm RFC1918_IP:PORT|status|check' ;;
+    esac
+    [[ "$2" == check || "$2" == status ]] && exit 0
+    exec 9>/run/secure-single-server-praxis.lock
+    flock 9
+    install -d -m 0700 /etc/secure-single-server
+    if [[ "$2" == remote-vllm ]]; then
+      tmp="$(mktemp /etc/secure-single-server/.vllm-endpoint.XXXXXX)"
+      printf '%s\n' "$3" >"${tmp}"
+      chmod 0600 "${tmp}"
+      mv "${tmp}" /etc/secure-single-server/vllm-endpoint
+    fi
+    tmp="$(mktemp /etc/secure-single-server/.inference-backend.XXXXXX)"
+    printf '%s\n' "$2" >"${tmp}"
+    chmod 0600 "${tmp}"
+    mv "${tmp}" /etc/secure-single-server/inference-backend
+    flock -u 9
+    systemctl restart secure-single-server-praxis.service
+    ;;
+  secret)
+    require_root
+    [[ "$#" == 3 ]] || die 'secret requires provider and version'
+    case "$2" in openai|anthropic) ;; *) die 'expected openai or anthropic' ;; esac
+    exec "${ROOT}/scripts/common/secret-set" "$2" "$3"
+    ;;
+  activate)
+    require_root
+    [[ "$#" == 3 ]] || die 'activate requires two secret names'
+    require_secret "$2"
+    require_secret "$3"
+    exec 9>/run/secure-single-server-praxis.lock
+    flock 9
+    install -d -m 0700 /etc/secure-single-server
+    tmp="$(mktemp /etc/secure-single-server/.secret-names.XXXXXX)"
+    printf '%s %s\n' "$2" "$3" >"${tmp}"
+    chmod 0600 "${tmp}"
+    mv "${tmp}" /etc/secure-single-server/secret-names
+    flock -u 9
+    systemctl restart secure-single-server-praxis.service
+    ;;
+  status)
+    require_root
+    systemctl status secure-single-server-praxis.service --no-pager
+    as_service systemctl --user status praxis.service --no-pager
+    ;;
+  reconcile) praxis_reconcile ;;
+  *) die 'unknown command; see sss-praxis help' ;;
+esac

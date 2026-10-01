@@ -1,0 +1,40 @@
+ARG RHEL_BOOTC_IMAGE
+ARG RHSM=0
+FROM ${RHEL_BOOTC_IMAGE}
+ARG RHSM=0
+
+RUN --mount=type=secret,id=rhsm_org,target=/run/secrets/rhsm_org \
+    --mount=type=secret,id=rhsm_activation_key,target=/run/secrets/rhsm_activation_key \
+    set -eu; \
+    if [ "${RHSM}" = 1 ]; then \
+      org="$(cat /run/secrets/rhsm_org)"; \
+      activation_key="$(cat /run/secrets/rhsm_activation_key)"; \
+      subscription-manager register --org "${org}" --activationkey "${activation_key}"; \
+      trap 'subscription-manager unregister || true; subscription-manager clean || true; rm -rf /etc/pki/consumer /etc/pki/entitlement /var/lib/rhsm /run/rhsm; find /var/log -type f -delete' EXIT; \
+    fi; \
+    dnf install -y podman policycoreutils-python-utils shadow-utils util-linux \
+      python3 iproute openssl curl cloud-init; \
+    dnf clean all; \
+    rm -rf /var/cache/dnf /var/lib/dnf /var/lib/rhsm /run/cloud-init /run/rhsm \
+      /etc/pki/consumer /etc/pki/entitlement; \
+    find /var/log -type f -delete
+
+COPY scripts/common/lib.sh /usr/share/secure-single-server/scripts/common/lib.sh
+COPY scripts/common/install /usr/share/secure-single-server/scripts/common/install
+COPY scripts/common/secret-set /usr/share/secure-single-server/scripts/common/secret-set
+COPY bootc/scripts/praxis /usr/share/secure-single-server/bootc/scripts/praxis
+COPY configs/all-in-one/shared-gateway.yaml /usr/share/secure-single-server/configs/all-in-one/shared-gateway.yaml
+COPY configs/common/quadlet/praxis.container.in /usr/share/secure-single-server/configs/common/quadlet/praxis.container.in
+COPY configs/common/quadlet/praxis.network /usr/share/secure-single-server/configs/common/quadlet/praxis.network
+COPY configs/vllm/praxis-remote.yaml /usr/share/secure-single-server/configs/vllm/praxis-remote.yaml
+COPY configs/vllm/praxis.container.in /usr/share/secure-single-server/configs/vllm/praxis.container.in
+COPY bootc/systemd/secure-single-server-praxis.service /usr/lib/systemd/system/
+COPY bootc/systemd/delegate.conf /usr/lib/systemd/system/user@.service.d/50-secure-single-server.conf
+RUN chmod 0755 /usr/share/secure-single-server/scripts/common/install \
+      /usr/share/secure-single-server/scripts/common/secret-set \
+      /usr/share/secure-single-server/bootc/scripts/praxis \
+    && ln -s /usr/share/secure-single-server/bootc/scripts/praxis /usr/bin/sss-praxis \
+    && systemctl enable secure-single-server-praxis.service \
+    && bootc container lint
+
+LABEL containers.bootc=1

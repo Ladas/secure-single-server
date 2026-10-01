@@ -6,23 +6,33 @@ the OS as an image. OpenShell supplies the sandbox; Praxis supplies model access
 and shared quotas. Their combined inference path remains
 [experimental](../docs/quickstarts/openshell-praxis/users.md).
 
-Build one x86_64 bootable base and three derived OS images:
+Build one x86_64 bootable base, standalone Praxis and vLLM images, and these
+published OS images:
 
 ```text
 RHEL 9 bootc → secure-single-server:base
               ├── :codex
               ├── :opencode
               └── :openclaw
+
+RHEL 9 bootc → secure-single-server:praxis
+RHEL 9 bootc → secure-single-server:vllm
 ```
 
-The base includes Podman, the native OpenShell CLI, deployment configuration,
-and a boot service for Praxis and OpenShell. Each child adds one harness's
-selection and scripts/policies. Harness binaries run in the pinned workload
-containers, not directly on the host. This initial bootc path uses Praxis's
-in-memory quota profile and administrator-operated OpenShell. It does not yet
-provide Valkey, remote-gateway TLS/JWT, or ordinary-user access to OpenShell.
-It is a deployment foundation for the [phased gateway goals](../docs/roadmap.md),
-not completion of the durable-quota or retained-session requirements.
+The base remains the parent for harness images. It includes Podman, the native
+OpenShell CLI, deployment configuration, and a boot service for the existing
+OpenShell/Praxis path. The standalone `praxis` image is a slimmer direct RHEL
+bootc image for gateway-only deployments; it excludes OpenShell, harnesses, and
+NVIDIA components. The standalone `vllm` image is also a direct RHEL bootc
+image; it excludes Praxis and OpenShell and includes the NVIDIA 580 open driver
+and Container Toolkit so CPU or GPU mode can be selected at runtime. Each
+harness image adds one harness's selection
+and scripts/policies. Harness binaries run in the pinned workload containers,
+not directly on the host. This initial bootc path uses Praxis's in-memory quota
+profile and administrator-operated OpenShell. It does not yet provide Valkey,
+remote-gateway TLS/JWT, or ordinary-user access to OpenShell. It is a deployment
+foundation for the [phased gateway goals](../docs/roadmap.md), not completion of
+the durable-quota or retained-session requirements.
 
 ## Pull on first boot
 
@@ -72,8 +82,9 @@ sudo bootc/test-images
 `bootc/build` requires an immutable RHEL 9 reference and refuses non-amd64
 builders. It constructs a restricted build context from deployment sources;
 Git history, local evidence, AWS state and workstation credentials are excluded.
-The harness builds resolve the base tag to its local image ID before deriving
-the three images. Every image runs `bootc container lint` during its build.
+Harness builds resolve the base tag to its local image ID before deriving their
+images. The Praxis and vLLM images build directly from the pinned RHEL bootc
+reference. Every image runs `bootc container lint` during its build.
 Use a second argument such as `quay.io/YOUR_NAMESPACE/secure-single-server`
 to select the output image prefix. Publishing is a separate `podman push` step.
 
@@ -86,6 +97,12 @@ mounts are excluded from the resulting layers.
 On a subscription-registered non-AWS builder, omit this variable and use
 Podman's normal entitlement integration. Cloud-init is included for AWS
 first-boot SSH-key provisioning.
+
+On a clean GitHub Actions runner, set `RHSM_ORG_ID` and
+`RHSM_ACTIVATION_KEY` as repository secrets. The build passes those values as
+Podman build secrets, registers the ephemeral build, installs packages, and
+unregisters/cleans the subscription in the same `RUN`. The values are never
+written to an image layer.
 
 ## Install and boot
 
@@ -141,6 +158,20 @@ installer/upgrade/uninstall commands on this deployment. Each boot re-renders
 the units from that deployment's pins, which also applies after bootc rollback.
 Keys, caches, workspaces and DB contents persist; OS rollback does not roll back
 application data or guarantee compatibility with older database schemas.
+
+## Deploy standalone Praxis
+
+The `praxis` image is independent of the OpenShell base. On its booted host,
+use `sss-praxis` instead of `sss-bootc` for secrets, activation, status, and
+Praxis upstream selection. It supports cloud providers or a private
+`remote-vllm` endpoint; local vLLM belongs on the separate vLLM image:
+
+```console
+printf '%s' "$key" | sudo sss-praxis secret openai v1
+sudo sss-praxis activate praxis-openai-api-key-v1 praxis-anthropic-api-key-v1
+sudo sss-praxis inference remote-vllm 10.0.0.10:8000
+sudo sss-praxis status
+```
 
 When an OS update changes OpenShell, follow the [OpenShell upgrade
 runbook](../openshell/docs/upgrade.md) before staging/rebooting: export work,

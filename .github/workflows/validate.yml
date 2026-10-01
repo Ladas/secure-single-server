@@ -60,6 +60,8 @@ jobs:
       - name: Check bootc build contract without registry credentials
         run: |
           python3 bootc/tests/build.py
+          python3 bootc/tests/select-images.py
+          python3 bootc/tests/praxis.py
           python3 bootc/tests/vllm.py
           python3 bootc/tests/vllm-lock.py
           python3 bootc/tests/inference.py
