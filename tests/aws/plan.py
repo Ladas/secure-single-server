@@ -513,6 +513,12 @@ class PlanTest(unittest.TestCase):
             with patch.object(aws, "call", side_effect=[identity, client_reply, {"Reservations": []}]), \
                     self.assertRaisesRegex(ValueError, "exactly one"):
                 vm.vllm_endpoint(aws, endpoint_args)
+            non_rfc1918_instance = copy.deepcopy(instance)
+            non_rfc1918_instance["PrivateIpAddress"] = "100.64.1.10"
+            with patch.object(aws, "call", side_effect=[identity, client_reply,
+                                                        {"Reservations": [{"Instances": [non_rfc1918_instance]}]}]), \
+                    self.assertRaisesRegex(ValueError, "RFC1918"):
+                vm.vllm_endpoint(aws, endpoint_args)
             other_vpc_instance = copy.deepcopy(instance)
             other_vpc_instance["VpcId"] = "vpc-other"
             with patch.object(aws, "call", side_effect=[identity, client_reply,

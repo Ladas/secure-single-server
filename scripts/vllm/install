@@ -205,7 +205,6 @@ cleanup_install() {
 commit_install_state() {
   printf '%s\n' "${mode}" >"${state}/mode"
   printf '%s\n' "${model}" >"${state}/model"
-  touch "${state}/network-owned"
   if [[ -n "${remote_listen}" ]]; then
     printf '%s\n' "${remote_listen}" >"${state}/listen-address"
   else

@@ -309,6 +309,46 @@ cleanup_install
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
 
+    def test_vllm_removal_only_removes_an_owned_network(self):
+        source = (ROOT / 'scripts/vllm/remove').read_text()
+        decision = source[source.index('remove_network=0'):source.index('remove_fcontext=0')]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / 'state'
+            unit_directory = root / 'units'
+            state.mkdir()
+            unit_directory.mkdir()
+            unit = unit_directory / 'praxis-vllm.container'
+            network_unit = unit_directory / 'praxis.network'
+            unit.write_text('Network=praxis.network\n')
+            (state / 'manifest').write_text('manifest\n')
+            network_unit.write_text('network\n')
+
+            def run_decision(network_owned):
+                if network_owned:
+                    (state / 'network-owned').write_text('')
+                script = f"""
+set -euo pipefail
+state={shlex.quote(str(state))}
+unit={shlex.quote(str(unit))}
+network_unit={shlex.quote(str(network_unit))}
+gateway_unit={shlex.quote(str(unit_directory / 'praxis.container'))}
+ROOT={shlex.quote(str(ROOT))}
+sha256_file() {{ cat "$1"; }}
+cmp() {{ return 0; }}
+vllm_uses_praxis_network() {{ return 0; }}
+{decision}
+printf '%s\\n' "$remove_network"
+"""
+                return subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+
+            result = run_decision(False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "0\n")
+            result = run_decision(True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "1\n")
+
     def test_gateway_uninstall_preserves_network_for_vllm(self):
         source = (ROOT / 'scripts/common/uninstall').read_text()
         block = source[source.index('network_unit='):source.index('as_service systemctl --user daemon-reload')]
@@ -381,6 +421,13 @@ printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$fcontext_o
             self.assertEqual((state / "model").read_text(), "test-model\n")
             self.assertEqual((state / "listen-address").read_text(), "10.0.1.10\n")
             self.assertTrue((state / "network-owned").exists())
+            self.assertEqual(result.stdout, "0\n0\n0\n0\n0\n0\n")
+
+            (state / "network-owned").unlink()
+            script = script.replace("network_staged=1", "network_staged=0")
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((state / "network-owned").exists())
             self.assertEqual(result.stdout, "0\n0\n0\n0\n0\n0\n")
 
     def test_model_selection_rejects_unknown_and_duplicate_presets(self):

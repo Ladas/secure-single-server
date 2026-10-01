@@ -245,6 +245,12 @@ def vllm_endpoint(aws, args):
     private_ip = instance.get("PrivateIpAddress")
     if not private_ip:
         raise ValueError("vLLM instance has no private IPv4 address yet; wait and rerun")
+    private_address = ipaddress.ip_address(private_ip)
+    private_networks = (ipaddress.ip_network("10.0.0.0/8"),
+                        ipaddress.ip_network("172.16.0.0/12"),
+                        ipaddress.ip_network("192.168.0.0/16"))
+    if private_address.version != 4 or not any(private_address in network for network in private_networks):
+        raise ValueError("vLLM instance private address must be RFC1918")
     if instance.get("VpcId") != args.client_vpc_id:
         raise ValueError("vLLM instance is not in the single server's VPC")
     group_ids = [group["GroupId"] for group in instance.get("SecurityGroups", [])]
