@@ -289,7 +289,11 @@ aws_test_vllm_endpoint() {
   _aws_test_name "$test_vllm" || return 1
   local test_args=(vllm-endpoint --region "$REGION" --account-id "$ACCOUNT"
     --vllm-prefix "$RUN_PREFIX-$test_vllm")
-  if [ -n "${RHEL_VPC_ID:-}" ]; then test_args+=(--client-vpc-id "$RHEL_VPC_ID"); fi
+  if [ -z "${RHEL_VPC_ID:-}" ]; then
+    _aws_test_error 'Verify the single server first so vLLM endpoint discovery can check the VPC.'
+    return 1
+  fi
+  test_args+=(--client-vpc-id "$RHEL_VPC_ID")
   _aws_test_vm "${test_args[@]}"
 }
 

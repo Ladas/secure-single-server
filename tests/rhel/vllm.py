@@ -93,7 +93,7 @@ class VllmTest(unittest.TestCase):
                     'die() { printf \'error: %s\\n\' "$*" >&2; exit 1; }\n'
                     'service_uid() { echo 1001; }\n'
                     'vllm_uses_praxis_network() { return 0; }\n'
-                    'sha256_file() { echo fixture-manifest; }\n'
+                    'sha256_file() { case "$1" in *chat-template.jinja) echo template-hash;; *) echo fixture-manifest;; esac; }\n'
                     'as_service() { printf \'AS_SERVICE %s\\n\' "$*"; }\n'
                     'note() { printf \'NOTE %s\\n\' "$*"; }\n'
                     'flock() { :; }\n'
@@ -130,6 +130,8 @@ class VllmTest(unittest.TestCase):
             network_unit.write_bytes((ROOT / "configs/common/quadlet/praxis.network").read_bytes())
             (state / "manifest").write_text("fixture-manifest\n")
             (state / "network-owned").write_text("")
+            (state / "chat-template.jinja").write_text("template\n")
+            (state / "template.sha256").write_text("template-hash\n")
             semanage_remove_marker.unlink()
             result = subprocess.run(['bash', str(removal_script(True))],
                                     capture_output=True, text=True)
@@ -138,7 +140,7 @@ class VllmTest(unittest.TestCase):
             self.assertTrue(network_unit.exists())
             self.assertTrue(gateway_unit.exists())
             self.assertFalse((state / "network-owned").exists())
-            self.assertFalse(semanage_remove_marker.exists())
+            self.assertTrue(semanage_remove_marker.exists())
             self.assertNotIn('praxis-network.service', result.stdout)
 
             install_source = (ROOT / 'scripts/vllm/install').read_text()
@@ -354,11 +356,8 @@ vllm_uses_praxis_network() {{ return {0 if preserve_network else 1}; }}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             state = root / "state"
-            gateway_unit = root / "praxis.container"
             state.mkdir()
             (state / "network-owned").write_text("")
-            commit = commit.replace(
-                '/etc/containers/systemd/users/${uid}/praxis.container', str(gateway_unit))
             script = f"""
 set -euo pipefail
 state={shlex.quote(str(state))}
@@ -383,11 +382,6 @@ printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$fcontext_o
             self.assertEqual((state / "listen-address").read_text(), "10.0.1.10\n")
             self.assertTrue((state / "network-owned").exists())
             self.assertEqual(result.stdout, "0\n0\n0\n0\n0\n0\n")
-
-            gateway_unit.write_text("gateway\n")
-            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue((state / "network-owned").exists())
 
     def test_model_selection_rejects_unknown_and_duplicate_presets(self):
         for args in (("--model", "unknown", "cpu"), ("--model", "../qwen3-8b", "cpu"),

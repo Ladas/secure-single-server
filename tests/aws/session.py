@@ -194,6 +194,18 @@ printf 'SHELL_ALIVE\\n'
             self.assertNotIn("VM_CALL:", output)
             self.assertIn("Discover or set the recorded account first.", output)
 
+    def test_vllm_endpoint_requires_the_recorded_client_vpc(self):
+        for shell in SHELLS:
+            output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
+ACCOUNT=123456789012 AWS_TEST_CREDENTIALS=ready REGION=eu-central-1 RUN_PREFIX=gateway-test
+unset RHEL_VPC_ID
+if aws_test_vllm_endpoint vllm-server; then printf 'UNEXPECTED_ENDPOINT\\n'; fi
+printf 'SHELL_ALIVE\\n'
+""")
+            self.assertNotIn("VM_CALL:", output)
+            self.assertNotIn("UNEXPECTED_ENDPOINT", output)
+            self.assertIn("Verify the single server first so vLLM endpoint discovery can check the VPC.", output)
+
     def test_vllm_helpers_reject_extra_arguments(self):
         for shell in SHELLS:
             output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """

@@ -26,10 +26,14 @@ if [[ -f "${state}/template.sha256" ]]; then
   [[ "$(sha256_file "${state}/chat-template.jinja")" == "$(cat "${state}/template.sha256")" ]] ||
     die 'vLLM template drifted; refusing removal'
 fi
+remove_fcontext=0
+if [[ -f "${state}/fcontext-owned" || -f "${state}/template.sha256" ]]; then
+  remove_fcontext=1
+fi
 as_service systemctl --user stop praxis-vllm.service
 rm -f "${unit}" "${state}/manifest" "${state}/mode" "${state}/model" "${state}/listen-address" \
   "${state}/chat-template.jinja" "${state}/template.sha256"
-if [[ -f "${state}/fcontext-owned" ]]; then
+if (( remove_fcontext )); then
   semanage fcontext -d '^/etc/praxis-vllm/chat-template\.jinja$' >/dev/null 2>&1 || true
   rm -f "${state}/fcontext-owned"
 fi

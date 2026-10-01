@@ -440,7 +440,7 @@ class PlanTest(unittest.TestCase):
         values.update(overrides)
         return SimpleNamespace(**values)
 
-    def test_vllm_endpoint_discovers_one_private_address_and_rejects_public_ingress(self):
+    def test_vllm_endpoint_discovers_one_private_address_and_requires_source_group_ingress(self):
         instance = {"InstanceId": "i-vllm", "PrivateIpAddress": "10.0.1.10", "VpcId": "vpc-test",
                     "Tags": vm.tags("gateway-test-vllm-server", "vllm-server"),
                     "SecurityGroups": [{"GroupId": "sg-vllm"}]}
@@ -463,6 +463,10 @@ class PlanTest(unittest.TestCase):
                            {"Ipv6Ranges": [{"CidrIpv6": "::/0"}]},
                            {"IpRanges": [{"CidrIp": "0.0.0.0/1"}, {"CidrIp": "128.0.0.0/1"}]},
                            {"Ipv6Ranges": [{"CidrIpv6": "2600::/23"}]},
+                           {"IpRanges": [{"CidrIp": "10.0.0.0/8"}]},
+                           {"IpRanges": [{"CidrIp": "172.16.0.0/12"}]},
+                           {"IpRanges": [{"CidrIp": "192.168.0.0/16"}]},
+                           {"Ipv6Ranges": [{"CidrIpv6": "fc00::/7"}]},
                            {"PrefixListIds": [{"PrefixListId": "pl-public"}]}):
             bad_group = copy.deepcopy(group)
             bad_group["IpPermissions"][0]["UserIdGroupPairs"] = []
@@ -473,8 +477,20 @@ class PlanTest(unittest.TestCase):
         for bad_group in public_groups:
             with patch.object(aws, "call", side_effect=[replies[0], replies[1],
                                                         {"SecurityGroups": [bad_group]}]), \
-                    self.assertRaisesRegex(ValueError, "exposes port 8000"):
+                    self.assertRaisesRegex(ValueError, "port 8000 ingress"):
                 vm.vllm_endpoint(aws, self.endpoint_args())
+
+        all_protocol_group = copy.deepcopy(group)
+        all_protocol_group["IpPermissions"] = [{"IpProtocol": "-1",
+                                                "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]
+        with patch.object(aws, "call", side_effect=[replies[0], replies[1],
+                                                    {"SecurityGroups": [all_protocol_group]}]), \
+                self.assertRaisesRegex(ValueError, "exact TCP source-group rule"):
+            vm.vllm_endpoint(aws, self.endpoint_args())
+
+        with patch.object(aws, "call", side_effect=replies[:2]), \
+                self.assertRaisesRegex(ValueError, "client VPC is required"):
+            vm.vllm_endpoint(aws, self.endpoint_args(client_vpc_id=None))
 
         with patch.object(aws, "call", side_effect=[replies[0], {"Reservations": []}]), \
                 self.assertRaisesRegex(ValueError, "exactly one"):

@@ -199,6 +199,30 @@ def check_no_public_vllm_ingress(groups):
                     raise ValueError("vLLM security group exposes port 8000 to the Internet")
 
 
+def check_vllm_ingress_is_source_group_only(groups):
+    source_group_rule = False
+    for group in groups:
+        for permission in group.get("IpPermissions", []):
+            protocol = permission.get("IpProtocol")
+            if protocol == "-1":
+                port_matches = True
+            elif protocol == "tcp":
+                port_matches = int(permission.get("FromPort", 0)) <= VLLM_PORT <= int(permission.get("ToPort", 65535))
+            else:
+                continue
+            if not port_matches:
+                continue
+            if (permission.get("IpRanges") or permission.get("Ipv6Ranges")
+                    or permission.get("PrefixListIds") or not permission.get("UserIdGroupPairs")):
+                raise ValueError("vLLM port 8000 ingress must use source security groups")
+            if (protocol != "tcp" or permission.get("FromPort") != VLLM_PORT
+                    or permission.get("ToPort") != VLLM_PORT):
+                raise ValueError("vLLM port 8000 ingress must be an exact TCP source-group rule")
+            source_group_rule = True
+    if not source_group_rule:
+        raise ValueError("vLLM security group has no source-group access on port 8000")
+
+
 def vllm_endpoint(aws, args):
     check_identity(aws, args.account_id)
     instances = vllm_instances(aws, args)
@@ -211,11 +235,13 @@ def vllm_endpoint(aws, args):
     private_ip = instance.get("PrivateIpAddress")
     if not private_ip:
         raise ValueError("vLLM instance has no private IPv4 address yet; wait and rerun")
+    if not args.client_vpc_id:
+        raise ValueError("client VPC is required for vLLM endpoint discovery")
     if args.client_vpc_id and instance.get("VpcId") != args.client_vpc_id:
         raise ValueError("vLLM instance is not in the single server's VPC")
     group_ids = [group["GroupId"] for group in instance.get("SecurityGroups", [])]
     groups = aws.call("ec2", "describe-security-groups", group_ids=group_ids)["SecurityGroups"] if group_ids else []
-    check_no_public_vllm_ingress(groups)
+    check_vllm_ingress_is_source_group_only(groups)
     result = {"InstanceId": instance["InstanceId"], "PrivateIpAddress": private_ip,
               "VllmEndpoint": f"{private_ip}:{VLLM_PORT}", "VpcId": instance.get("VpcId"),
               "SecurityGroupIds": group_ids, "Result": "private vLLM endpoint discovered"}
