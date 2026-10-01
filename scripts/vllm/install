@@ -152,6 +152,7 @@ unit_backup=''
 manifest_backup=''
 manifest_new="${state}/manifest.new"
 fcontext_regex='^/etc/praxis-vllm/chat-template\.jinja$'
+fcontext_owned="${state}/fcontext-owned"
 template_backup=''
 template_hash_backup=''
 # shellcheck disable=SC2329
@@ -178,6 +179,7 @@ cleanup_install() {
   fi
   if (( fcontext_staged )); then
     semanage fcontext -d "${fcontext_regex}" >/dev/null 2>&1 || true
+    rm -f "${fcontext_owned}"
   fi
   if (( service_touched )); then
     as_service systemctl --user stop praxis-vllm.service || true
@@ -199,11 +201,7 @@ cleanup_install() {
 commit_install_state() {
   printf '%s\n' "${mode}" >"${state}/mode"
   printf '%s\n' "${model}" >"${state}/model"
-  if [[ -f "${state}/network-owned" && ! -f "/etc/containers/systemd/users/${uid}/praxis.container" ]]; then
-    touch "${state}/network-owned"
-  else
-    rm -f "${state}/network-owned"
-  fi
+  touch "${state}/network-owned"
   if [[ -n "${remote_listen}" ]]; then
     printf '%s\n' "${remote_listen}" >"${state}/listen-address"
   else
@@ -237,8 +235,8 @@ if [[ -e "${network_unit}" ]]; then
   cmp -s "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}" ||
     die 'praxis.network drifted; inspect it before installing remote vLLM'
 else
-  install -o root -g "${gid}" -m 0640 "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}"
   network_staged=1
+  install -o root -g "${gid}" -m 0640 "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}"
   touch "${state}/network-owned"
 fi
 if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
@@ -256,8 +254,9 @@ if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
   if [[ -z "${existing_context}" ]]; then
     semanage fcontext -a -t container_file_t "${fcontext_regex}"
     fcontext_staged=1
-  elif [[ "${existing_context}" != *:container_file_t:* ]]; then
-    die "unexpected SELinux context for vLLM chat template: ${existing_context}"
+    touch "${fcontext_owned}"
+  elif [[ "${existing_context}" != *:container_file_t:* || ! -f "${fcontext_owned}" ]]; then
+    die 'vLLM chat-template SELinux rule exists but is not owned by this installer'
   fi
   restorecon -F "${state}/chat-template.jinja"
   sha256_file "${state}/chat-template.jinja" >"${state}/template.sha256"

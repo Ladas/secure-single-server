@@ -69,12 +69,14 @@ class VllmTest(unittest.TestCase):
             unit = root / "praxis-vllm.container"
             network_unit = root / "praxis.network"
             gateway_unit = root / "praxis.container"
+            semanage_remove_marker = root / "semanage-remove"
             state.mkdir()
             unit.write_text("managed vLLM unit\n")
             network_unit.write_bytes((ROOT / "configs/common/quadlet/praxis.network").read_bytes())
             (state / "manifest").write_text("fixture-manifest\n")
             (state / "model").write_text("qwen3-8b\n")
             (state / "network-owned").write_text("")
+            (state / "fcontext-owned").write_text("")
 
             def removal_script(with_gateway):
                 if with_gateway:
@@ -90,11 +92,13 @@ class VllmTest(unittest.TestCase):
                     'require_root() { :; }\n'
                     'die() { printf \'error: %s\\n\' "$*" >&2; exit 1; }\n'
                     'service_uid() { echo 1001; }\n'
+                    'vllm_uses_praxis_network() { return 0; }\n'
                     'sha256_file() { echo fixture-manifest; }\n'
                     'as_service() { printf \'AS_SERVICE %s\\n\' "$*"; }\n'
                     'note() { printf \'NOTE %s\\n\' "$*"; }\n'
                     'flock() { :; }\n'
-                    'semanage() { :; }\n')
+                    'semanage() { if [[ "$1" == fcontext && "$2" == -d ]]; then touch ' +
+                    shlex.quote(str(semanage_remove_marker)) + '; fi; }\n')
                 source = source.replace('/run/lock/praxis-vllm.lock', str(root / "vllm.lock"))
                 source = source.replace('$(gateway_lock_path "${SERVICE_USER}")', str(root / "gateway.lock"))
                 source = source.replace('state=/etc/praxis-vllm', f'state={state}')
@@ -117,13 +121,16 @@ class VllmTest(unittest.TestCase):
             self.assertFalse(unit.exists())
             self.assertFalse(network_unit.exists())
             self.assertFalse((state / "network-owned").exists())
+            self.assertFalse((state / "fcontext-owned").exists())
             self.assertFalse((state / "model").exists())
             self.assertIn('AS_SERVICE systemctl --user stop praxis-network.service', result.stdout)
+            self.assertTrue(semanage_remove_marker.exists())
 
             unit.write_text("managed vLLM unit\n")
             network_unit.write_bytes((ROOT / "configs/common/quadlet/praxis.network").read_bytes())
             (state / "manifest").write_text("fixture-manifest\n")
             (state / "network-owned").write_text("")
+            semanage_remove_marker.unlink()
             result = subprocess.run(['bash', str(removal_script(True))],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -131,6 +138,7 @@ class VllmTest(unittest.TestCase):
             self.assertTrue(network_unit.exists())
             self.assertTrue(gateway_unit.exists())
             self.assertFalse((state / "network-owned").exists())
+            self.assertFalse(semanage_remove_marker.exists())
             self.assertNotIn('praxis-network.service', result.stdout)
 
             install_source = (ROOT / 'scripts/vllm/install').read_text()
@@ -181,6 +189,7 @@ service_touched=0
 service_was_active=0
 fcontext_staged=0
 fcontext_regex='^/etc/praxis-vllm/chat-template\\.jinja$'
+fcontext_owned=''
 semanage() {{
   if [[ "$1" == fcontext && "$2" == -d ]]; then
     touch {shlex.quote(str(fcontext_rm_marker))}
@@ -201,6 +210,7 @@ cleanup_install
             self.assertFalse(manifest.exists())
             self.assertFalse(network_unit.exists())
             self.assertFalse((state / "network-owned").exists())
+
             self.assertFalse(temporary.exists())
 
             network_unit.write_text("network\n")
@@ -258,6 +268,74 @@ cleanup_install
             self.assertTrue(network_rm_marker.exists())
             self.assertTrue(fcontext_rm_marker.exists())
 
+    def test_vllm_network_reference_detects_managed_unit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "etc/praxis-vllm"
+            unit_directory = root / "etc/containers/systemd/users/1001"
+            unit = unit_directory / "praxis-vllm.container"
+            state.mkdir(parents=True)
+            unit_directory.mkdir(parents=True)
+            unit.write_text("Network=praxis.network\n")
+            (state / "manifest").write_text("manifest\n")
+            command = ('set -e; source ' + shlex.quote(str(ROOT / 'scripts/common/lib.sh')) +
+                       '; vllm_uses_praxis_network "$1" 1001')
+            result = subprocess.run(['bash', '-c', command, 'helper', str(root)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            unit.write_text("Network=host\n")
+            result = subprocess.run(['bash', '-c', command, 'helper', str(root)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+
+            unit.write_text("Network=praxis.network\n")
+            (state / "manifest").unlink()
+            result = subprocess.run(['bash', '-c', command, 'helper', str(root)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_gateway_uninstall_preserves_network_for_vllm(self):
+        source = (ROOT / 'scripts/common/uninstall').read_text()
+        block = source[source.index('network_unit='):source.index('as_service systemctl --user daemon-reload')]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            network_unit = root / 'praxis.network'
+            other_file = root / 'other'
+            manifest = root / 'manifest'
+            block = block.replace(
+                'network_unit="/etc/containers/systemd/users/$(service_uid)/praxis.network"',
+                f'network_unit={shlex.quote(str(network_unit))}')
+
+            def run_uninstall(preserve_network):
+                network_unit.write_text('network\n')
+                other_file.write_text('other\n')
+                manifest.write_text(f'file {network_unit}\nfile {other_file}\n')
+                script = f"""
+set -euo pipefail
+CONFIG_DIR={shlex.quote(str(root))}
+MANIFEST_FILE={shlex.quote(str(manifest))}
+validate_owned_path() {{ :; }}
+selinux_path_regex() {{ echo fixture-regex; }}
+semanage() {{ :; }}
+as_service() {{ printf 'SERVICE %s\\n' "$*"; }}
+vllm_uses_praxis_network() {{ return {0 if preserve_network else 1}; }}
+{block}
+"""
+                return subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+
+            result = run_uninstall(True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(network_unit.exists())
+            self.assertFalse(other_file.exists())
+            self.assertNotIn('stop praxis-network.service', result.stdout)
+
+            result = run_uninstall(False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(network_unit.exists())
+            self.assertFalse(other_file.exists())
+            self.assertIn('stop praxis-network.service', result.stdout)
+
     def test_remote_install_commits_state_and_clears_staging(self):
         source = (ROOT / 'scripts/vllm/install').read_text()
         commit = source[source.index('commit_install_state() {'):source.index('trap cleanup_install EXIT')]
@@ -296,7 +374,7 @@ printf '%s\\n' "$unit_staged" "$template_staged" "$fcontext_staged" "$network_st
             gateway_unit.write_text("gateway\n")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse((state / "network-owned").exists())
+            self.assertTrue((state / "network-owned").exists())
 
     def test_model_selection_rejects_unknown_and_duplicate_presets(self):
         for args in (("--model", "unknown", "cpu"), ("--model", "../qwen3-8b", "cpu"),

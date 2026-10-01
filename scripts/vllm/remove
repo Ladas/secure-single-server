@@ -17,7 +17,7 @@ gateway_unit="/etc/containers/systemd/users/$(service_uid)/praxis.container"
 [[ -f "${unit}" && -f "${state}/manifest" ]] || die 'managed vLLM install not found'
 [[ "$(sha256_file "${unit}")" == "$(cat "${state}/manifest")" ]] || die 'vLLM unit drifted; refusing removal'
 remove_network=0
-if [[ ! -f "${gateway_unit}" && -f "${state}/network-owned" && -f "${network_unit}" ]]; then
+if [[ ! -f "${gateway_unit}" && -f "${network_unit}" ]] && vllm_uses_praxis_network; then
   cmp -s "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}" ||
     die 'praxis.network drifted; refusing removal'
   remove_network=1
@@ -29,7 +29,10 @@ fi
 as_service systemctl --user stop praxis-vllm.service
 rm -f "${unit}" "${state}/manifest" "${state}/mode" "${state}/model" "${state}/listen-address" \
   "${state}/chat-template.jinja" "${state}/template.sha256"
-semanage fcontext -d '^/etc/praxis-vllm/chat-template\.jinja$' >/dev/null 2>&1 || true
+if [[ -f "${state}/fcontext-owned" ]]; then
+  semanage fcontext -d '^/etc/praxis-vllm/chat-template\.jinja$' >/dev/null 2>&1 || true
+  rm -f "${state}/fcontext-owned"
+fi
 if (( remove_network )); then
   as_service systemctl --user stop praxis-network.service 2>/dev/null || true
   rm -f "${network_unit}"

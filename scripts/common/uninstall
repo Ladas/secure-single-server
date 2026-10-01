@@ -23,11 +23,19 @@ for command in podman runuser semanage systemctl; do
 done
 verify_managed_manifest
 
+network_unit="/etc/containers/systemd/users/$(service_uid)/praxis.network"
+preserve_network=0
+if vllm_uses_praxis_network; then
+  preserve_network=1
+fi
+
 as_service systemctl --user stop praxis.service 2>/dev/null || true
 as_service systemctl --user stop praxis-valkey.service 2>/dev/null || true
-as_service systemctl --user stop praxis-network.service 2>/dev/null || true
 as_service systemctl --user stop praxis-valkey-volume.service 2>/dev/null || true
-as_service podman network rm praxis-private >/dev/null 2>&1 || true
+if (( ! preserve_network )); then
+  as_service systemctl --user stop praxis-network.service 2>/dev/null || true
+  as_service podman network rm praxis-private >/dev/null 2>&1 || true
+fi
 
 while read -r _ path; do
   validate_owned_path "${path}"
@@ -36,6 +44,9 @@ while read -r _ path; do
       semanage fcontext -d "$(selinux_path_regex "${path}")" >/dev/null 2>&1 || true
       ;;
   esac
+  if [[ "${path}" == "${network_unit}" && "${preserve_network}" == 1 ]]; then
+    continue
+  fi
   rm -f -- "${path}"
 done <"${MANIFEST_FILE}"
 rm -f -- "${MANIFEST_FILE}"
@@ -48,3 +59,6 @@ else
   note "preserved Podman secrets and the shared-gateway Valkey data volume"
 fi
 note "removed managed shared-gateway files; preserved ${SERVICE_USER} and its linger setting"
+if (( preserve_network )); then
+  note "preserved praxis.network for the managed vLLM service"
+fi

@@ -87,6 +87,15 @@ service_home() {
   getent passwd "${SERVICE_USER}" | awk -F: '{print $6}'
 }
 
+vllm_uses_praxis_network() {
+  local root="${1:-/}" uid="${2:-}" unit state
+  [[ -n "${uid}" ]] || uid="$(service_uid)"
+  unit="${root}/etc/containers/systemd/users/${uid}/praxis-vllm.container"
+  state="${root}/etc/praxis-vllm"
+  [[ -f "${unit}" && -f "${state}/manifest" ]] || return 1
+  grep -q '^Network=praxis.network$' "${unit}"
+}
+
 as_service() {
   local uid home
   uid="$(service_uid)"
