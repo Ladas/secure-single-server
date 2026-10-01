@@ -1,17 +1,73 @@
 # External remote-client acceptance
 
-Run Codex, Claude Code and OpenCode on an ordinary user's **separate client**,
-through HTTPS and a caller JWT to a remote-gateway installation. CPU/GPU refers
-to the gateway's vLLM backend. The runner makes no SSH connection and receives
-no issuer private key or upstream provider key. On-gateway harness passes do
-not qualify this path.
+Test that your locally installed Codex, Claude Code and OpenCode can connect to
+Praxis using its HTTPS URL and your caller JWT. A valid token must let the harness
+complete a small coding task on your machine. Missing, invalid and expired tokens
+must be rejected by the gateway. Provider credentials stay on the server.
 
-The automated subset covers trusted TLS, rejection with an empty CA trust
-store, missing/invalid JWTs, optional signed-expired JWTs, private-port reachability,
-JSON/SSE APIs, native tool execution and independent tests of generated code.
-Interactive selectors, resume, compaction, quota exhaustion/shared quota,
-provider-side model attribution and host reboot remain separate acceptance rows.
-It does not report the entire external-client matrix as passed.
+## Test locally with Podman
+
+Install the pinned CLIs from [client setup](../quickstarts/remote-gateway/users.md#2-prepare-the-client),
+then run from this checkout as your ordinary user. Start the Podman VM on macOS
+if it is stopped:
+
+```console
+podman machine start
+python3 -B tests/remote-client/local.py
+```
+
+On Linux, start the local Podman service as needed; no Podman VM is required.
+The test starts a disposable Praxis gateway with a temporary CA and JWT issuer.
+Only its HTTPS endpoint and test control endpoint are published on loopback.
+The model is a deterministic fixture; no model download or provider key is needed.
+
+The test checks TLS trust and rejects missing, malformed, incorrectly signed,
+expired, wrong-issuer and wrong-audience JWTs on each supported inference API.
+It verifies that denied requests do not reach the model. Each working
+harness/provider pair then uses the same launcher as the remote test, receives
+streamed tool calls, writes a tiny project and runs its tests. Independent
+checks verify the generated function and the recorded model requests.
+
+Use `--provider vllm --harness claude` for a narrower run. `--api-only` runs TLS,
+JWT and inference API checks without starting harnesses. `--valkey` selects that
+gateway storage profile. Private logs and projects stay under
+`.state/local-remote-client-TIMESTAMP/`; owned containers are removed afterward.
+This validates local gateway authentication and client setup before the RHEL run.
+
+### Harness/provider matrix
+
+Every provider includes all three harnesses in the result. Current local results
+use synthetic models behind the real gateway:
+
+| Harness | vLLM | OpenAI | Anthropic |
+| --- | --- | --- | --- |
+| Codex | Passed | Passed | Blocked: Responses-to-Messages translation |
+| Claude Code | Passed | Blocked: Messages-to-OpenAI translation | Passed |
+| OpenCode | Passed | Passed | Passed |
+
+Blocked entries retain their reason in the evidence and are never counted as
+passes. The gateway routes and launcher must integrate the required translation
+before those entries can run. A run with blocked or unrun harnesses reports
+`partial`; `--api-only` reports only the API result and leaves harnesses unrun.
+The same complete matrix is used for RHEL testing.
+
+## Configure your own local harness
+
+For normal use, obtain the HTTPS URL, an approved model ID, your caller JWT and
+any private CA certificate from the administrator. Follow
+[remote user setup](../quickstarts/remote-gateway/users.md) to launch your chosen
+harness with `--url`, `--token-file` and, for a private CA, `--ca-file`.
+The launcher sets the following for local Qwen:
+
+| Harness | Endpoint | Caller JWT configuration |
+| --- | --- | --- |
+| Codex | `https://GATEWAY/vllm/v1`, Responses API | `PRAXIS_PLACEHOLDER_KEY`, referenced by the Praxis provider's `env_key` |
+| Claude Code | `https://GATEWAY/vllm`, Messages API | `ANTHROPIC_AUTH_TOKEN` |
+| OpenCode | `https://GATEWAY/vllm/v1`, Chat Completions API | Praxis provider `apiKey` and `Authorization: Bearer` header |
+
+Files and tools run on your client. The gateway only handles inference.
+The server evidence export below is for automated qualification; ordinary
+harness use needs the connection details and caller token, without that export.
 
 ## Prepare the gateway and client
 
@@ -85,8 +141,8 @@ python3 tests/remote-client/run.py --url "$GATEWAY_URL" \
 ```
 
 For the mock cloud routes, repeat with `--provider openai --model fixture`
-(Codex/OpenCode) and `--provider anthropic --model fixture` (Claude/OpenCode).
-There is no API translation. The local synthetic vLLM fixture serves `qwen3-8b`;
+and `--provider anthropic --model fixture`. Each includes all three harnesses;
+the translation cases above are recorded as blocked. The local synthetic vLLM fixture serves `qwen3-8b`;
 that does not qualify real 8B or 27B inference.
 
 After the administrator installs real Qwen and supplies a fresh evidence JSON,
@@ -101,26 +157,13 @@ redacted CLI logs, isolated homes and generated projects. Results record the
 gateway evidence hash, launcher/runner hashes, CLI versions, durations and
 the exact automated subset. Nonzero exits, timeouts, missing successful tool
 events, empty tests or wrong functions fail qualification. Cancellation stops
-the harness process group. The optional second subject proves a separate
-successful caller request, **not shared-quota semantics**.
+the harness process group. The optional second subject checks that another
+issued caller can also authenticate.
 
-## Complete the remaining matrix
+## Record the RHEL result
 
-| Dimension | Required runs |
-| --- | --- |
-| Gateway/backend | Remote CPU and remote GPU; memory and Valkey recorded separately |
-| Provider/model | Synthetic local and cloud routes first; real 8B/27B recorded separately |
-| Harness | Codex, Claude Code, OpenCode on each supported native route |
-| Configuration | Isolated automated launcher run; separate normal interactive and file-config runs |
-| Model selector | Open `/model` or `/models`, select the approved ID, execute a task and retain actual provider request evidence |
-| Quotas | Two signed subjects share one allowance, exhaustion and recovery, denial between tool calls; follow Q1–Q10 |
-| Lifecycle | Fresh task after gateway restart/reboot; client restart and resume recorded separately |
-
-Use [manual harness acceptance](harnesses.md) and
-[gateway feature testing](gateway-features.md) for the remaining cases. Server
-health, an API model list and a client banner are insufficient to prove actual
-harness request attribution. Retain sanitized provider/backend observations
-beside client results and leave attribution unverified when absent.
-Update only matching [compatibility cells](compatibility.md#remote-gateway)
-after collecting real external-client evidence. No RHEL external-client pass
-is claimed by this implementation or its local TLS/unit tests.
+For each supported harness, record whether the valid JWT completes the tool task,
+which invalid-token cases return `401`, and whether TLS verification succeeds
+with the supplied CA. Repeat the same client setup against the deployed remote
+gateway. Update the [remote-gateway results](compatibility.md#remote-gateway)
+only after that run; local Podman results do not establish RHEL deployment health.

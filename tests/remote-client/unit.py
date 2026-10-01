@@ -24,6 +24,20 @@ spec.loader.exec_module(client)
 
 
 class RemoteTest(unittest.TestCase):
+    def test_full_matrix_keeps_blocked_translation_pairs_visible(self):
+        rows = {provider: client.harness_matrix(provider) for provider in ("vllm", "openai", "anthropic")}
+        for row in rows.values():
+            self.assertEqual(set(row), {"codex", "opencode", "claude"})
+        blocked = {(provider, name) for provider, row in rows.items() for name, value in row.items()
+                   if value["status"] == "blocked"}
+        self.assertEqual(blocked, {("openai", "claude"), ("anthropic", "codex")})
+        for provider, name in blocked:
+            self.assertIn("translation", rows[provider][name]["reason"])
+            result = {"harnesses": rows[provider]}
+            with patch.object(client, "run_captured", side_effect=AssertionError("blocked pair must not launch")):
+                client.run_harnesses((name,), type("Options", (), {"provider": provider})(), {}, None, [], result)
+            self.assertEqual(result["harnesses"][name]["status"], "blocked")
+
     def test_interruption_stops_the_harness_process_group(self):
         with patch.object(client.subprocess.Popen, "communicate", side_effect=[KeyboardInterrupt(), ("", "")]), \
              patch.object(client.os, "killpg", wraps=os.killpg) as killed:

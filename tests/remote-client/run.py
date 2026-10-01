@@ -28,6 +28,16 @@ from contracts import check
 from harness import qwen_limits
 
 BACKEND_PORTS = (8000, 8080, 8081, 9901, 6379, 19000, 19001)
+HARNESSES = ("codex", "opencode", "claude")
+BLOCKED_PAIRS = {
+    ("openai", "claude"): "Messages-to-OpenAI API translation is not configured in this gateway/launcher",
+    ("anthropic", "codex"): "Responses-to-Anthropic API translation is not configured in this gateway/launcher",
+}
+
+
+def harness_matrix(provider):
+    return {name: ({"status": "blocked", "reason": BLOCKED_PAIRS[provider, name]}
+                   if (provider, name) in BLOCKED_PAIRS else {"status": "not-run"}) for name in HARNESSES}
 
 
 def origin(value):
@@ -158,7 +168,7 @@ class Remote:
         with response:
             return response.status, response.read().decode()
 
-    def tls_and_ports(self, fingerprint):
+    def verify_tls(self, fingerprint):
         target = urlsplit(self.url)
         with socket.create_connection((target.hostname, target.port or 443), timeout=10) as raw:
             with self.context.wrap_socket(raw, server_hostname=target.hostname) as tls:
@@ -173,6 +183,10 @@ class Remote:
             pass
         else:
             raise AssertionError("untrusted gateway certificate was accepted")
+
+    def tls_and_ports(self, fingerprint):
+        self.verify_tls(fingerprint)
+        target = urlsplit(self.url)
         for port in BACKEND_PORTS:
             try:
                 connection = socket.create_connection((target.hostname, port), timeout=2)
@@ -183,6 +197,47 @@ class Remote:
             else:
                 connection.close()
                 raise AssertionError(f"private backend/management port {port} is reachable from this client")
+
+
+def run_harnesses(names, args, server, output, tokens, result):
+    versions = json.loads((ROOT / "configs/common/harness-versions.json").read_text())
+    packages = {"codex": "@openai/codex", "claude": "@anthropic-ai/claude-code", "opencode": "opencode-ai"}
+    for name in names:
+        row = harness_matrix(args.provider)[name]
+        if row["status"] == "blocked":
+            result["harnesses"][name] = row
+            print(f"BLOCKED {args.provider}/{name}: {row['reason']}", flush=True)
+            continue
+        print("RUN external client: " + name, flush=True)
+        directory = output / name
+        directory.mkdir(mode=0o700)
+        env = client_environment(output / (name + "-home"))
+        version = run_captured([name, "--version"], env=env, cwd=directory, timeout=30)
+        assert version.returncode == 0 and re.search(r"(?<![\d.])" + re.escape(versions[packages[name]]) + r"(?![\d.])",
+                                                   version.stdout), f"install pinned {name} {versions[packages[name]]}"
+        subprocess.run(["git", "init", "-q", str(directory)], env=env, check=True)
+        command = [sys.executable, str(ROOT / "scripts/common/harness.py"), name, "--provider", args.provider,
+            "--model", args.model, "--url", args.url, "--ca-file", str(args.ca_file.resolve()),
+            "--token-file", str(args.token_file.resolve()), "--prompt", TASK]
+        deadline = (3600 if server.get("inference") == "cpu" else 1800) if args.mode == "real" else 180
+        started = time.monotonic()
+        try:
+            process = run_captured(command, env=env, cwd=directory, timeout=deadline)
+            code, text = process.returncode, process.stdout + process.stderr
+        except subprocess.TimeoutExpired as error:
+            code, text = 124, (error.output or "") + (error.stderr or "")
+        private_write(output / (name + ".log"), redact(text, tokens))
+        result["harnesses"][name] = {"status": "failed", "exit_code": code, "version": version.stdout.strip(),
+            "seconds": round(time.monotonic() - started, 2), "timeout_seconds": deadline,
+            "mode": "isolated noninteractive client home"}
+        assert code == 0, f"{name} failed; inspect its private log"
+        assert (directory / "add.py").is_file() and (directory / "test_add.py").is_file(), f"{name}: missing generated files"
+        assert ran_tests(name, text), f"{name}: no successful unittest tool event"
+        if args.mode == "mock":
+            assert MARKER in text, f"{name}: missing tool continuation"
+        verify_project(directory, env)
+        result["harnesses"][name]["status"] = "passed"
+        print("PASS external client: " + name, flush=True)
 
 
 def main():
@@ -216,12 +271,7 @@ def main():
                 parser.error("the second caller must have a distinct subject")
             tokens.append(value)
             extra[kind] = value
-    names = {"vllm": ("codex", "opencode", "claude"), "openai": ("codex", "opencode"),
-             "anthropic": ("claude", "opencode")}[args.provider]
-    if args.harness:
-        if args.harness not in names:
-            parser.error("unsupported native harness/provider API pair")
-        names = (args.harness,)
+    names = (args.harness,) if args.harness else HARNESSES
     output = (args.output or ROOT / ".state" / ("external-client-" + str(time.time_ns()))).resolve()
     output.mkdir(mode=0o700, parents=True)
     result = {"status": "running", "url": args.url, "mode": args.mode, "provider": args.provider, "model": args.model,
@@ -229,8 +279,8 @@ def main():
               "launcher_sha256": hashlib.sha256((ROOT / "scripts/common/harness.py").read_bytes()).hexdigest(),
               "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               "client": {"system": platform.system(), "machine_id_sha256": machine_id(), "uid": os.geteuid()},
-              "checks": {}, "harnesses": {}, "not_run": ["interactive-menus", "resume", "compaction", "quota-exhaustion",
-                    "shared-quota-across-subjects", "server-reboot", "provider-request-model-attribution"]}
+              "scope": "gateway JWT authentication and native client tool task",
+              "checks": {}, "harnesses": harness_matrix(args.provider), "not_run": []}
     remote = Remote(args.url, args.ca_file.resolve(), token, args.provider, args.model, args.mode == "real")
     try:
         remote.tls_and_ports(server["tls_leaf_sha256"])
@@ -271,40 +321,9 @@ def main():
                 else:
                     check(path, payload, stream, model=args.model)
                 result["checks"][f"{path}:stream={stream}"] = "passed"
-        versions = json.loads((ROOT / "configs/common/harness-versions.json").read_text())
-        packages = {"codex": "@openai/codex", "claude": "@anthropic-ai/claude-code", "opencode": "opencode-ai"}
-        for name in names:
-            print("RUN external client: " + name, flush=True)
-            directory = output / name
-            directory.mkdir(mode=0o700)
-            env = client_environment(output / (name + "-home"))
-            version = run_captured([name, "--version"], env=env, cwd=directory, timeout=30)
-            assert version.returncode == 0 and re.search(r"(?<![\d.])" + re.escape(versions[packages[name]]) + r"(?![\d.])",
-                                                       version.stdout), f"install pinned {name} {versions[packages[name]]}"
-            subprocess.run(["git", "init", "-q", str(directory)], env=env, check=True)
-            command = [sys.executable, str(ROOT / "scripts/common/harness.py"), name, "--provider", args.provider,
-                "--model", args.model, "--url", args.url, "--ca-file", str(args.ca_file.resolve()),
-                "--token-file", str(args.token_file.resolve()), "--prompt", TASK]
-            deadline = (3600 if server.get("inference") == "cpu" else 1800) if args.mode == "real" else 180
-            started = time.monotonic()
-            try:
-                process = run_captured(command, env=env, cwd=directory, timeout=deadline)
-                code, text = process.returncode, process.stdout + process.stderr
-            except subprocess.TimeoutExpired as error:
-                code, text = 124, (error.output or "") + (error.stderr or "")
-            private_write(output / (name + ".log"), redact(text, tokens))
-            result["harnesses"][name] = {"status": "failed", "exit_code": code, "version": version.stdout.strip(),
-                "seconds": round(time.monotonic() - started, 2), "timeout_seconds": deadline,
-                "mode": "isolated noninteractive client home"}
-            assert code == 0, f"{name} failed; inspect its private log"
-            assert (directory / "add.py").is_file() and (directory / "test_add.py").is_file(), f"{name}: missing generated files"
-            assert ran_tests(name, text), f"{name}: no successful unittest tool event"
-            if args.mode == "mock":
-                assert MARKER in text, f"{name}: missing tool continuation"
-            verify_project(directory, env)
-            result["harnesses"][name]["status"] = "passed"
-            print("PASS external client: " + name, flush=True)
-        result["status"] = "passed-automated-subset"
+        run_harnesses(names, args, server, output, tokens, result)
+        result["status"] = ("passed-automated-subset" if all(row["status"] == "passed" for row in result["harnesses"].values())
+                            else "partial")
     except BaseException as error:
         result["status"] = "failed"
         result["error"] = redact(str(error), tokens)

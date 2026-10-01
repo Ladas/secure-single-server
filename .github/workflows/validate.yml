@@ -88,6 +88,10 @@ jobs:
         env:
           CONTAINER_ENGINE: docker
         run: python3 tests/mocked-provider.py --suite gateways
+      - name: Local client HTTPS and JWT authentication against Praxis
+        env:
+          CONTAINER_ENGINE: docker
+        run: python3 -B tests/remote-client/local.py --api-only
       - name: Upload redacted test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
