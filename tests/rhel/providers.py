@@ -33,7 +33,7 @@ class ProvidersTest(unittest.TestCase):
 
     def test_provider_update_refuses_to_reset_an_existing_custom_configuration(self):
         template = source("all-in-one")
-        state = {"vllm": True, "openai_secret": "", "anthropic_secret": ""}
+        state = {"vllm": True, "vllm_endpoint": "", "openai_secret": "", "anthropic_secret": ""}
         installed = providers.render(template, vllm=True, openai=False, anthropic=False)
         installed["admin"]["address"] = "127.0.0.1:9999"
         with self.assertRaisesRegex(ValueError, "matching checkout"):
@@ -42,13 +42,13 @@ class ProvidersTest(unittest.TestCase):
 
     def test_unchanged_provider_state_does_not_require_restart(self):
         template = source("all-in-one")
-        state = {"vllm": True, "openai_secret": "", "anthropic_secret": ""}
+        state = {"vllm": True, "vllm_endpoint": "", "openai_secret": "", "anthropic_secret": ""}
         installed = providers.render(template, vllm=True, openai=False, anthropic=False)
         self.assertIsNone(manager.updated_config(template, installed, state, state.copy()))
 
     def test_legacy_cloud_configuration_can_add_qwen_without_changing_listeners(self):
         template = source("all-in-one")
-        state = {"vllm": False, "openai_secret": "openai-key", "anthropic_secret": "anthropic-key"}
+        state = {"vllm": False, "vllm_endpoint": "", "openai_secret": "openai-key", "anthropic_secret": "anthropic-key"}
         result = manager.updated_config(template, template, state, {**state, "vllm": True}, legacy=True)
         self.assertEqual(result["listeners"], template["listeners"])
 
@@ -69,6 +69,56 @@ class ProvidersTest(unittest.TestCase):
                 stripped = next(f["request_remove"] for f in filters if f["filter"] == "headers")
                 self.assertIn("Authorization", stripped)
                 self.assertIn("X-Api-Key", stripped)
+
+    def test_remote_qwen_uses_exactly_one_private_upstream(self):
+        template = source("all-in-one")
+        endpoint = "10.0.1.10:8000"
+        config = providers.render(template, vllm=True, openai=False, anthropic=False,
+                                  vllm_endpoint=endpoint)
+        cluster = next(cluster for filter in config["filter_chains"][0]["filters"]
+                      if filter["filter"] == "load_balancer" for cluster in filter["clusters"]
+                      if cluster["name"] == "vllm")
+        self.assertEqual(cluster, {"name": "vllm", "endpoints": [endpoint],
+                                   "http": {"authority": endpoint}})
+        state = {"vllm": False, "vllm_endpoint": "", "openai_secret": "openai-key", "anthropic_secret": ""}
+        selected = {**state, "vllm": True, "vllm_endpoint": endpoint}
+        expected = providers.render(template, vllm=True, openai=True, anthropic=False,
+                                    vllm_endpoint=endpoint)
+        installed = providers.render(template, vllm=False, openai=True, anthropic=False)
+        self.assertEqual(manager.updated_config(template, installed, state, selected), expected)
+        with self.assertRaises(ValueError):
+            providers.render(template, vllm=False, openai=True, anthropic=False,
+                             vllm_endpoint=endpoint)
+        with self.assertRaises(ValueError):
+            providers.render(template, vllm=True, openai=False, anthropic=False,
+                             vllm_endpoint="http://10.0.1.10:8000")
+        with self.assertRaises(ValueError):
+            providers.render(template, vllm=True, openai=False, anthropic=False,
+                             vllm_endpoint="vllm.internal:8000")
+        with self.assertRaises(ValueError):
+            providers.render(template, vllm=True, openai=False, anthropic=False,
+                             vllm_endpoint="8.8.8.8:8000")
+        with self.assertRaises(ValueError):
+            providers.render(template, vllm=True, openai=False, anthropic=False,
+                             vllm_endpoint="10.010.1.10:8000")
+
+    def test_explicit_empty_remote_endpoints_fail_instead_of_using_local_vllm(self):
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/common/provider_config.py"),
+                                 "--directory", "/unused", "--vllm", "--vllm-endpoint", ""],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("vllm endpoint must be RFC1918_IP:PORT", result.stderr)
+
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/common/provider_manage.py"),
+                                 "enable", "vllm", "--vllm-endpoint", ""],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("vllm endpoint must be RFC1918_IP:PORT", result.stderr)
+
+        result = subprocess.run(["bash", str(ROOT / "scripts/common/install"),
+                                 "--vllm-endpoint", ""], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--vllm-endpoint requires RFC1918_IP:PORT", result.stderr)
 
     def test_add_clouds_independently_keeps_qwen_and_valkey_namespaces(self):
         original = source("remote-gateway")

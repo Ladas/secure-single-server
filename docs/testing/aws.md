@@ -12,6 +12,8 @@ and journal. They can run at the same time. AWS deployment prepares the host;
 | `remote-gateway-cpu` | Remote HTTPS/JWT clients | CPU: `m7i.4xlarge`, 64 GiB RAM, 100 GiB disk |
 | `all-in-one-cloud` | Local users, external providers only | No vLLM: `m7i.2xlarge`, 32 GiB RAM, 50 GiB disk |
 | `remote-gateway-cloud` | Remote clients, external providers only | No vLLM: `m7i.2xlarge`, 32 GiB RAM, 50 GiB disk |
+| `vllm-server-gpu` | Separate Qwen inference server | GPU: `g6.2xlarge`, L4, 32 GiB RAM, 200 GiB disk |
+| `vllm-server-cpu` | Separate Qwen inference server | CPU: `m7i.4xlarge`, 64 GiB RAM, 100 GiB disk |
 
 ## Model and context sizing
 
@@ -300,6 +302,49 @@ aws_test_deploy remote-gateway-cloud "${REMOTE_GATEWAY_CLOUD_VM[@]}" \
   || printf 'Deploy stopped; inspect its journal before retrying.\n'
 ```
 
+### Separate vLLM server
+
+Deploy a no-vLLM gateway VM first, then one dedicated inference VM. The
+gateway and inference VM must use the same subnet/VPC. The grant helper adds
+only a TCP 8000 security-group rule whose source is the gateway VM's security
+group; it does not expose vLLM to the Internet.
+
+```console
+VLLM_SERVER_GPU_VM=(configs/aws/vllm-gpu.json --scenario vllm-server "${ALL_IN_ONE_ACCESS[@]}")
+aws_test_plan vllm-server-gpu "${VLLM_SERVER_GPU_VM[@]}" \
+  || printf 'Plan failed; correct the error before deploying.\n'
+```
+
+```console
+aws_test_deploy vllm-server-gpu "${VLLM_SERVER_GPU_VM[@]}" \
+  || printf 'Deploy stopped; inspect its journal before retrying.\n'
+```
+
+After both VMs are running, select the gateway VM, review the read-only grant
+plan, and apply it with typed confirmation:
+
+```console
+aws_test_verify all-in-one-cloud \
+  || printf 'Gateway verification failed; do not grant vLLM access.\n'
+aws_test_vllm_grant all-in-one-cloud vllm-server-gpu \
+  || printf 'Grant plan failed; inspect both journals.\n'
+aws_test_vllm_grant_apply all-in-one-cloud vllm-server-gpu \
+  || printf 'Grant failed; no endpoint was configured.\n'
+VLLM_INFO="$(aws_test_vllm_endpoint vllm-server-gpu)" \
+  || printf 'Endpoint discovery failed; inspect the vLLM VM.\n'
+VLLM_ENDPOINT="$(printf '%s' "${VLLM_INFO:-}" | jq -er '.VllmEndpoint')" \
+  || printf 'Endpoint JSON was invalid.\n'
+printf 'Private vLLM endpoint: %s\n' "${VLLM_ENDPOINT:-unknown}"
+```
+
+The endpoint command prints the tagged instance's private IPv4 address as
+`VllmEndpoint`. It refuses ambiguous matches and rejects any vLLM security
+group with public IPv4/IPv6 ingress on port 8000. Configure the dedicated VM
+with [the vLLM administration guide](../quickstarts/common/vllm.md), using
+`--remote` and the printed private IP. Configure the gateway with
+`--vllm-endpoint "$VLLM_ENDPOINT"`. For the bootc/OpenShell path, run
+`sudo sss-bootc inference remote-vllm "$VLLM_ENDPOINT"` instead.
+
 ## Share deployed VM details
 
 To hand testing over, copy this block into the same workstation terminal and
@@ -311,7 +356,7 @@ credentials or private key contents. Keep your SSH key unlocked with `ssh-add`.
   printf 'AWS account: %s\nRegion: %s\nRun prefix: %s\n' "$ACCOUNT" "$REGION" "$RUN_PREFIX"
   found=no
   for VM_NAME in all-in-one-gpu all-in-one-cpu remote-gateway-gpu remote-gateway-cpu \
-    all-in-one-cloud remote-gateway-cloud; do
+    all-in-one-cloud remote-gateway-cloud vllm-server-gpu vllm-server-cpu; do
     if [ -f "$AWS_TEST_REPO/.state/$RUN_PREFIX-$VM_NAME.json" ]; then
       found=yes
       aws_test_verify "$VM_NAME" || printf 'UNVERIFIED: %s; inspect before testing.\n' "$VM_NAME"
@@ -352,9 +397,10 @@ aws_test_verify all-in-one-cloud || printf 'Verify failed; do not continue to te
 aws_test_verify remote-gateway-cloud || printf 'Verify failed; do not continue to testing.\n'
 ```
 
-A successful verify sets `RHEL_HOST`, `RHEL_SCENARIO` and `RHEL_INFERENCE` from
-that VM's launch record. All following guides use those three variables and
-`SSH_KEY`. No per-host variables or edits to the test commands are needed.
+A successful verify sets `RHEL_HOST`, `RHEL_SCENARIO`, `RHEL_INFERENCE` and
+`RHEL_VPC_ID` from that VM's launch record. All following guides use those
+variables and `SSH_KEY`. No per-host variables or edits to the test commands
+are needed.
 If the VM is still pending, wait and rerun verify. Do not continue after a failure.
 
 Verify the host fingerprint through a trusted channel and connect once:

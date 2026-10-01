@@ -16,6 +16,11 @@ or Podman VM cannot reach the Python mock server's host loopback. Ports 8000,
 
 ```console
 python3 bootc/tests/vllm-lock.py
+python3 bootc/tests/inference.py
+python3 tests/aws/plan.py
+python3 tests/aws/session.py
+python3 tests/rhel/providers.py
+python3 tests/rhel/vllm.py
 CONTAINER_ENGINE=docker python3 bootc/tests/inference-image.py
 ```
 

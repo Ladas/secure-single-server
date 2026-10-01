@@ -49,7 +49,7 @@ _aws_test_vm() {
     elif [ "$MODE" = missing_metadata ]; then
       printf '%s\\n' '{"State":"running","PublicIpAddress":"192.0.2.8"}'
     else
-      printf '%s\\n' '{"State":"running","PublicIpAddress":"192.0.2.8","Scenario":"remote-gateway","Inference":"cpu"}'
+      printf '%s\\n' '{"State":"running","PublicIpAddress":"192.0.2.8","VpcId":"vpc-test","Scenario":"remote-gateway","Inference":"cpu"}'
     fi
   fi
 }
@@ -147,8 +147,10 @@ printf 'SHELL_ALIVE\\n'
 
     def test_vm_role_is_independent_of_inference_config(self):
         for shell in SHELLS:
-            for name in ("all-in-one", "remote-gateway"):
-                for config in ("no-vllm", "vllm-cpu", "vllm-gpu"):
+            for name, configs in (("all-in-one", ("no-vllm", "vllm-cpu", "vllm-gpu")),
+                                  ("remote-gateway", ("no-vllm", "vllm-cpu", "vllm-gpu")),
+                                  ("vllm-server", ("vllm-cpu", "vllm-gpu"))):
+                for config in configs:
                     with self.subTest(shell=shell, name=name, config=config):
                         output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + f"""
 ACCOUNT=123456789012 SUBNET=subnet-a CLIENT_CIDR=192.0.2.7/32 AWS_TEST_READY=ready
@@ -159,6 +161,49 @@ printf 'SHELL_ALIVE\\n'
                         self.assertEqual(output.count("VM_CALL:plan"), 1)
                         self.assertIn("--scenario " + name, output)
                         self.assertIn("--prefix gateway-test-" + name, output)
+
+    def test_vllm_helpers_target_one_client_and_one_server(self):
+        for shell in SHELLS:
+            output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
+ACCOUNT=123456789012 AWS_TEST_CREDENTIALS=ready REGION=eu-central-1 RUN_PREFIX=gateway-test
+if aws_test_vllm_grant all-in-one vllm-server; then printf 'GRANT_PLAN_OK\n'; fi
+if aws_test_vllm_grant_apply all-in-one vllm-server; then printf 'GRANT_APPLY_OK\n'; fi
+RHEL_VPC_ID=vpc-test
+if aws_test_vllm_endpoint vllm-server; then printf 'ENDPOINT_OK\n'; fi
+printf 'SHELL_ALIVE\n'
+""")
+            self.assertIn("GRANT_PLAN_OK", output)
+            self.assertIn("GRANT_APPLY_OK", output)
+            self.assertIn("ENDPOINT_OK", output)
+            self.assertEqual(output.count("VM_CALL:vllm-grant"), 2)
+            self.assertEqual(output.count("--client-state-file"), 2)
+            self.assertEqual(output.count("--vllm-state-file"), 2)
+            self.assertEqual(output.count("--apply"), 1)
+            self.assertEqual(output.count("VM_CALL:vllm-endpoint"), 1)
+            self.assertIn("--vllm-prefix gateway-test-vllm-server", output)
+            self.assertIn("--client-vpc-id vpc-test", output)
+
+    def test_vllm_helpers_require_the_recorded_account(self):
+        for shell in SHELLS:
+            output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
+unset ACCOUNT
+if aws_test_vllm_grant all-in-one vllm-server; then printf 'UNEXPECTED_GRANT\\n'; fi
+if aws_test_vllm_endpoint vllm-server; then printf 'UNEXPECTED_ENDPOINT\\n'; fi
+printf 'SHELL_ALIVE\\n'
+""")
+            self.assertNotIn("VM_CALL:", output)
+            self.assertIn("Discover or set the recorded account first.", output)
+
+    def test_vllm_helpers_reject_extra_arguments(self):
+        for shell in SHELLS:
+            output = self.run_shell(shell, "set -eu\nMODE=normal\n" + SETUP + """
+ACCOUNT=123456789012 AWS_TEST_CREDENTIALS=ready REGION=eu-central-1 RUN_PREFIX=gateway-test
+if aws_test_vllm_grant all-in-one vllm-server extra; then printf 'UNEXPECTED_GRANT\\n'; fi
+if aws_test_vllm_endpoint vllm-server extra; then printf 'UNEXPECTED_ENDPOINT\\n'; fi
+printf 'SHELL_ALIVE\\n'
+""")
+            self.assertNotIn("VM_CALL:", output)
+            self.assertNotIn("UNEXPECTED_", output)
 
     def test_canonical_vm_names_cannot_be_given_another_role(self):
         for shell in SHELLS:
@@ -443,6 +488,7 @@ ALL_IN_ONE_GPU_VM=(configs/aws/vllm-gpu.json --scenario all-in-one)
 ALL_IN_ONE_CPU_VM=(configs/aws/vllm-cpu.json --scenario all-in-one)
 REMOTE_GATEWAY_CPU_VM=(configs/aws/vllm-cpu.json --scenario remote-gateway)
 REMOTE_GATEWAY_GPU_VM=(configs/aws/vllm-gpu.json --scenario remote-gateway)
+VLLM_SERVER_GPU_VM=(configs/aws/vllm-gpu.json --scenario vllm-server)
 ALL_IN_ONE_CLOUD_VM=(configs/aws/no-vllm.json --scenario all-in-one)
 REMOTE_GATEWAY_CLOUD_VM=(configs/aws/no-vllm.json --scenario remote-gateway)
 ALL_IN_ONE_ACCESS=(--ssh-access restricted)

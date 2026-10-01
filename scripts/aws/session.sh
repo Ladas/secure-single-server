@@ -32,7 +32,7 @@ aws_test_credentials() {
   set +x
   set +a
   local test_access='' test_secret='' test_token=''
-  unset AWS_TEST_CREDENTIALS AWS_TEST_READY AWS_TEST_PLAN_INPUTS RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE ALL_IN_ONE_HOST REMOTE_GATEWAY_HOST REMOTE_HOST OPENSHELL_HOST
+  unset AWS_TEST_CREDENTIALS AWS_TEST_READY AWS_TEST_PLAN_INPUTS RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE RHEL_VPC_ID ALL_IN_ONE_HOST REMOTE_GATEWAY_HOST REMOTE_HOST OPENSHELL_HOST
   unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
   _aws_test_prompt test_access 'AWS access key ID' || return 1
   if [ -z "$test_access" ]; then
@@ -66,7 +66,7 @@ _aws_test_identity_ready() {
 
 aws_test_discover() {
   local test_tool test_identity test_principal test_subnets test_ip test_subnet test_cidr
-  unset AWS_TEST_READY AWS_TEST_PLAN_INPUTS ACCOUNT RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE ALL_IN_ONE_HOST REMOTE_GATEWAY_HOST REMOTE_HOST OPENSHELL_HOST
+  unset AWS_TEST_READY AWS_TEST_PLAN_INPUTS ACCOUNT RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE RHEL_VPC_ID ALL_IN_ONE_HOST REMOTE_GATEWAY_HOST REMOTE_HOST OPENSHELL_HOST
   _aws_test_identity_ready || return 1
   for test_tool in aws python3 jq curl ssh ssh-keygen; do
     command -v "$test_tool" >/dev/null 2>&1 || {
@@ -188,11 +188,11 @@ _aws_test_launch() {
     esac
   done
   case "$test_scenario" in
-    all-in-one|remote-gateway|openshell-praxis) ;;
-    *) _aws_test_error 'Supply --scenario all-in-one, remote-gateway or openshell-praxis; hardware presets do not choose the role.'; return 1 ;;
+    all-in-one|remote-gateway|openshell-praxis|vllm-server) ;;
+    *) _aws_test_error 'Supply --scenario all-in-one, remote-gateway, openshell-praxis or vllm-server; hardware presets do not choose the role.'; return 1 ;;
   esac
   case "$test_name" in
-    all-in-one|remote-gateway|openshell-praxis)
+    all-in-one|remote-gateway|openshell-praxis|vllm-server)
       if [ "$test_name" != "$test_scenario" ]; then
         _aws_test_error "VM name $test_name must use --scenario $test_name."
         return 1
@@ -230,8 +230,8 @@ aws_test_apply() {
 }
 
 aws_test_verify() {
-  local test_name=${1:-} test_info test_ip test_scenario test_inference
-  unset RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE
+  local test_name=${1:-} test_info test_ip test_scenario test_inference test_vpc
+  unset RHEL_HOST RHEL_SCENARIO RHEL_INFERENCE RHEL_VPC_ID
   _aws_test_identity_ready || return 1
   _aws_test_name "$test_name" || return 1
   if [ "$#" -ne 1 ]; then _aws_test_error 'Verify takes exactly one VM name.'; return 1; fi
@@ -243,14 +243,54 @@ aws_test_verify() {
     _aws_test_error "$test_name must be running with a public IP; wait and rerun verify."
     return 1
   }
-  test_scenario=$(printf '%s' "$test_info" | jq -er '.Scenario | select(. == "all-in-one" or . == "remote-gateway" or . == "openshell-praxis")') || return 1
+  test_scenario=$(printf '%s' "$test_info" | jq -er '.Scenario | select(. == "all-in-one" or . == "remote-gateway" or . == "openshell-praxis" or . == "vllm-server")') || return 1
   test_inference=$(printf '%s' "$test_info" | jq -er '.Inference | select(. == "cpu" or . == "gpu" or . == "none")') || return 1
+  test_vpc=$(printf '%s' "$test_info" | jq -er '.VpcId | select(. != null)') || return 1
   RHEL_HOST="ec2-user@$test_ip"
   RHEL_SCENARIO="$test_scenario"
   RHEL_INFERENCE="$test_inference"
+  RHEL_VPC_ID="$test_vpc"
   printf '%s login: %s\nJournal: %s/.state/%s-%s.json\nSSH key: %s\n' \
     "$test_name" "$RHEL_HOST" "$AWS_TEST_REPO" "$RUN_PREFIX" "$test_name" "${SSH_KEY:-not set}"
-  printf 'Selected for testing: %s / %s inference (RHEL_HOST, RHEL_SCENARIO, RHEL_INFERENCE).\n' "$RHEL_SCENARIO" "$RHEL_INFERENCE"
+  printf 'Selected for testing: %s / %s inference (RHEL_HOST, RHEL_SCENARIO, RHEL_INFERENCE, RHEL_VPC_ID).\n' "$RHEL_SCENARIO" "$RHEL_INFERENCE"
+}
+
+_aws_test_vllm_grant() {
+  local test_mode=$1 test_client=${2:-} test_vllm=${3:-vllm-server}
+  if [ "$#" -gt 3 ]; then _aws_test_error 'vLLM grant takes CLIENT [VLLM_SERVER].'; return 1; fi
+  _aws_test_identity_ready || return 1
+  if [ -z "${ACCOUNT:-}" ]; then _aws_test_error 'Discover or set the recorded account first.'; return 1; fi
+  _aws_test_name "$test_client" || return 1
+  _aws_test_name "$test_vllm" || return 1
+  if [ "$test_client" = "$test_vllm" ]; then
+    _aws_test_error 'Client and vLLM VM names must differ.'
+    return 1
+  fi
+  local test_args=(vllm-grant --region "$REGION" --account-id "$ACCOUNT"
+    --client-state-file "$AWS_TEST_REPO/.state/$RUN_PREFIX-$test_client.json"
+    --vllm-state-file "$AWS_TEST_REPO/.state/$RUN_PREFIX-$test_vllm.json")
+  if [ "$test_mode" = apply ]; then test_args+=(--apply); fi
+  _aws_test_vm "${test_args[@]}"
+}
+
+aws_test_vllm_grant() {
+  _aws_test_vllm_grant plan "$@"
+}
+
+aws_test_vllm_grant_apply() {
+  _aws_test_vllm_grant apply "$@"
+}
+
+aws_test_vllm_endpoint() {
+  local test_vllm=${1:-vllm-server}
+  if [ "$#" -gt 1 ]; then _aws_test_error 'vLLM endpoint takes [VLLM_SERVER].'; return 1; fi
+  _aws_test_identity_ready || return 1
+  if [ -z "${ACCOUNT:-}" ]; then _aws_test_error 'Discover or set the recorded account first.'; return 1; fi
+  _aws_test_name "$test_vllm" || return 1
+  local test_args=(vllm-endpoint --region "$REGION" --account-id "$ACCOUNT"
+    --vllm-prefix "$RUN_PREFIX-$test_vllm")
+  if [ -n "${RHEL_VPC_ID:-}" ]; then test_args+=(--client-vpc-id "$RHEL_VPC_ID"); fi
+  _aws_test_vm "${test_args[@]}"
 }
 
 aws_test_ssh() {

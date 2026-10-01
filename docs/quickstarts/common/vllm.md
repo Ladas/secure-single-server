@@ -1,7 +1,9 @@
 # vLLM administration on RHEL
 
 Install private Qwen inference on CPU or one NVIDIA L4, with cloud providers optional.
-The administrator manages inference; ordinary users run their own harnesses.
+The preferred topology places vLLM on a separate server and gives Praxis a
+private `RFC1918_IP:PORT` upstream. The older co-located container-network mode
+remains available for compatibility but is deprecated for new deployments.
 
 ## Requirements
 
@@ -13,9 +15,9 @@ gateway or reuses an installed memory/Valkey profile. Choose one backend:
   the 8B preset accepts 32 GiB, with 64 GiB recommended.
 
 The installer pins the vLLM image and model revision, preserves downloaded
-weights in the service account's cache, and keeps port 8000 on Praxis's private
-container network. One model runs at a time; changing the model restarts only
-vLLM. Existing Praxis routes and cloud providers are retained.
+weights in the service account's cache, and binds remote mode only to the
+selected private IPv4 address. One model runs at a time; changing the model
+restarts only vLLM. Existing Praxis routes and cloud providers are retained.
 
 | Model option | Weights and template | Intended use |
 | --- | --- | --- |
@@ -49,8 +51,10 @@ quantized model size alone is not a RAM/VRAM requirement.
 
 ## 1. Transfer the deployment files
 
-From the reviewed checkout in a Bash or zsh workstation shell, select the administrator login
-and key. Leave the key blank to use your SSH configuration or agent:
+From the reviewed checkout in a Bash or zsh workstation shell, select the
+administrator login and key. Leave the key blank to use your SSH configuration
+or agent. For separate servers, repeat this transfer on the gateway host and
+the vLLM host:
 
 ```console
 printf 'RHEL administrator login (user@host): '
@@ -81,18 +85,23 @@ cd ~/secure-single-server-deploy
 
 ## 2. Prepare Praxis
 
-Install host dependencies:
+Install host dependencies on the gateway host and, for separate-server mode,
+on the vLLM host:
 
 ```console
 sudo dnf install -y podman python3 python3-pyyaml openssl policycoreutils-python-utils jq curl
 ```
+
+On a dedicated vLLM host, run only the preparation command below and do not
+install the gateway. On the gateway host, continue with the selected gateway
+installation.
 
 Skip gateway creation if Praxis is already installed. For a new **all-in-one**
 gateway with memory quotas:
 
 ```console
 sudo scripts/all-in-one/install --prepare
-sudo scripts/all-in-one/install --profile memory --vllm
+sudo scripts/all-in-one/install --profile memory --vllm-endpoint "$VLLM_ENDPOINT"
 ```
 
 For persistent all-in-one quotas, use the [Valkey profile](../all-in-one/valkey.md)
@@ -100,7 +109,7 @@ with `--vllm` instead of `--openai-secret` / `--anthropic-secret`. The three
 Valkey arguments remain required.
 
 For **remote-gateway**, follow [gateway installation](../remote-gateway/install.md)
-and select its local Qwen option. It prepares TLS/JWT and the private gateway
+and select its Qwen option. It prepares TLS/JWT and the private gateway
 before you install inference here. No cloud key is required for Qwen.
 
 ## 3. Install one backend
@@ -128,13 +137,18 @@ Then install on the matching hardware:
 
 ```console
 # GPU:
-sudo scripts/vllm/install --model "$VLLM_MODEL" gpu
+sudo scripts/vllm/install --model "$VLLM_MODEL" --remote "$VLLM_PRIVATE_IP" gpu
 ```
 
 ```console
 # CPU:
-sudo scripts/vllm/install --model "$VLLM_MODEL" cpu
+sudo scripts/vllm/install --model "$VLLM_MODEL" --remote "$VLLM_PRIVATE_IP" cpu
 ```
+
+On AWS, obtain `VLLM_PRIVATE_IP` and `VLLM_ENDPOINT` from
+[the private endpoint helper](../../testing/aws.md#separate-vllm-server). The
+helper requires the dedicated instance to carry the launcher's ownership and
+`vllm-server` tags, and it rejects public port-8000 ingress.
 
 To switch back, repeat with `VLLM_MODEL=qwen3-8b`. The old weights remain cached.
 The model is selected during application installation; AWS VM configuration
@@ -150,9 +164,13 @@ If Praxis was installed without Qwen, enable its routes using the matching
 checkout:
 
 ```console
-sudo scripts/common/providers enable vllm
+sudo scripts/common/providers enable vllm --vllm-endpoint "$VLLM_ENDPOINT"
 sudo scripts/common/verify --host
 ```
+
+Omit `--vllm-endpoint` only for the deprecated co-located mode. The provider
+change is transactional and retains the existing gateway identity, secrets and
+quota state.
 
 Optionally [add OpenAI and Anthropic](providers.md) without replacing Qwen.
 For all-in-one, [create ordinary user logins](../all-in-one/accounts.md) and

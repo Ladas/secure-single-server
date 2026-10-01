@@ -9,17 +9,18 @@ consume a shared model.
 This repository shows how to run those agents on one administrator-managed RHEL
 server without giving them that unrestricted power. The harness keeps the
 developer experience. OpenShell constrains tools and network access. Praxis owns
-model routing and shared usage. vLLM supplies an approved local model. bootc
+model routing and shared usage. A separate vLLM server can supply an approved
+private model. bootc
 makes the host reproducible and rollback-capable.
 
 Start with the [architecture value walkthrough](docs/quickstarts/architecture-walkthrough/README.md).
 It follows the validated **OpenCode → Praxis → vLLM** path, shows the commands
 that prove each boundary, and states what is not yet qualified.
 
-The environment brings together **harnesses, OpenShell, Praxis, and local or
-cloud inference**. bootc packages the host setup into an updatable OS image.
-The validated local example runs OpenCode through Praxis against Qwen3-8B in a
-vLLM container, using either CPU or a single NVIDIA L4.
+The environment brings together **harnesses, OpenShell, Praxis, and separate
+private or cloud inference**. bootc packages the host setup into an updatable OS
+image. The preferred example runs OpenCode through Praxis against Qwen3-8B in
+vLLM on a separate CPU or single-NVIDIA-L4 server.
 
 ## How the pieces fit
 
@@ -28,12 +29,12 @@ vLLM container, using either CPU or a single NVIDIA L4.
 | **Harnesses** | Provide the coding-agent experience: prompts, model interactions, and tool calls. Recipes cover several harnesses; supported integrations differ. |
 | **OpenShell** | Runs the harness and tools inside a sandbox with declarative filesystem and network policies. |
 | **Praxis** | Routes model requests and applies shared request and token limits. Cloud profiles keep provider credentials at the gateway. |
-| **Inference backend** | Supplies the model: optional containerized vLLM for local Qwen3-8B, or a cloud provider through a separate Praxis profile. |
+| **Inference backend** | Supplies the model: optional vLLM for Qwen3-8B on a separate private server, or a cloud provider through a separate Praxis profile. |
 | **bootc** | Packages service setup and the selected harness configuration into a reviewed RHEL OS image, with image-based updates and OS rollback. |
 
 Two paths meet at the harness: tools execute within OpenShell's policies, while
-model requests travel through Praxis. The diagram shows the validated local
-path and the separate cloud-profile option:
+model requests travel through Praxis. The diagram shows the preferred separate
+vLLM path and the separate cloud-profile option:
 
 ```mermaid
 flowchart LR
@@ -44,17 +45,17 @@ flowchart LR
             H -->|Tool execution| T
         end
         P["Praxis container<br/>Shared request and token limits<br/>127.0.0.1:8080"]
-        V["vLLM container<br/>Qwen3-8B: CPU or NVIDIA L4<br/>127.0.0.1:8000"]
         H -->|Policy-permitted model requests| P
-        P -->|Local inference profile| V
     end
+    V["Separate vLLM server<br/>Qwen3-8B: CPU or NVIDIA L4<br/>Private AWS address:8000"]
+    P -->|Private vLLM profile| V
     P -. Separate cloud profile .-> Provider["Cloud model provider"]
 ```
 
-The local profile permits sandbox inference traffic only to Praxis. Direct
+The vLLM profile permits sandbox inference traffic only to Praxis. Direct
 vLLM and cloud-provider access are denied, and there is no cloud fallback.
-CPU and GPU are alternative vLLM modes. OpenCode is the validated harness for
-this local path; Codex and OpenClaw local adapters are not enabled.
+OpenCode is the recorded harness for this path; Codex and OpenClaw adapters are
+not enabled.
 
 Pinned workload containers are pulled on first boot and cached across reboots.
 Credentials, model caches, and workspace data stay outside the OS image.
@@ -65,8 +66,8 @@ or sandbox workspaces.
 
 | Workflow | Where the harness and tools run | Guide |
 | --- | --- | --- |
-| RHEL with Qwen and optional cloud providers | Ordinary user accounts on all-in-one, or remote clients; CPU/GPU selected independently | [Install local inference](docs/quickstarts/common/vllm.md), then [add providers](docs/quickstarts/common/providers.md) |
-| Sandboxed agents with local inference | OpenShell on a bootc-managed server; Praxis routes to CPU or NVIDIA L4 vLLM | [Local Qwen3-8B example](bootc/VLLM.md) |
+| RHEL with Qwen and optional cloud providers | Ordinary user accounts on all-in-one, or remote clients; CPU/GPU selected independently | [Install Qwen inference](docs/quickstarts/common/vllm.md), then [add providers](docs/quickstarts/common/providers.md) |
+| Sandboxed agents with separate inference | OpenShell on a bootc-managed server; Praxis routes to a private CPU or NVIDIA L4 vLLM server | [Qwen3-8B example](bootc/VLLM.md) |
 | Sandboxed harness exploration | OpenShell on the server, with harness-specific policies and provider setup | [OpenShell recipes](openshell/docs/README.md) |
 | Shared host with a cloud gateway | Harnesses run directly under OS accounts on RHEL; Praxis owns provider credentials | [All-in-one gateway](docs/quickstarts/all-in-one/README.md) |
 | Remote clients with a central gateway | Harnesses and tools stay on client machines; requests reach Praxis over HTTPS with caller JWTs | [Remote gateway](docs/quickstarts/remote-gateway/README.md) |
@@ -81,12 +82,17 @@ example's validation report.
 ## Validated today
 
 This is an experimental deployment and validation repository. The strongest
-end-to-end example is **OpenCode → Praxis → vLLM** on bootc. AWS tests with
+recorded end-to-end example is **OpenCode → Praxis → vLLM** on bootc. AWS tests with
 OpenShell `0.1.2-rhaiv.0` passed on CPU and NVIDIA L4, covering real Qwen3-8B
 inference, streamed responses, independently verified tool execution, explicit
 bypass denials, cached reboot, and disable/re-enable behavior. The
 [local inference report](bootc/VLLM-VALIDATION.md) records exact pins and limits,
 including the GPU instance's cleanup issue.
+
+The preferred topology now places vLLM on a separate server and keeps only
+OpenShell, Praxis, and the harness on the single server. The AWS helper discovers
+that server's private address and grants access by security group; its fresh
+real-inference qualification remains separate work.
 
 The mutable AWS workflow also passed native mocked Qwen/OpenAI/Anthropic
 tests. With vLLM 0.30, all-in-one real Qwen tasks passed for Codex, Claude and

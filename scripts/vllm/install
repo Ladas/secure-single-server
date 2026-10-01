@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mutable RHEL addon. Private rootless network; no host inference port or cloud keys.
+# Mutable RHEL addon. Private rootless inference; no cloud keys.
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/common/lib.sh
@@ -33,6 +33,9 @@ NoNewPrivileges=true
 DropCapability=all
 ShmSize=4g
 UNIT
+if [[ -n "${remote_listen}" ]]; then
+  printf 'PublishPort=%s:8000:8000\n' "${remote_listen}"
+fi
   local template_args=''
   if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
     printf 'Volume=/etc/praxis-vllm/chat-template.jinja:/etc/vllm-chat-template.jinja:ro\n'
@@ -56,14 +59,17 @@ UNIT
 }
 
 if [[ "${1:-}" == --help || "$#" == 0 ]]; then
-  printf 'Usage: sudo scripts/vllm/install [--model qwen3-8b|qwen3.8-27b-int4] [--image NAME@sha256:DIGEST] cpu|gpu\n       Add --render to print the service without installing it. Default model: qwen3-8b.\n'
+  printf 'Usage: sudo scripts/vllm/install [--model qwen3-8b|qwen3.8-27b-int4] [--image NAME@sha256:DIGEST] [--remote PRIVATE_IP] cpu|gpu\n       Add --render to print the service without installing it. Default model: qwen3-8b.\n       Omit --remote for the deprecated co-located private network. Use --remote on a separate server.\n'
   exit 0
 fi
-mode='' model='' image_override='' render_only=false
+mode='' model='' image_override='' render_only=false remote_listen=''
 while (( $# )); do
   case "$1" in
     cpu|gpu) [[ -z "${mode}" ]] || die 'select one inference mode'; mode="$1"; shift ;;
     --render) render_only=true; shift ;;
+    --remote)
+      [[ "$#" -ge 2 && -n "$2" && -z "${remote_listen}" ]] || die '--remote requires one private IPv4 address'
+      remote_listen="$2"; shift 2 ;;
     --model)
       [[ "$#" -ge 2 && -n "$2" && -z "${model}" ]] || die '--model requires one preset name'
       model="$2"; shift 2 ;;
@@ -75,6 +81,20 @@ while (( $# )); do
 done
 [[ -n "${mode}" ]] || die 'expected cpu or gpu'
 model="${model:-qwen3-8b}"
+if [[ -n "${remote_listen}" ]]; then
+  require_command python3
+  python3 - "${remote_listen}" <<'PY'
+import ipaddress, sys
+try:
+    address = ipaddress.ip_address(sys.argv[1])
+except ValueError:
+    raise SystemExit("--remote requires an RFC1918 IPv4 address")
+private = any(address in ipaddress.ip_network(network) for network in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+if address.version != 4 or not private:
+    raise SystemExit("--remote requires an RFC1918 IPv4 address")
+PY
+fi
 VLLM_CONTEXT=16384
 VLLM_TOOL_PARSER=hermes
 VLLM_CHAT_TEMPLATE="${ROOT}/configs/vllm/qwen3.jinja"
@@ -88,14 +108,28 @@ case "${model}" in
 esac
 if "${render_only}"; then render "${mode}"; exit 0; fi
 require_root
+if [[ -n "${remote_listen}" ]]; then
+  require_command ip
+  ip -4 -o address show | awk -v address="${remote_listen}" '
+    $3 == "inet" {
+      split($4, parts, "/")
+      if (parts[1] == address) found = 1
+    }
+    END { exit !found }
+  ' || die "--remote address ${remote_listen} is not assigned to this server"
+fi
 [[ "$(uname -m)" == x86_64 ]] || die 'vLLM requires x86_64'
 # shellcheck disable=SC1091
 source /etc/os-release
 [[ "${ID}" == rhel && "${VERSION_ID}" == 9.* ]] || die 'mutable RHEL 9 is required'
 [[ "$(getenforce)" == Enforcing ]] || die 'SELinux must remain enforcing'
-verify_managed_manifest
+if [[ -z "${remote_listen}" ]]; then
+  verify_managed_manifest
+fi
 exec 8>/run/lock/praxis-vllm.lock
 flock -n 8 || die 'another vLLM install is running'
+exec 9>"$(gateway_lock_path "${SERVICE_USER}")"
+flock -n 9 || die 'another gateway installation/provider change is running'
 image="${VLLM_CPU_IMAGE}"
 if [[ "${mode}" == gpu ]]; then
   require_command nvidia-smi
@@ -115,7 +149,19 @@ image="${image_override:-${image}}"
 uid="$(service_uid)"
 gid="$(service_gid)"
 unit="/etc/containers/systemd/users/${uid}/praxis-vllm.container"
+quadlet_dir="/etc/containers/systemd/users/${uid}"
+network_unit="/etc/containers/systemd/users/${uid}/praxis.network"
 state=/etc/praxis-vllm
+network_staged=0
+temporary=''
+# shellcheck disable=SC2329
+cleanup_install() {
+  rm -f "${temporary}"
+  if (( network_staged )) && [[ ! -f "${state}/manifest" ]]; then
+    rm -f "${network_unit}" "${state}/network-owned"
+  fi
+}
+trap cleanup_install EXIT
 if [[ -e "${unit}" ]]; then
   [[ -f "${state}/manifest" ]] || die 'existing vLLM unit has no managed manifest'
   [[ "$(sha256_file "${unit}")" == "$(cat "${state}/manifest")" ]] || die 'vLLM unit drifted; inspect before replacing'
@@ -132,6 +178,15 @@ require_linux_image_platform vLLM "$(as_service podman image inspect "${image}" 
   "$(as_service podman image inspect "${image}" --format '{{.Architecture}}')" amd64
 as_service mkdir -p "$(service_home)/vllm-cache"
 install -d -o root -g "${gid}" -m 0750 "${state}"
+install -d -o root -g "${gid}" -m 0750 "${quadlet_dir}"
+if [[ -e "${network_unit}" ]]; then
+  cmp -s "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}" ||
+    die 'praxis.network drifted; inspect it before installing remote vLLM'
+else
+  install -o root -g "${gid}" -m 0640 "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}"
+  network_staged=1
+  touch "${state}/network-owned"
+fi
 if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
   install -o root -g "${gid}" -m 0640 "${VLLM_CHAT_TEMPLATE}" "${state}/chat-template.jinja"
   if ! semanage fcontext -a -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$' 2>/dev/null; then
@@ -141,19 +196,35 @@ if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
   sha256_file "${state}/chat-template.jinja" >"${state}/template.sha256"
 fi
 temporary="$(mktemp)"
-trap 'rm -f "${temporary}"' EXIT
 render "${mode}" >"${temporary}"
 install -o root -g "${gid}" -m 0640 "${temporary}" "${unit}"
 sha256_file "${unit}" >"${state}/manifest"
+network_staged=0
 printf '%s\n' "${mode}" >"${state}/mode"
 printf '%s\n' "${model}" >"${state}/model"
+if [[ -f "${state}/network-owned" && ! -f "/etc/containers/systemd/users/${uid}/praxis.container" ]]; then
+  touch "${state}/network-owned"
+else
+  rm -f "${state}/network-owned"
+fi
+if [[ -n "${remote_listen}" ]]; then
+  printf '%s\n' "${remote_listen}" >"${state}/listen-address"
+else
+  rm -f "${state}/listen-address"
+fi
 as_service systemctl --user daemon-reload
 as_service systemctl --user restart praxis-vllm.service
 for (( attempt=0; attempt<360; attempt++ )); do
   if as_service podman exec praxis-vllm python3 -c \
     'import json,sys,urllib.request; r=json.load(urllib.request.urlopen("http://127.0.0.1:8000/v1/models", timeout=3)); assert any(m["id"] == sys.argv[1] for m in r["data"])' "${model}" 2>/dev/null; then
-    [[ -z "$(as_service podman port praxis-vllm)" ]] || die 'vLLM unexpectedly publishes a host port'
-    note "vLLM ${mode} ready: ${model}, private container port 8000; no host publication"
+    if [[ -n "${remote_listen}" ]]; then
+      [[ "$(as_service podman port praxis-vllm 8000/tcp)" == "${remote_listen}:8000" ]] ||
+        die "vLLM is not bound to the requested private address ${remote_listen}"
+      note "vLLM ${mode} ready: ${model}, private server address ${remote_listen}:8000"
+    else
+      [[ -z "$(as_service podman port praxis-vllm)" ]] || die 'vLLM unexpectedly publishes a host port'
+      note "vLLM ${mode} ready: ${model}, private container port 8000; no host publication"
+    fi
     exit 0
   fi
   if (( attempt % 6 == 0 )); then note 'waiting for vLLM model download/startup; inspect praxis-vllm container logs for progress'; fi

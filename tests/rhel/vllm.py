@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Mutable RHEL inference must never publish its unauthenticated backend."""
+"""Mutable RHEL inference must expose only an explicitly selected private address."""
 from pathlib import Path
+import shlex
 import subprocess
 import sys
+import tempfile
 import unittest
 from jinja2 import Environment
 
@@ -39,6 +41,140 @@ class VllmTest(unittest.TestCase):
                     command, _ = configuration("codex", "vllm", model, "http://127.0.0.1:8080", "caller")
                     self.assertIn(f"--max-model-len {context} ", result.stdout)
                     self.assertIn(f"model_context_window={context}", command)
+
+    def test_remote_mode_publishes_only_the_requested_private_address(self):
+        result = subprocess.run(["bash", str(ROOT / "scripts/vllm/install"), "--render",
+                                 "--remote", "10.0.1.10", "gpu"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("PublishPort=10.0.1.10:8000:8000\n", result.stdout)
+        self.assertIn("Network=praxis.network", result.stdout)
+        self.assertIn("AddDevice=nvidia.com/gpu=0", result.stdout)
+        result = subprocess.run(["bash", str(ROOT / "scripts/vllm/install"), "--render",
+                                 "--remote", "", "cpu"], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--remote requires one private IPv4 address", result.stderr)
+        for address in ("8.8.8.8", "203.0.113.1", "10.0.1.256", "localhost"):
+            result = subprocess.run(["bash", str(ROOT / "scripts/vllm/install"), "--render",
+                                     "--remote", address, "cpu"],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("[Container]", result.stdout)
+            self.assertIn("--remote requires an RFC1918 IPv4 address", result.stderr)
+
+    def test_remote_removal_cleans_remote_state_without_touching_gateway_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            unit = root / "praxis-vllm.container"
+            network_unit = root / "praxis.network"
+            gateway_unit = root / "praxis.container"
+            state.mkdir()
+            unit.write_text("managed vLLM unit\n")
+            network_unit.write_bytes((ROOT / "configs/common/quadlet/praxis.network").read_bytes())
+            (state / "manifest").write_text("fixture-manifest\n")
+            (state / "model").write_text("qwen3-8b\n")
+            (state / "network-owned").write_text("")
+
+            def removal_script(with_gateway):
+                if with_gateway:
+                    gateway_unit.write_text("managed gateway unit\n")
+                else:
+                    gateway_unit.unlink(missing_ok=True)
+                source = (ROOT / "scripts/vllm/remove").read_text()
+                source = source.replace(
+                    'ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"',
+                    f'ROOT={shlex.quote(str(ROOT))}')
+                source = source.replace(
+                    'source "${ROOT}/scripts/common/lib.sh"',
+                    'require_root() { :; }\n'
+                    'die() { printf \'error: %s\\n\' "$*" >&2; exit 1; }\n'
+                    'service_uid() { echo 1001; }\n'
+                    'sha256_file() { echo fixture-manifest; }\n'
+                    'as_service() { printf \'AS_SERVICE %s\\n\' "$*"; }\n'
+                    'note() { printf \'NOTE %s\\n\' "$*"; }\n'
+                    'flock() { :; }\n'
+                    'semanage() { :; }\n')
+                source = source.replace('/run/lock/praxis-vllm.lock', str(root / "vllm.lock"))
+                source = source.replace('$(gateway_lock_path "${SERVICE_USER}")', str(root / "gateway.lock"))
+                source = source.replace('state=/etc/praxis-vllm', f'state={state}')
+                source = source.replace(
+                    'unit="/etc/containers/systemd/users/$(service_uid)/praxis-vllm.container"',
+                    f'unit={unit}')
+                source = source.replace(
+                    'network_unit="/etc/containers/systemd/users/$(service_uid)/praxis.network"',
+                    f'network_unit={network_unit}')
+                source = source.replace(
+                    'gateway_unit="/etc/containers/systemd/users/$(service_uid)/praxis.container"',
+                    f'gateway_unit={gateway_unit}')
+                script = root / ("remove-with-gateway.sh" if with_gateway else "remove-standalone.sh")
+                script.write_text(source)
+                return script
+
+            result = subprocess.run(['bash', str(removal_script(False))],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(unit.exists())
+            self.assertFalse(network_unit.exists())
+            self.assertFalse((state / "network-owned").exists())
+            self.assertFalse((state / "model").exists())
+            self.assertIn('AS_SERVICE systemctl --user stop praxis-network.service', result.stdout)
+
+            unit.write_text("managed vLLM unit\n")
+            network_unit.write_bytes((ROOT / "configs/common/quadlet/praxis.network").read_bytes())
+            (state / "manifest").write_text("fixture-manifest\n")
+            (state / "network-owned").write_text("")
+            result = subprocess.run(['bash', str(removal_script(True))],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(unit.exists())
+            self.assertTrue(network_unit.exists())
+            self.assertTrue(gateway_unit.exists())
+            self.assertFalse((state / "network-owned").exists())
+            self.assertNotIn('praxis-network.service', result.stdout)
+
+            install_source = (ROOT / 'scripts/vllm/install').read_text()
+            self.assertIn('install -d -o root -g "${gid}" -m 0750 "${quadlet_dir}"', install_source)
+            self.assertIn('exec 9>"$(gateway_lock_path "${SERVICE_USER}")"', install_source)
+            self.assertIn('ip -4 -o address show', install_source)
+            self.assertIn('--remote address ${remote_listen} is not assigned to this server', install_source)
+
+    def test_remote_network_creation_rolls_back_before_the_manifest_is_committed(self):
+        source = (ROOT / 'scripts/vllm/install').read_text()
+        cleanup = source[source.index('cleanup_install() {'):source.index('trap cleanup_install EXIT')]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            network_unit = root / "praxis.network"
+            temporary = root / "rendered"
+            state.mkdir()
+            network_unit.write_text("network\n")
+            temporary.write_text("rendered\n")
+            (state / "network-owned").write_text("")
+            script = f"""
+set -euo pipefail
+state={shlex.quote(str(state))}
+network_unit={shlex.quote(str(network_unit))}
+temporary={shlex.quote(str(temporary))}
+network_staged=1
+{cleanup}
+cleanup_install
+"""
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(network_unit.exists())
+            self.assertFalse((state / "network-owned").exists())
+            self.assertFalse(temporary.exists())
+
+            network_unit.write_text("network\n")
+            temporary.write_text("rendered\n")
+            (state / "network-owned").write_text("")
+            (state / "manifest").write_text("committed\n")
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(network_unit.exists())
+            self.assertTrue((state / "network-owned").exists())
+            self.assertFalse(temporary.exists())
 
     def test_model_selection_rejects_unknown_and_duplicate_presets(self):
         for args in (("--model", "unknown", "cpu"), ("--model", "../qwen3-8b", "cpu"),

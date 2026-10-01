@@ -36,11 +36,19 @@ gateway_start as_openshell /usr/bin/openshell /var/lib/openshell-svc/.config/ope
 
 backend="$(inference_backend)"
 praxis_units="/etc/containers/systemd/users/$(service_uid)"
-if [[ "${backend}" == vllm ]]; then
-  # No cloud secrets or cloud fallback for the local route. vLLM can still be
-  # loading; Praxis starts independently and reports upstream errors until ready.
-  install -o root -g "$(service_gid)" -m 0640 "${ROOT}/configs/vllm/praxis.yaml" \
-    /etc/praxis/shared-gateway.yaml
+if [[ "${backend}" == vllm || "${backend}" == remote-vllm ]]; then
+  # No cloud secrets or cloud fallback for either vLLM route. The remote host
+  # may still be loading; Praxis starts independently and reports upstream errors.
+  if [[ "${backend}" == remote-vllm ]]; then
+    endpoint="$(inference_vllm_endpoint)"
+    render_template "${ROOT}/configs/vllm/praxis-remote.yaml" "${tmp}/praxis.yaml" \
+      VLLM_HOST "${endpoint%:*}" VLLM_PORT "${endpoint##*:}"
+    install -o root -g "$(service_gid)" -m 0640 "${tmp}/praxis.yaml" \
+      /etc/praxis/shared-gateway.yaml
+  else
+    install -o root -g "$(service_gid)" -m 0640 "${ROOT}/configs/vllm/praxis.yaml" \
+      /etc/praxis/shared-gateway.yaml
+  fi
   render_template "${ROOT}/configs/vllm/praxis.container.in" "${tmp}/praxis.container" \
     PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}"
 else

@@ -8,16 +8,33 @@ require_root
 [[ "$#" == 0 ]] || die 'usage: sudo scripts/vllm/remove'
 exec 8>/run/lock/praxis-vllm.lock
 flock -n 8 || die 'another vLLM operation is running'
+exec 9>"$(gateway_lock_path "${SERVICE_USER}")"
+flock -n 9 || die 'another gateway installation/provider change is running'
 state=/etc/praxis-vllm
 unit="/etc/containers/systemd/users/$(service_uid)/praxis-vllm.container"
+network_unit="/etc/containers/systemd/users/$(service_uid)/praxis.network"
+gateway_unit="/etc/containers/systemd/users/$(service_uid)/praxis.container"
 [[ -f "${unit}" && -f "${state}/manifest" ]] || die 'managed vLLM install not found'
 [[ "$(sha256_file "${unit}")" == "$(cat "${state}/manifest")" ]] || die 'vLLM unit drifted; refusing removal'
+remove_network=0
+if [[ ! -f "${gateway_unit}" && -f "${state}/network-owned" && -f "${network_unit}" ]]; then
+  cmp -s "${ROOT}/configs/common/quadlet/praxis.network" "${network_unit}" ||
+    die 'praxis.network drifted; refusing removal'
+  remove_network=1
+fi
 if [[ -f "${state}/template.sha256" ]]; then
   [[ "$(sha256_file "${state}/chat-template.jinja")" == "$(cat "${state}/template.sha256")" ]] ||
     die 'vLLM template drifted; refusing removal'
 fi
 as_service systemctl --user stop praxis-vllm.service
-rm -f "${unit}" "${state}/manifest" "${state}/mode" "${state}/chat-template.jinja" "${state}/template.sha256"
+rm -f "${unit}" "${state}/manifest" "${state}/mode" "${state}/model" "${state}/listen-address" \
+  "${state}/chat-template.jinja" "${state}/template.sha256"
 semanage fcontext -d '^/etc/praxis-vllm/chat-template\.jinja$' >/dev/null 2>&1 || true
+if (( remove_network )); then
+  as_service systemctl --user stop praxis-network.service 2>/dev/null || true
+  rm -f "${network_unit}"
+  as_service podman network rm praxis-private >/dev/null 2>&1 || true
+fi
+rm -f "${state}/network-owned"
 as_service systemctl --user daemon-reload
 note 'removed vLLM service; retained model cache and image; the Praxis /vllm route now fails closed'

@@ -4,16 +4,21 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source /usr/share/secure-single-server/bootc/scripts/common
 require_root
-[[ "$(inference_backend)" == vllm ]] || die 'select inference vllm first'
-python3 - <<'PY'
+backend="$(inference_backend)"
+[[ "${backend}" == vllm || "${backend}" == remote-vllm ]] || die 'select inference vllm or remote-vllm first'
+vllm_base='http://127.0.0.1:8000/v1'
+if [[ "${backend}" == remote-vllm ]]; then
+  vllm_base="http://$(inference_vllm_endpoint)/v1"
+fi
+VLLM_BASE="${vllm_base}" python3 - <<'PY'
 import json
 import urllib.request
+import os
 
 model = 'Qwen/Qwen3-8B'
 # Do not allow workstation/caller proxy environment to redirect local probes.
 client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-for name, base in [('vLLM', 'http://127.0.0.1:8000/v1'),
-                   ('Praxis', 'http://127.0.0.1:8080/v1')]:
+for name, base in [('vLLM', os.environ['VLLM_BASE']), ('Praxis', 'http://127.0.0.1:8080/v1')]:
     with client.open(base + '/models', timeout=30) as response:
         models = json.load(response)
     assert model in [entry['id'] for entry in models['data']], (name, models)

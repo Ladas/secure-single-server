@@ -8,8 +8,9 @@ case "${1:-help}" in
   help|--help|-h)
     cat <<'EOF'
 Usage (run as root except help):
-  sss-bootc vllm disabled|cpu|gpu|status          Optional local Qwen3-8B
-  sss-bootc inference cloud|vllm|status|check    Select/check Praxis upstream
+  sss-bootc vllm disabled|cpu|gpu|status          Deprecated local Qwen3-8B
+  sss-bootc inference cloud|vllm|remote-vllm RFC1918_IP:PORT|status|check
+                                                  Select/check Praxis upstream
   sss-bootc status
   sss-bootc secret openai|anthropic VERSION       Read secret from stdin
   sss-bootc activate OPENAI_SECRET ANTHROPIC_SECRET
@@ -28,21 +29,38 @@ EOF
     ;;
   inference)
     require_root
-    [[ "$#" == 2 ]] || die 'expected inference cloud|vllm|status|check'
+    subcommand="${2:-}"
+    if [[ "$#" == 3 && "${subcommand}" == remote-vllm ]]; then :;
+    elif [[ "$#" == 2 && "${subcommand}" != remote-vllm ]]; then :;
+    else die 'expected inference cloud|vllm|remote-vllm RFC1918_IP:PORT|status|check'; fi
     case "$2" in
       check) exec "${ROOT}/bootc/scripts/inference-check" ;;
-      status) printf 'Praxis upstream: %s\n' "$(inference_backend)"; exit 0 ;;
+      status)
+        backend="$(inference_backend)"
+        printf 'Praxis upstream: %s\n' "${backend}"
+        if [[ "${backend}" == remote-vllm ]]; then
+          printf 'Remote vLLM endpoint: %s\n' "$(inference_vllm_endpoint)"
+        fi
+        exit 0
+        ;;
       cloud) ;;
       vllm)
         # shellcheck disable=SC1091
         source "${ROOT}/bootc/scripts/vllm-lib"
         [[ "$(vllm_mode)" != disabled ]] || die 'enable vLLM CPU or GPU mode first'
         ;;
-      *) die 'expected inference cloud|vllm|status|check' ;;
+      remote-vllm) validate_vllm_endpoint "$3" ;;
+      *) die 'expected inference cloud|vllm|remote-vllm RFC1918_IP:PORT|status|check' ;;
     esac
     exec 9>/run/secure-single-server.lock
     flock 9
     install -d -m 0755 /etc/secure-single-server
+    if [[ "$2" == remote-vllm ]]; then
+      tmp="$(mktemp /etc/secure-single-server/.vllm-endpoint.XXXXXX)"
+      printf '%s\n' "$3" >"${tmp}"
+      chmod 0644 "${tmp}"
+      mv "${tmp}" /etc/secure-single-server/vllm-endpoint
+    fi
     tmp="$(mktemp /etc/secure-single-server/.inference-backend.XXXXXX)"
     printf '%s\n' "$2" >"${tmp}"
     chmod 0644 "${tmp}"
@@ -85,10 +103,10 @@ EOF
     action="${2:-}"
     case "${action}" in create|connect) ;; *) die 'expected create or connect' ;; esac
     shift 2
-    if [[ "${action}" == create && "$(inference_backend)" == vllm ]]; then
-      [[ "${harness}" == opencode ]] || die 'local Praxis integration currently supports the OpenCode OS variant only'
+    if [[ "${action}" == create && "$(inference_backend)" =~ ^(vllm|remote-vllm)$ ]]; then
+      [[ "${harness}" == opencode ]] || die 'Praxis vLLM integration currently supports the OpenCode OS variant only'
       for argument in "$@"; do
-        case "${argument}" in --provider|--config|--provider=*|--config=*) die 'local inference owns provider configuration; omit --provider and --config' ;; esac
+        case "${argument}" in --provider|--config|--provider=*|--config=*) die 'Praxis vLLM integration owns provider configuration; omit --provider and --config' ;; esac
       done
       as_openshell env OPENSHELL_MODEL_ID=Qwen/Qwen3-8B PRAXIS_PORT=8080 \
         "${ROOT}/openshell/harnesses/${harness}/${action}.sh" \

@@ -30,6 +30,8 @@ tls_key=""
 jwt_public_key=""
 providers=0
 vllm=0
+vllm_explicit=0
+vllm_endpoint=""
 
 usage() {
   cat <<'EOF'
@@ -53,7 +55,8 @@ Options:
   --development-fedora                  Allow mutable Fedora for development.
   --praxis-image IMAGE@sha256:DIGEST  Override the reviewed Praxis digest.
   --providers                       Enable only the supplied cloud secrets.
-  --vllm                            Also route /vllm to the private vLLM service.
+  --vllm                            Also route /vllm to the co-located vLLM service.
+  --vllm-endpoint RFC1918_IP:PORT   Route /vllm to a separate private vLLM server.
   --replace                          Replace a same-profile managed install.
 EOF
 }
@@ -68,7 +71,10 @@ while (( "$#" )); do
     --development-fedora) development_fedora=1; shift ;;
     --profile) profile="${2:-}"; shift 2 ;;
     --providers) providers=1; shift ;;
-    --vllm) providers=1; vllm=1; shift ;;
+    --vllm) providers=1; vllm=1; vllm_explicit=1; shift ;;
+    --vllm-endpoint)
+      [[ "$#" -ge 2 && -n "$2" ]] || die '--vllm-endpoint requires RFC1918_IP:PORT'
+      vllm_endpoint="$2"; providers=1; vllm=1; shift 2 ;;
     --praxis-image) praxis_image="${2:-}"; shift 2 ;;
     --valkey-image) valkey_image="${2:-}"; shift 2 ;;
     --openai-secret) openai_secret="${2:-}"; shift 2 ;;
@@ -88,6 +94,10 @@ done
 
 require_root
 require_command flock
+if [[ -n "${vllm_endpoint}" ]]; then
+  [[ "${vllm_explicit}" == 0 ]] || die '--vllm-endpoint replaces --vllm; do not combine them'
+  validate_vllm_endpoint "${vllm_endpoint}"
+fi
 exec 9>"$(gateway_lock_path "${SERVICE_USER}")"
 flock -n 9 || die 'another gateway installation/provider change is running'
 for command in awk chmod chown cmp getenforce getent grep head install loginctl podman restorecon runuser sed semanage sha256sum sleep sort ss stat systemctl useradd usermod; do
@@ -371,6 +381,7 @@ fi
 if (( providers == 1 )); then
   provider_args=(--directory "${tmp_dir}" --openai-secret "${openai_secret}" --anthropic-secret "${anthropic_secret}")
   (( vllm == 0 )) || provider_args+=(--vllm)
+  [[ -z "${vllm_endpoint}" ]] || provider_args+=(--vllm-endpoint "${vllm_endpoint}")
   python3 "${SCRIPT_DIR}/provider_config.py" "${provider_args[@]}"
 fi
 

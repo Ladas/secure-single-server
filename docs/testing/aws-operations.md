@@ -1,6 +1,6 @@
 # AWS VM operations and recovery
 
-**To deploy CPU/GPU all-in-one or remote-gateway VMs, follow [aws.md](aws.md).**
+**To deploy gateway or separate vLLM VMs, follow [aws.md](aws.md).**
 This page is the reference for custom configuration, recovery and cleanup.
 Use [model/context sizing](aws.md#model-and-context-sizing) to distinguish the
 current L4/CPU presets from estimated full-context and Flash-Next hardware.
@@ -14,6 +14,7 @@ on-demand official Red Hat RHEL 9 PAYG VM, one encrypted gp3 root disk, one
 security group and one imported **public** SSH key. The primary interface and
 root EBS disk have `DeleteOnTermination=true`. IMDSv2 is required. Resources
 carry `ManagedBy`, `ResourcePrefix`, `Scenario` and `Name` tags.
+The `vllm-grant` mode can add one TCP 8000 source-security-group rule.
 
 No IAM roles, VPCs, subnets, routes, DNS, SSM access or applications are created.
 No AWS/provider credentials enter the VM. There is no user-data bootstrap.
@@ -26,6 +27,8 @@ Podman data belong on the encrypted EBS root disk in the planned installation.
 | `apply` | Fresh validation and printed plan, then typed account/region/prefix confirmation before creation |
 | `verify` | Read-only comparison against the recorded launch, including ownership, image/type, ingress, IMDSv2 and disk/interface deletion settings |
 | `capacity` | Read-only offered zones and public subnet candidates; spare instance capacity remains unknown |
+| `vllm-endpoint` | Read-only discovery of one running tagged `vllm-server`; rejects ambiguity and public port-8000 ingress |
+| `vllm-grant` | Read-only source-group plan; with `--apply`, typed confirmation adds the private TCP 8000 rule |
 
 Credentials need `sts:GetCallerIdentity`, EC2 describe access for instance
 types, instance-type offerings, images, subnets, route tables, instances,
@@ -57,7 +60,8 @@ inputs. A recorded failed instance launch is reconciled and retried using its ex
 security group/key pair. Completed VMs and unrelated name collisions are refused.
 
 Plan/apply require `--config`. The hardware presets omit `scenario`; pass it with
-`--scenario all-in-one` or `--scenario remote-gateway`. The session helper
+`--scenario all-in-one`, `--scenario remote-gateway`, `--scenario openshell-praxis`
+or `--scenario vllm-server`. The session helper
 requires that flag, including for a custom file. JSON accepts `scenario`,
 `inference`, `arch`, `instance_type`, `volume_gib`, optional `ami_id` and
 `ssh_access` / `https_access` (`restricted` or `public`, both default to
@@ -197,6 +201,10 @@ For external providers without local inference, use the
 [remote-gateway without vLLM](aws.md#remote-gateway-without-vllm) blocks.
 Both use the smaller `no-vllm.json` preset. The helper currently requires
 at least 32 GiB RAM; smaller instance types are rejected.
+
+For a separate inference host, use the
+[separate vLLM server block](aws.md#separate-vllm-server) and a CPU/GPU preset.
+The gateway may use `no-vllm.json`; the dedicated server must use `cpu` or `gpu`.
 
 ## Access and changed IPs
 
