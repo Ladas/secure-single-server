@@ -6,8 +6,8 @@ the OS as an image. OpenShell supplies the sandbox; Praxis supplies model access
 and shared quotas. Their combined inference path remains
 [experimental](../docs/quickstarts/openshell-praxis/users.md).
 
-Build one x86_64 bootable base, standalone Praxis and vLLM images, and these
-published OS images:
+Build one x86_64 internal base, standalone Praxis and vLLM images, and these
+deployable OS images:
 
 ```text
 RHEL 9 bootc → secure-single-server:base
@@ -16,23 +16,40 @@ RHEL 9 bootc → secure-single-server:base
               └── :openclaw
 
 RHEL 9 bootc → secure-single-server:praxis
-RHEL 9 bootc → secure-single-server:vllm
+RHEL 9 bootc → secure-single-server:vllm-cpu
+RHEL 9 bootc → secure-single-server:vllm-gpu
 ```
 
 The base remains the parent for harness images. It includes Podman, the native
 OpenShell CLI, deployment configuration, and a boot service for the existing
 OpenShell/Praxis path. The standalone `praxis` image is a slimmer direct RHEL
 bootc image for gateway-only deployments; it excludes OpenShell, harnesses, and
-NVIDIA components. The standalone `vllm` image is also a direct RHEL bootc
-image; it excludes Praxis and OpenShell and includes the NVIDIA 580 open driver
-and Container Toolkit so CPU or GPU mode can be selected at runtime. Each
-harness image adds one harness's selection
+NVIDIA components. The standalone `vllm-cpu` and `vllm-gpu` images are also
+direct RHEL bootc images; they exclude Praxis and OpenShell. The CPU image
+omits NVIDIA components, while the GPU image includes the NVIDIA 580 open
+driver and Container Toolkit. Each harness image adds one harness's selection
 and scripts/policies. Harness binaries run in the pinned workload containers,
 not directly on the host. This initial bootc path uses Praxis's in-memory quota
 profile and administrator-operated OpenShell. It does not yet provide Valkey,
 remote-gateway TLS/JWT, or ordinary-user access to OpenShell. It is a deployment
 foundation for the [phased gateway goals](../docs/roadmap.md), not completion of
 the durable-quota or retained-session requirements.
+
+## Published images
+
+The bootc workflow publishes deployable images to `quay.io/redhat-et` with the
+release-facing `v0.1` tag and an immutable `sha-<commit>` audit tag. The
+internal `base` image is not published. Pin a `sha-<commit>` tag when a
+deployment must remain exactly reproducible.
+
+```text
+quay.io/redhat-et/secure-single-server-praxis:v0.1
+quay.io/redhat-et/secure-single-server-vllm-cpu:v0.1
+quay.io/redhat-et/secure-single-server-vllm-gpu:v0.1
+quay.io/redhat-et/secure-single-server-codex:v0.1
+quay.io/redhat-et/secure-single-server-opencode:v0.1
+quay.io/redhat-et/secure-single-server-openclaw:v0.1
+```
 
 ## Pull on first boot
 
@@ -179,12 +196,18 @@ delete every pre-upgrade sandbox, and recreate sandboxes with the new pins.
 Apply the same recreation rule when rolling OpenShell back.
 
 After publishing a reviewed OS image, stage it with `sudo bootc switch
-REGISTRY/IMAGE:RELEASE`, inspect `sudo bootc status`, then reboot. To return to
-the previous OS deployment, use `sudo bootc rollback` and reboot. The selected
-harness is part of the OS image, so switching from Codex to OpenCode uses the
-same process. Local testing can use `bootc switch --transport containers-storage
-localhost/secure-single-server:opencode` after loading that image into root's
-Podman store; this does not exercise registry authentication or distribution.
+REGISTRY/IMAGE:RELEASE`, inspect `sudo bootc status`, then reboot. For example:
+
+```console
+sudo bootc switch quay.io/redhat-et/secure-single-server-codex:v0.1
+```
+
+To return to the previous OS deployment, use `sudo bootc rollback` and reboot.
+The selected harness is part of the OS image, so switching from Codex to
+OpenCode uses the same process. Local testing can use `bootc switch --transport
+containers-storage localhost/secure-single-server:opencode` after loading that
+image into root's Podman store; this does not exercise registry authentication
+or distribution.
 
 ## Use the selected harness
 

@@ -23,31 +23,75 @@ class SelectImagesTests(unittest.TestCase):
 
     def test_base_change_selects_harnesses(self):
         selected = self.select(["bootc/scripts/common"])
-        self.assertEqual(selected, {"praxis": False, "vllm": False, "harnesses": True})
+        self.assertEqual(selected, {
+            "praxis": False,
+            "vllm_cpu": False,
+            "vllm_gpu": False,
+            "harnesses": True,
+        })
 
     def test_praxis_only_change_selects_praxis(self):
         selected = self.select(["bootc/Containerfile.praxis"])
-        self.assertEqual(selected, {"praxis": True, "vllm": False, "harnesses": False})
+        self.assertEqual(selected, {
+            "praxis": True,
+            "vllm_cpu": False,
+            "vllm_gpu": False,
+            "harnesses": False,
+        })
 
-    def test_praxis_service_does_not_select_base(self):
-        selected = self.select(["bootc/systemd/secure-single-server-praxis.service"])
-        self.assertEqual(selected, {"praxis": True, "vllm": False, "harnesses": False})
+    def test_vllm_cpu_only_change_selects_cpu(self):
+        selected = self.select(["bootc/Containerfile.vllm.cpu"])
+        self.assertEqual(selected, {
+            "praxis": False,
+            "vllm_cpu": True,
+            "vllm_gpu": False,
+            "harnesses": False,
+        })
 
-    def test_vllm_only_change_selects_vllm(self):
+    def test_vllm_gpu_only_change_selects_gpu(self):
         selected = self.select(["bootc/install-nvidia"])
-        self.assertEqual(selected, {"praxis": False, "vllm": True, "harnesses": False})
+        self.assertEqual(selected, {
+            "praxis": False,
+            "vllm_cpu": False,
+            "vllm_gpu": True,
+            "harnesses": False,
+        })
+
+    def test_shared_vllm_change_selects_both_profiles(self):
+        selected = self.select(["bootc/scripts/vllm-common"])
+        self.assertEqual(selected, {
+            "praxis": False,
+            "vllm_cpu": True,
+            "vllm_gpu": True,
+            "harnesses": True,
+        })
 
     def test_harness_only_change_selects_harnesses(self):
         selected = self.select(["openshell/harnesses/opencode/create.sh"])
-        self.assertEqual(selected, {"praxis": False, "vllm": False, "harnesses": True})
+        self.assertEqual(selected, {
+            "praxis": False,
+            "vllm_cpu": False,
+            "vllm_gpu": False,
+            "harnesses": True,
+        })
 
     def test_ci_change_selects_all_image_groups(self):
         selected = self.select([".github/workflows/bootc-images.yml"])
-        self.assertEqual(selected, {"praxis": True, "vllm": True, "harnesses": True})
+        self.assertEqual(selected, {
+            "praxis": True,
+            "vllm_cpu": True,
+            "vllm_gpu": True,
+            "harnesses": True,
+        })
 
     def test_ignored_path_selects_nothing(self):
         selected = self.select(["README.md"])
-        self.assertEqual(selected, {"praxis": False, "vllm": False, "harnesses": False})
+        self.assertEqual(selected, {
+            "praxis": False,
+            "vllm_cpu": False,
+            "vllm_gpu": False,
+            "harnesses": False,
+        })
 
 
 if __name__ == "__main__":

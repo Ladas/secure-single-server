@@ -40,6 +40,7 @@ elif args[0] == 'build':
         assert (context / 'openshell/configs/images.env').is_file()
         assert (context / 'bootc/scripts/reconcile').is_file()
         assert (context / 'bootc/scripts/vllm-common').is_file()
+        assert (context / 'bootc/vllm-profile').read_text() == 'any\\n'
         assert not (context / 'bootc/scripts/praxis').exists()
         assert not (context / 'bootc/install-nvidia').exists()
         assert not (context / 'openshell/harnesses').exists()
@@ -50,25 +51,40 @@ elif args[0] == 'build':
         assert not (context / 'bootc/install-nvidia').exists()
         assert not (context / 'openshell').exists()
         assert not (context / 'configs/vllm/images.env').exists()
-    elif args[file_index].endswith('/bootc/Containerfile.vllm'):
+    elif args[file_index].endswith('/bootc/Containerfile.vllm.cpu'):
+        assert not (context / 'bootc/install-nvidia').exists()
+        assert (context / 'bootc/vllm-profile').read_text() == 'cpu\\n'
+        assert (context / 'bootc/scripts/vllm-common').is_file()
+        assert (context / 'scripts/common/lib.sh').is_file()
+        assert (context / 'configs/vllm/images.env').is_file()
+        assert not (context / 'openshell/configs').exists()
+        assert not (context / 'openshell').exists()
+    elif args[file_index].endswith('/bootc/Containerfile.vllm.gpu'):
         assert (context / 'bootc/install-nvidia').is_file()
+        assert (context / 'bootc/vllm-profile').read_text() == 'gpu\\n'
         assert (context / 'bootc/scripts/vllm-common').is_file()
         assert (context / 'scripts/common/lib.sh').is_file()
         assert (context / 'configs/vllm/images.env').is_file()
         assert not (context / 'openshell/configs').exists()
         assert not (context / 'openshell').exists()
     elif args[file_index].endswith('/bootc/Containerfile.harness'):
-        harness = next(arg.split('=', 1)[1] for arg in args if arg.startswith('HARNESS='))
         assert (context / 'bootc/harnesses').is_dir()
-        assert (context / f'bootc/harnesses/{harness}').is_file()
         assert (context / 'openshell/harnesses').is_dir()
+        assert not list((context / 'openshell/harnesses/codex').glob('.test-secret.*.secret'))
         assert not (context / 'openshell/configs').exists()
+    else:
+        sys.exit(3)
 else:
     sys.exit(3)
 ''')
         podman.chmod(0o755)
-        self.env = {**os.environ, 'PATH': str(self.directory) + ':' + os.environ['PATH'],
-                    'CALL_LOG': str(self.log), 'RHEL_BOOTC_IMAGE': PIN}
+        self.env = {
+            **{key: value for key, value in os.environ.items()
+               if key not in {'RHSM_ORG_ID', 'RHSM_ACTIVATION_KEY'}},
+            'PATH': str(self.directory) + ':' + os.environ['PATH'],
+            'CALL_LOG': str(self.log),
+            'RHEL_BOOTC_IMAGE': PIN,
+        }
 
     def run_build(self, *args):
         return subprocess.run([str(ROOT / 'bootc/build'), *args], env=self.env,
@@ -80,7 +96,7 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [json.loads(row) for row in self.log.read_text().splitlines()]
         builds = [call for call in calls if call[0] == 'build']
-        self.assertEqual(len(builds), 6)
+        self.assertEqual(len(builds), 7)
         self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[0])
         self.assertIn('RHSM=0', builds[0])
         self.assertIn('--secret', builds[0])
@@ -88,7 +104,9 @@ else:
         self.assertIn('RHSM=0', builds[1])
         self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[2])
         self.assertIn('RHSM=0', builds[2])
-        for harness, call in zip(('codex', 'opencode', 'openclaw'), builds[3:]):
+        self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[3])
+        self.assertIn('RHSM=0', builds[3])
+        for harness, call in zip(('codex', 'opencode', 'openclaw'), builds[4:]):
             self.assertIn('BASE_IMAGE=' + 'b' * 64, call)
             self.assertIn('HARNESS=' + harness, call)
             self.assertIn('--pull=never', call)
@@ -105,18 +123,26 @@ else:
         self.assertTrue(any('Containerfile.praxis' in arg for arg in builds[0]))
         self.assertFalse(any(call[:2] == ['image', 'inspect'] for call in calls))
 
-    def test_vllm_builds_directly_from_rhel_bootc(self):
+    def test_vllm_profiles_build_directly_from_rhel_bootc(self):
         import json
+        for profile in ('cpu', 'gpu'):
+            with self.subTest(profile=profile):
+                self.log.write_text('')
+                result = self.run_build('vllm-' + profile, 'localhost/vllm-test')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = [json.loads(row) for row in self.log.read_text().splitlines()]
+                builds = [call for call in calls if call[0] == 'build']
+                self.assertEqual(len(builds), 1)
+                self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[0])
+                self.assertIn('RHSM=0', builds[0])
+                self.assertTrue(any(f'Containerfile.vllm.{profile}' in arg for arg in builds[0]))
+                self.assertIn(f'localhost/vllm-test:vllm-{profile}', builds[0])
+                self.assertFalse(any(call[:2] == ['image', 'inspect'] for call in calls))
+
+    def test_rejects_ambiguous_vllm_target(self):
         result = self.run_build('vllm', 'localhost/vllm-test')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        calls = [json.loads(row) for row in self.log.read_text().splitlines()]
-        builds = [call for call in calls if call[0] == 'build']
-        self.assertEqual(len(builds), 1)
-        self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[0])
-        self.assertIn('RHSM=0', builds[0])
-        self.assertTrue(any('Containerfile.vllm' in arg for arg in builds[0]))
-        self.assertIn('localhost/vllm-test:vllm', builds[0])
-        self.assertFalse(any(call[:2] == ['image', 'inspect'] for call in calls))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unknown target: vllm', result.stderr)
 
     def test_rhsm_secrets_are_mounted_without_baking_values(self):
         import json
@@ -137,14 +163,21 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('RHSM_ORG_ID and RHSM_ACTIVATION_KEY must be set together', result.stderr)
 
-    def test_harness_build_does_not_require_rhsm_pairing(self):
+    def test_harness_build_ignores_rhsm_and_excludes_local_secrets(self):
         import json
+        descriptor, secret_name = tempfile.mkstemp(
+            prefix='.test-secret.', suffix='.secret',
+            dir=ROOT / 'openshell/harnesses/codex')
+        os.close(descriptor)
+        secret = Path(secret_name)
+        secret.write_text('local secret\n')
+        self.addCleanup(secret.unlink)
         self.env['RHSM_ORG_ID'] = 'test-org'
-        result = self.run_build('codex')
+        result = self.run_build('codex', 'localhost/harness-test')
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [json.loads(row) for row in self.log.read_text().splitlines()]
         build = next(call for call in calls if call[0] == 'build')
-        self.assertNotIn('RHSM=', build)
+        self.assertNotIn('RHSM=1', build)
         self.assertFalse(any(arg.startswith('id=rhsm_') for arg in build))
 
     def test_rejects_unpinned_or_wrong_distribution(self):

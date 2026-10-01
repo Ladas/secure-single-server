@@ -22,9 +22,7 @@ BASE_PATHS = CI_PATHS + (
     "bootc/scripts/vllm",
     "bootc/scripts/vllm-common",
     "bootc/scripts/vllm-lib",
-    "bootc/systemd/delegate.conf",
-    "bootc/systemd/secure-single-server.service",
-    "bootc/systemd/secure-single-server-vllm.service",
+    "bootc/systemd/*",
     "configs/*",
     "openshell/configs/*",
     "openshell/scripts/*",
@@ -46,9 +44,7 @@ PRAXIS_PATHS = CI_PATHS + (
     "configs/vllm/praxis.container.in",
 )
 
-VLLM_PATHS = CI_PATHS + (
-    "bootc/Containerfile.vllm",
-    "bootc/install-nvidia",
+VLLM_SHARED_PATHS = CI_PATHS + (
     "bootc/scripts/vllm-common",
     "bootc/scripts/vllm",
     "bootc/scripts/vllm-lib",
@@ -57,6 +53,15 @@ VLLM_PATHS = CI_PATHS + (
     "scripts/common/lib.sh",
     "scripts/common/install",
     "configs/vllm/images.env",
+)
+
+VLLM_CPU_PATHS = VLLM_SHARED_PATHS + (
+    "bootc/Containerfile.vllm.cpu",
+)
+
+VLLM_GPU_PATHS = VLLM_SHARED_PATHS + (
+    "bootc/Containerfile.vllm.gpu",
+    "bootc/install-nvidia",
 )
 
 HARNESS_PATHS = BASE_PATHS + (
@@ -74,7 +79,8 @@ def main():
     changed = {line.strip() for line in sys.stdin if line.strip()}
     selected = {
         "praxis": any(matches(path, PRAXIS_PATHS) for path in changed),
-        "vllm": any(matches(path, VLLM_PATHS) for path in changed),
+        "vllm_cpu": any(matches(path, VLLM_CPU_PATHS) for path in changed),
+        "vllm_gpu": any(matches(path, VLLM_GPU_PATHS) for path in changed),
         "harnesses": any(matches(path, HARNESS_PATHS) for path in changed),
     }
     json.dump(selected, sys.stdout, sort_keys=True)

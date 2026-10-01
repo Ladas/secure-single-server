@@ -21,7 +21,7 @@ RUN --mount=type=secret,id=rhsm_org,target=/run/secrets/rhsm_org \
       registered=1; \
     fi; \
     dnf install -y podman policycoreutils-python-utils shadow-utils util-linux \
-      python3 iproute openssl curl cloud-init; \
+      curl cloud-init; \
     rhsm_cleanup; \
     trap - EXIT; \
     dnf clean all; \
@@ -30,20 +30,18 @@ RUN --mount=type=secret,id=rhsm_org,target=/run/secrets/rhsm_org \
 
 COPY scripts/common/lib.sh /usr/share/secure-single-server/scripts/common/lib.sh
 COPY scripts/common/install /usr/share/secure-single-server/scripts/common/install
-COPY scripts/common/secret-set /usr/share/secure-single-server/scripts/common/secret-set
-COPY bootc/scripts/praxis /usr/share/secure-single-server/bootc/scripts/praxis
-COPY configs/all-in-one/shared-gateway.yaml /usr/share/secure-single-server/configs/all-in-one/shared-gateway.yaml
-COPY configs/common/quadlet/praxis.container.in /usr/share/secure-single-server/configs/common/quadlet/praxis.container.in
-COPY configs/common/quadlet/praxis.network /usr/share/secure-single-server/configs/common/quadlet/praxis.network
-COPY configs/vllm/praxis-remote.yaml /usr/share/secure-single-server/configs/vllm/praxis-remote.yaml
-COPY configs/vllm/praxis.container.in /usr/share/secure-single-server/configs/vllm/praxis.container.in
-COPY bootc/systemd/secure-single-server-praxis.service /usr/lib/systemd/system/
+COPY bootc/scripts/vllm-common /usr/share/secure-single-server/bootc/scripts/vllm-common
+COPY bootc/scripts/vllm /usr/share/secure-single-server/bootc/scripts/vllm
+COPY bootc/scripts/vllm-lib /usr/share/secure-single-server/bootc/scripts/vllm-lib
+COPY bootc/vllm-profile /usr/share/secure-single-server/bootc/vllm-profile
+COPY configs/vllm/images.env /usr/share/secure-single-server/configs/vllm/images.env
+COPY bootc/systemd/secure-single-server-vllm.service /usr/lib/systemd/system/
 COPY bootc/systemd/delegate.conf /usr/lib/systemd/system/user@.service.d/50-secure-single-server.conf
-RUN chmod 0755 /usr/share/secure-single-server/scripts/common/install \
-      /usr/share/secure-single-server/scripts/common/secret-set \
-      /usr/share/secure-single-server/bootc/scripts/praxis \
-    && ln -s /usr/share/secure-single-server/bootc/scripts/praxis /usr/bin/sss-praxis \
-    && systemctl enable secure-single-server-praxis.service \
+RUN chmod 0755 /usr/share/secure-single-server/bootc/scripts/vllm-common \
+      /usr/share/secure-single-server/bootc/scripts/vllm \
+      /usr/share/secure-single-server/bootc/scripts/vllm-lib \
+    && ln -s /usr/share/secure-single-server/bootc/scripts/vllm /usr/bin/sss-vllm \
+    && systemctl enable secure-single-server-vllm.service \
     && bootc container lint
 
 LABEL containers.bootc=1

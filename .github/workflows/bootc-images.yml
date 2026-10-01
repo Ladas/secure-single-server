@@ -7,7 +7,8 @@ on:
       - bootc/Containerfile
       - bootc/Containerfile.harness
       - bootc/Containerfile.praxis
-      - bootc/Containerfile.vllm
+      - bootc/Containerfile.vllm.cpu
+      - bootc/Containerfile.vllm.gpu
       - bootc/build
       - bootc/install-nvidia
       - bootc/test-images
@@ -27,7 +28,8 @@ on:
       - bootc/Containerfile
       - bootc/Containerfile.harness
       - bootc/Containerfile.praxis
-      - bootc/Containerfile.vllm
+      - bootc/Containerfile.vllm.cpu
+      - bootc/Containerfile.vllm.gpu
       - bootc/build
       - bootc/install-nvidia
       - bootc/test-images
@@ -56,7 +58,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       praxis: ${{ steps.select.outputs.praxis }}
-      vllm: ${{ steps.select.outputs.vllm }}
+      vllm_cpu: ${{ steps.select.outputs.vllm_cpu }}
+      vllm_gpu: ${{ steps.select.outputs.vllm_gpu }}
       harnesses: ${{ steps.select.outputs.harnesses }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -69,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then
-            printf '%s\n' '{"praxis":true,"vllm":true,"harnesses":true}' >selected.json
+            printf '%s\n' '{"praxis":true,"vllm_cpu":true,"vllm_gpu":true,"harnesses":true}' >selected.json
           elif [[ "${{ github.event_name }}" == pull_request ]]; then
             git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" >changed.txt
             python3 bootc/ci/select-images.py <changed.txt >selected.json
@@ -77,14 +80,19 @@ jobs:
             if git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
               git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" >changed.txt
             else
-              printf '%s\n' '.github/workflows/bootc-images.yml' >changed.txt
+              git diff --name-only HEAD^ HEAD >changed.txt
             fi
             python3 bootc/ci/select-images.py <changed.txt >selected.json
           fi
           {
-            echo "praxis=$(jq -r .praxis selected.json)"
-            echo "vllm=$(jq -r .vllm selected.json)"
-            echo "harnesses=$(jq -r .harnesses selected.json)"
+            for key in praxis vllm_cpu vllm_gpu harnesses; do
+              value="$(jq -r ".$key" selected.json)"
+              if [[ "${value}" != true && "${value}" != false ]]; then
+                printf 'invalid selector output for %s\n' "${key}" >&2
+                exit 1
+              fi
+              echo "${key}=${value}"
+            done
           } >>"$GITHUB_OUTPUT"
 
   build:
@@ -94,16 +102,19 @@ jobs:
       ${{
         (github.event_name != 'pull_request' ||
          github.event.pull_request.head.repo.fork == false) &&
+        (github.event_name != 'workflow_dispatch' ||
+         github.ref == 'refs/heads/main') &&
         (needs.changes.outputs.praxis == 'true' ||
-         needs.changes.outputs.vllm == 'true' ||
+         needs.changes.outputs.vllm_cpu == 'true' ||
+         needs.changes.outputs.vllm_gpu == 'true' ||
          needs.changes.outputs.harnesses == 'true')
       }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    environment:
-      name: ${{ github.event_name == 'pull_request' && 'bootc-image-pr' || 'bootc-image-main' }}
+    environment: ${{ github.event_name == 'pull_request' && 'bootc-image-pr' || 'bootc-image-main' }}
     env:
       IMAGE_PREFIX: localhost/secure-single-server
+      IMAGE_RELEASE_TAG: v0.1
       RHEL_BOOTC_IMAGE: ${{ vars.RHEL_BOOTC_IMAGE }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -113,6 +124,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y podman skopeo jq
+      - name: Validate build configuration
+        env:
+          REDHAT_REGISTRY_USERNAME: ${{ secrets.REDHAT_REGISTRY_USERNAME }}
+          REDHAT_REGISTRY_PASSWORD: ${{ secrets.REDHAT_REGISTRY_PASSWORD }}
+          RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID }}
+          RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$RHEL_BOOTC_IMAGE"
+          test -n "$REDHAT_REGISTRY_USERNAME"
+          test -n "$REDHAT_REGISTRY_PASSWORD"
+          test -n "$RHSM_ORG_ID"
+          test -n "$RHSM_ACTIVATION_KEY"
       - name: Authenticate to Red Hat Registry
         shell: bash
         env:
@@ -132,10 +156,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$RHEL_BOOTC_IMAGE"
-          sudo env \
-            RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" \
-            RHSM_ORG_ID="$RHSM_ORG_ID" \
-            RHSM_ACTIVATION_KEY="$RHSM_ACTIVATION_KEY" \
+          sudo --preserve-env=RHEL_BOOTC_IMAGE,RHSM_ORG_ID,RHSM_ACTIVATION_KEY \
             bootc/build base "$IMAGE_PREFIX"
       - name: Build Praxis image
         if: needs.changes.outputs.praxis == 'true'
@@ -144,23 +165,26 @@ jobs:
           RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
         run: |
           set -euo pipefail
-          sudo env \
-            RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" \
-            RHSM_ORG_ID="$RHSM_ORG_ID" \
-            RHSM_ACTIVATION_KEY="$RHSM_ACTIVATION_KEY" \
+          sudo --preserve-env=RHEL_BOOTC_IMAGE,RHSM_ORG_ID,RHSM_ACTIVATION_KEY \
             bootc/build praxis "$IMAGE_PREFIX"
-      - name: Build vLLM image
-        if: needs.changes.outputs.vllm == 'true'
+      - name: Build vLLM CPU image
+        if: needs.changes.outputs.vllm_cpu == 'true'
         env:
           RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID }}
           RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
         run: |
           set -euo pipefail
-          sudo env \
-            RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" \
-            RHSM_ORG_ID="$RHSM_ORG_ID" \
-            RHSM_ACTIVATION_KEY="$RHSM_ACTIVATION_KEY" \
-            bootc/build vllm "$IMAGE_PREFIX"
+          sudo --preserve-env=RHEL_BOOTC_IMAGE,RHSM_ORG_ID,RHSM_ACTIVATION_KEY \
+            bootc/build vllm-cpu "$IMAGE_PREFIX"
+      - name: Build vLLM GPU image
+        if: needs.changes.outputs.vllm_gpu == 'true'
+        env:
+          RHSM_ORG_ID: ${{ secrets.RHSM_ORG_ID }}
+          RHSM_ACTIVATION_KEY: ${{ secrets.RHSM_ACTIVATION_KEY }}
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=RHEL_BOOTC_IMAGE,RHSM_ORG_ID,RHSM_ACTIVATION_KEY \
+            bootc/build vllm-gpu "$IMAGE_PREFIX"
       - name: Build harness images
         if: needs.changes.outputs.harnesses == 'true'
         run: |
@@ -169,15 +193,21 @@ jobs:
             sudo bootc/build "$harness" "$IMAGE_PREFIX"
           done
       - name: Test built images
+        env:
+          PRAXIS_SELECTED: ${{ needs.changes.outputs.praxis }}
+          VLLM_CPU_SELECTED: ${{ needs.changes.outputs.vllm_cpu }}
+          VLLM_GPU_SELECTED: ${{ needs.changes.outputs.vllm_gpu }}
+          HARNESSES_SELECTED: ${{ needs.changes.outputs.harnesses }}
         run: |
           set -euo pipefail
           variants=()
-          if [[ "${{ needs.changes.outputs.harnesses }}" == true ]]; then
+          if [[ "$HARNESSES_SELECTED" == true ]]; then
             variants+=(base)
           fi
-          [[ "${{ needs.changes.outputs.praxis }}" == true ]] && variants+=(praxis)
-          [[ "${{ needs.changes.outputs.vllm }}" == true ]] && variants+=(vllm)
-          [[ "${{ needs.changes.outputs.harnesses }}" == true ]] && variants+=(codex opencode openclaw)
+          [[ "$PRAXIS_SELECTED" == true ]] && variants+=(praxis)
+          [[ "$VLLM_CPU_SELECTED" == true ]] && variants+=(vllm-cpu)
+          [[ "$VLLM_GPU_SELECTED" == true ]] && variants+=(vllm-gpu)
+          [[ "$HARNESSES_SELECTED" == true ]] && variants+=(codex opencode openclaw)
           if ((${#variants[@]})); then
             sudo bootc/test-images "$IMAGE_PREFIX" "${variants[@]}"
           fi
@@ -191,20 +221,28 @@ jobs:
         env:
           QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
           QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+          PRAXIS_SELECTED: ${{ needs.changes.outputs.praxis }}
+          VLLM_CPU_SELECTED: ${{ needs.changes.outputs.vllm_cpu }}
+          VLLM_GPU_SELECTED: ${{ needs.changes.outputs.vllm_gpu }}
+          HARNESSES_SELECTED: ${{ needs.changes.outputs.harnesses }}
         run: |
           set -euo pipefail
+          test -n "$QUAY_USERNAME"
+          test -n "$QUAY_TOKEN"
           printf '%s' "$QUAY_TOKEN" |
             sudo podman login quay.io \
               --username "$QUAY_USERNAME" --password-stdin
           short_sha="${GITHUB_SHA::12}"
           variants=()
-          [[ "${{ needs.changes.outputs.praxis }}" == true ]] && variants+=(praxis)
-          [[ "${{ needs.changes.outputs.vllm }}" == true ]] && variants+=(vllm)
-          [[ "${{ needs.changes.outputs.harnesses }}" == true ]] && variants+=(codex opencode openclaw)
+          # Base is an internal harness parent; only deployable derivatives are published.
+          [[ "$PRAXIS_SELECTED" == true ]] && variants+=(praxis)
+          [[ "$VLLM_CPU_SELECTED" == true ]] && variants+=(vllm-cpu)
+          [[ "$VLLM_GPU_SELECTED" == true ]] && variants+=(vllm-gpu)
+          [[ "$HARNESSES_SELECTED" == true ]] && variants+=(codex opencode openclaw)
           for variant in "${variants[@]}"; do
             repository="quay.io/redhat-et/secure-single-server-${variant}"
-            sudo podman tag "${IMAGE_PREFIX}:${variant}" "${repository}:main"
+            sudo podman tag "${IMAGE_PREFIX}:${variant}" "${repository}:${IMAGE_RELEASE_TAG}"
             sudo podman tag "${IMAGE_PREFIX}:${variant}" "${repository}:sha-${short_sha}"
-            sudo podman push "${repository}:main"
+            sudo podman push "${repository}:${IMAGE_RELEASE_TAG}"
             sudo podman push "${repository}:sha-${short_sha}"
           done

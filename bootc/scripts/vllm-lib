@@ -20,8 +20,21 @@ vllm_image() {
   esac
 }
 
+vllm_image_profile() {
+  local profile
+  profile="$(<"${ROOT}/bootc/vllm-profile")"
+  case "${profile}" in cpu|gpu|any) ;; *) die 'invalid vLLM image profile' ;; esac
+  printf '%s\n' "${profile}"
+}
+
 vllm_preflight() {
   [[ "$(uname -m)" == x86_64 ]] || die 'vLLM profiles require x86_64'
+  if [[ "$1" != disabled ]]; then
+    local image_profile
+    image_profile="$(vllm_image_profile)"
+    [[ "${image_profile}" == any || "$1" == "${image_profile}" ]] ||
+      die "this ${image_profile} vLLM image supports only ${image_profile} mode"
+  fi
   case "$1" in
     cpu)
       grep -qw avx512f /proc/cpuinfo || die 'CPU profile requires AVX-512'

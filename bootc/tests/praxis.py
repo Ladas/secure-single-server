@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the standalone Praxis dispatcher without a host deployment."""
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import tempfile
@@ -24,7 +25,7 @@ class PraxisDispatcherTests(unittest.TestCase):
         source = (ROOT / 'bootc/scripts/praxis').read_text()
         source = source.replace(
             'ROOT=/usr/share/secure-single-server',
-            f'ROOT={ROOT}')
+            f'ROOT={shlex.quote(str(ROOT))}')
         source = source.replace(
             'source "${ROOT}/scripts/common/lib.sh"',
             '''source "${ROOT}/scripts/common/lib.sh"
@@ -80,15 +81,16 @@ as_service() {
             '"${ROOT}/scripts/common/install" --prepare', ':')
         source = source.replace(
             '/run/secure-single-server-praxis.lock',
-            str(self.work / 'secure-single-server-praxis.lock'))
+            shlex.quote(str(self.work / 'secure-single-server-praxis.lock')))
         source = source.replace(
-            '/etc/secure-single-server', str(self.state))
+            '/etc/secure-single-server',
+            shlex.quote(str(self.state)))
         source = source.replace(
             '/etc/praxis/shared-gateway.yaml',
-            str(self.work / 'praxis/shared-gateway.yaml'))
+            shlex.quote(str(self.work / 'praxis/shared-gateway.yaml')))
         source = source.replace(
             '/etc/containers/systemd/users',
-            str(self.work / 'containers/users'))
+            shlex.quote(str(self.work / 'containers/users')))
         script = self.work / 'dispatcher'
         script.write_text(source)
         script.chmod(0o755)

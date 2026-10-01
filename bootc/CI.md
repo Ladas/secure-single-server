@@ -30,8 +30,8 @@ CONTAINER_ENGINE=docker python3 bootc/tests/inference-image.py
 
 `.github/workflows/bootc-images.yml` builds only the image groups whose inputs
 changed. Pull requests build and test locally but do not publish. Pushes to
-`main` publish the selected images to `quay.io/redhat-et` with immutable
-`sha-<commit>` tags and a movable `main` tag.
+`main` publish the selected images to `quay.io/redhat-et` with the release-facing
+`v0.1` tag and immutable `sha-<commit>` audit tags.
 
 The workflow authenticates to `registry.redhat.io` with a Red Hat registry
 service account and uses `RHSM_ORG_ID` plus `RHSM_ACTIVATION_KEY` as ephemeral
@@ -41,25 +41,24 @@ into an image layer.
 
 Published repositories:
 
-- `secure-single-server-praxis`
-- `secure-single-server-vllm`
-- `secure-single-server-codex`
-- `secure-single-server-opencode`
-- `secure-single-server-openclaw`
+- The `base` image is built and tested as the internal harness parent but is
+  not published.
+- `quay.io/redhat-et/secure-single-server-praxis:v0.1`
+- `quay.io/redhat-et/secure-single-server-vllm-cpu:v0.1`
+- `quay.io/redhat-et/secure-single-server-vllm-gpu:v0.1`
+- `quay.io/redhat-et/secure-single-server-codex:v0.1`
+- `quay.io/redhat-et/secure-single-server-opencode:v0.1`
+- `quay.io/redhat-et/secure-single-server-openclaw:v0.1`
 
 Required GitHub configuration:
 
 - Repository variable: `RHEL_BOOTC_IMAGE`
-- Protected environment `bootc-image-pr` with required reviewers and secrets:
-  `REDHAT_REGISTRY_USERNAME`, `REDHAT_REGISTRY_PASSWORD`, `RHSM_ORG_ID`,
-  and `RHSM_ACTIVATION_KEY`
-- Environment `bootc-image-main` with those secrets plus `QUAY_USERNAME` and
-  `QUAY_TOKEN`
-
-The PR environment gates secret-backed execution behind a reviewer. GitHub
-does not provide repository secrets to fork PRs, and the workflow skips those
-runs explicitly. Restrict write access because a same-repository PR can modify
-the build scripts it executes after approval.
+- Protected environment `bootc-image-pr` with required reviewers for
+  same-repository pull-request builds
+- Environment `bootc-image-main` for trusted `main` and manual builds
+- Repository secrets: `REDHAT_REGISTRY_USERNAME`,
+  `REDHAT_REGISTRY_PASSWORD`, `RHSM_ORG_ID`, `RHSM_ACTIVATION_KEY`,
+  `QUAY_USERNAME`, and `QUAY_TOKEN`
 
 ## Scope
 

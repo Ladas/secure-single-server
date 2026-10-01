@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 prefix="${1:-localhost/secure-single-server}"
-shift || true
+if (( "$#" )); then
+  shift
+fi
 variants=("$@")
 if [[ "${#variants[@]}" -eq 0 ]]; then
-  variants=(base praxis vllm codex opencode openclaw)
+  variants=(base praxis vllm-cpu vllm-gpu codex opencode openclaw)
 fi
 for variant in "${variants[@]}"; do
   image="${prefix}:${variant}"
@@ -21,6 +23,7 @@ for variant in "${variants[@]}"; do
     test ! -s /etc/yum.repos.d/bootc-rhui.repo
     root=/usr/share/secure-single-server
     if [[ "$1" == base ]]; then
+      test "$(cat "$root/bootc/vllm-profile")" = any
       test -x /usr/bin/openshell
       /usr/bin/openshell --version
       test -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
@@ -44,7 +47,7 @@ for variant in "${variants[@]}"; do
       test ! -d "$root/openshell/harnesses"
       test ! -x /usr/bin/nvidia-smi
       test ! -x /usr/bin/nvidia-ctk
-    elif [[ "$1" == vllm ]]; then
+    elif [[ "$1" == vllm-cpu || "$1" == vllm-gpu ]]; then
       test ! -e /usr/bin/openshell
       test ! -e "$root/openshell"
       test ! -e "$root/configs/all-in-one"
@@ -53,12 +56,26 @@ for variant in "${variants[@]}"; do
       test -x /usr/bin/sss-vllm
       test -x /usr/share/secure-single-server/bootc/scripts/vllm
       test -f /usr/share/secure-single-server/configs/vllm/images.env
-      test ! -e "$root/bootc/vllm-profile"
+      test "$(cat "$root/bootc/vllm-profile")" = "${1#vllm-}"
       test ! -e "$root/bootc/harness"
       test ! -d "$root/openshell/harnesses"
-      test -x /usr/bin/nvidia-smi
-      test -x /usr/bin/nvidia-ctk
+      if [[ "$1" == vllm-gpu ]]; then
+        test -x /usr/bin/nvidia-smi
+        test -x /usr/bin/nvidia-ctk
+        if sss-vllm select cpu >/tmp/vllm-profile-check 2>&1; then
+          exit 1
+        fi
+        grep -q "this gpu vLLM image supports only gpu mode" /tmp/vllm-profile-check
+      else
+        test ! -x /usr/bin/nvidia-smi
+        test ! -x /usr/bin/nvidia-ctk
+        if sss-vllm select gpu >/tmp/vllm-profile-check 2>&1; then
+          exit 1
+        fi
+        grep -q "this cpu vLLM image supports only cpu mode" /tmp/vllm-profile-check
+      fi
     else
+      test "$(cat "$root/bootc/vllm-profile")" = any
       test -x /usr/bin/openshell
       /usr/bin/openshell --version
       test -L /etc/systemd/system/multi-user.target.wants/secure-single-server.service
@@ -76,9 +93,7 @@ for variant in "${variants[@]}"; do
     fi
     if [[ "$1" == praxis ]]; then
       sss-praxis help
-    elif [[ "$1" == vllm ]]; then
-      sss-vllm status
-    else
+    elif [[ "$1" != vllm-cpu && "$1" != vllm-gpu ]]; then
       sss-bootc help
     fi
   ' -- "${variant}"

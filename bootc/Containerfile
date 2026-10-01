@@ -3,24 +3,33 @@ ARG OPENSHELL_CLI_IMAGE
 ARG RHSM=0
 FROM ${OPENSHELL_CLI_IMAGE} AS cli
 FROM ${RHEL_BOOTC_IMAGE}
-ARG RHSM=0
+ARG RHSM
 
 # Workload containers are pulled into persistent rootless storage after boot.
 # Only the native CLI is copied into the OS image.
 RUN --mount=type=secret,id=rhsm_org,target=/run/secrets/rhsm_org \
     --mount=type=secret,id=rhsm_activation_key,target=/run/secrets/rhsm_activation_key \
     set -eu; \
+    registered=0; \
+    rhsm_cleanup() { \
+      if [ "${registered}" = 1 ]; then \
+        subscription-manager unregister; \
+        subscription-manager clean; \
+      fi; \
+    }; \
+    trap 'rhsm_cleanup || true' EXIT; \
     if [ "${RHSM}" = 1 ]; then \
       org="$(cat /run/secrets/rhsm_org)"; \
       activation_key="$(cat /run/secrets/rhsm_activation_key)"; \
       subscription-manager register --org "${org}" --activationkey "${activation_key}"; \
-      trap 'subscription-manager unregister || true; subscription-manager clean || true; rm -rf /etc/pki/consumer /etc/pki/entitlement /var/lib/rhsm /run/rhsm; find /var/log -type f -delete' EXIT; \
+      registered=1; \
     fi; \
     dnf install -y podman skopeo policycoreutils-python-utils shadow-utils \
       util-linux openssl openssh-clients jq python3 curl cloud-init; \
+    rhsm_cleanup; \
+    trap - EXIT; \
     dnf clean all; \
-    rm -rf /var/cache/dnf /var/lib/dnf /var/lib/rhsm /run/cloud-init /run/rhsm \
-      /etc/pki/consumer /etc/pki/entitlement; \
+    rm -rf /var/cache/dnf /var/lib/dnf /var/lib/rhsm /run/cloud-init /run/rhsm; \
     find /var/log -type f -delete
 COPY --from=cli /usr/local/bin/openshell /usr/bin/openshell
 COPY scripts/common /usr/share/secure-single-server/scripts/common
@@ -28,6 +37,7 @@ COPY configs /usr/share/secure-single-server/configs
 COPY openshell/configs /usr/share/secure-single-server/openshell/configs
 COPY openshell/scripts /usr/share/secure-single-server/openshell/scripts
 COPY bootc/scripts /usr/share/secure-single-server/bootc/scripts
+COPY bootc/vllm-profile /usr/share/secure-single-server/bootc/vllm-profile
 COPY bootc/systemd/secure-single-server*.service /usr/lib/systemd/system/
 COPY bootc/systemd/delegate.conf /usr/lib/systemd/system/user@.service.d/50-secure-single-server.conf
 RUN chmod 0755 /usr/share/secure-single-server/bootc/scripts/* \

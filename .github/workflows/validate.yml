@@ -71,6 +71,7 @@ jobs:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
           source scripts/common/lib.sh
+          : "${EXPECTED_ARCH:?expected runner architecture is required}"
           test "$(oci_architecture "$(uname -m)")" = "$EXPECTED_ARCH"
       - name: Start pinned Praxis profiles without provider keys
         env:

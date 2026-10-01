@@ -17,15 +17,17 @@ local adapters are not enabled.
 
 ## Host requirements
 
+- Published OS images: `quay.io/redhat-et/secure-single-server-vllm-cpu:v0.1`
+  and `quay.io/redhat-et/secure-single-server-vllm-gpu:v0.1`.
 - Separate CPU vLLM server: x86_64 with AVX-512, at least 32 GB RAM, and 64
   GiB recommended. This is a starting resource budget, not a throughput
   guarantee. The CPU profile uses BF16, a 4 GiB KV cache, and no explicit CPU
-  affinity/NUMA binding.
+  affinity/NUMA binding. Boot `vllm-cpu`; it omits NVIDIA drivers and the
+  Container Toolkit.
 - GPU: exactly one NVIDIA L4, a compatible NVIDIA host driver, and
   `nvidia-ctk` installed in the bootc OS image. The reconciler regenerates CDI
-  at boot. The one `vllm` image includes the NVIDIA 580 open driver and
-  Container Toolkit; CPU hosts can use the same image with GPU mode left
-  disabled. The build compiles the module for the kernel inside the image and
+  at boot. `vllm-gpu` includes the NVIDIA 580 open driver and Container
+  Toolkit. The build compiles the module for the kernel inside the image and
   fails if that kernel cannot be supported. Rebuild after kernel updates.
   Secure Boot with a custom signing key is not configured.
 - Persistent disk on the vLLM server: allow space for roughly 16 GB of model
@@ -57,8 +59,8 @@ VLLM_ENDPOINT="$(printf '%s' "${VLLM_INFO:-}" | jq -er '.VllmEndpoint')" \
 printf 'Private vLLM endpoint: %s\n' "${VLLM_ENDPOINT:-unknown}"
 ```
 
-On the dedicated server, boot the `vllm` image on either a CPU instance or the
-L4 instance. Alternatively, use the mutable RHEL vLLM installer with
+On the dedicated server, boot `vllm-cpu` on a CPU instance or `vllm-gpu` on
+the L4 instance. Alternatively, use the mutable RHEL vLLM installer with
 `--remote PRIVATE_IP` so port 8000 binds only to its private AWS address. On the
 booted single server, configure Praxis without changing the OpenShell harness
 policy:
@@ -77,22 +79,25 @@ falling back to a cloud provider.
 ## Build and boot a dedicated vLLM image
 
 Build and boot the updated OS using the [bootc instructions](README.md).
-The dedicated `vllm` target builds directly from RHEL bootc and excludes
-Praxis and OpenShell. It includes the NVIDIA 580 open driver and Container
-Toolkit so one image can serve CPU or GPU hosts:
+The dedicated `vllm-cpu` and `vllm-gpu` targets build directly from RHEL bootc
+and exclude Praxis and OpenShell. The CPU target omits NVIDIA components; the
+GPU target includes the NVIDIA 580 open driver and Container Toolkit:
 
 ```console
 sudo env RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" AWS_RHUI_REGION=us-east-1 \
-  bootc/build vllm localhost/secure-single-server
+  bootc/build vllm-cpu localhost/secure-single-server
+
+sudo env RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" AWS_RHUI_REGION=us-east-1 \
+  bootc/build vllm-gpu localhost/secure-single-server
 ```
 
 GPU drivers are OS components; vLLM and model weights remain separate workload
 containers and persistent data. On the booted host, select the mode matching
-the hardware:
+the image. Mismatched selections are rejected before starting a container:
 
 ```console
 sudo sss-vllm select cpu
-# On the prepared single-L4 host:
+# On the vllm-gpu image booted on the prepared single-L4 host:
 sudo sss-vllm select gpu
 sudo sss-vllm status
 sudo journalctl -u secure-single-server-vllm.service -b
