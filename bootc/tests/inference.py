@@ -69,8 +69,18 @@ admin "$@"
         result = subprocess.run(['bash', '-c', script, 'admin', 'inference', 'remote-vllm',
                                  '10.0.1.10:8000'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('VALIDATE 10.0.1.10:8000', result.stdout)
         self.assertIn('WRITE /etc/secure-single-server/vllm-endpoint', result.stdout)
         self.assertIn('WRITE /etc/secure-single-server/inference-backend', result.stdout)
+
+        invalid_selection = script.replace(
+            'validate_vllm_endpoint() { printf \'VALIDATE %s\\n\' "$1"; }',
+            'validate_vllm_endpoint() { die "invalid endpoint"; }')
+        result = subprocess.run(['bash', '-c', invalid_selection, 'admin', 'inference',
+                                 'remote-vllm', '8.8.8.8:8000'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('WRITE /etc/secure-single-server/vllm-endpoint', result.stdout)
 
         result = subprocess.run(['bash', '-c', script, 'admin', 'inference', 'status'],
                                 capture_output=True, text=True)
