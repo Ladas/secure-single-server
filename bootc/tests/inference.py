@@ -78,6 +78,17 @@ admin "$@"
         self.assertIn('Praxis upstream: remote-vllm', result.stdout)
         self.assertIn('Remote vLLM endpoint: 10.0.1.10:8000', result.stdout)
 
+        invalid_status = script.replace(
+            'inference_vllm_endpoint() { echo 10.0.1.10:8000; }',
+            'inference_vllm_endpoint() { die "invalid endpoint"; }')
+        result = subprocess.run(['bash', '-c', invalid_status, 'admin', 'inference', 'status'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('Remote vLLM endpoint:', result.stdout)
+
+        self.assertIn('backend="$(inference_backend)"', source)
+        self.assertNotIn('if [[ "${action}" == create && "$(inference_backend)"', source)
+
         result = subprocess.run(['bash', '-c', script, 'admin', 'inference'],
                                 capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
@@ -205,6 +216,27 @@ die() { exit 1; }
                          '8.8.8.8:8000', '172.32.1.10:8000', '10.0.1.256:8000',
                          '10.010.1.10:8000', '10.0.1.10:08000'):
             result = subprocess.run(['bash', '-c', command, 'validate', endpoint],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_remote_render_validation_does_not_require_python(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            bin_directory = Path(directory)
+            failing_python = bin_directory / 'python3'
+            failing_python.write_text('#!/bin/sh\nexit 99\n')
+            failing_python.chmod(0o755)
+            path = f'{bin_directory}:/usr/bin:/bin'
+            result = subprocess.run(['env', f'PATH={path}', 'bash',
+                                     str(ROOT / 'scripts/vllm/install'), '--render',
+                                     '--remote', '10.0.1.10', 'cpu'],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('PublishPort=10.0.1.10:8000:8000', result.stdout)
+
+            result = subprocess.run(['env', f'PATH={path}', 'bash',
+                                     str(ROOT / 'scripts/vllm/install'), '--render',
+                                     '--remote', '8.8.8.8', 'cpu'],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
 

@@ -60,7 +60,7 @@ class VllmTest(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn("[Container]", result.stdout)
-            self.assertIn("--remote requires an RFC1918 IPv4 address", result.stderr)
+            self.assertIn("vLLM endpoint", result.stderr)
 
     def test_remote_removal_cleans_remote_state_without_touching_gateway_network(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -150,8 +150,16 @@ class VllmTest(unittest.TestCase):
             source.index("die 'vLLM did not become ready")]
         self.assertNotIn('unit_staged=0', install_block)
         self.assertNotIn('network_staged=0', install_block)
+        self.assertNotIn('>"${state}/mode"', install_block)
+        self.assertNotIn('>"${state}/model"', install_block)
+        self.assertNotIn('>"${state}/listen-address"', install_block)
         self.assertIn('unit_staged=0', success_block)
+        self.assertIn('template_staged=0', success_block)
         self.assertIn('network_staged=0', success_block)
+        self.assertIn('service_touched=0', success_block)
+        self.assertIn('>"${state}/mode"', success_block)
+        self.assertIn('>"${state}/model"', success_block)
+        self.assertIn('>"${state}/listen-address"', success_block)
         self.assertLess(success_block.index('unit_staged=0'), success_block.index('exit 0'))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -163,6 +171,10 @@ class VllmTest(unittest.TestCase):
             manifest = state / "manifest"
             manifest_backup = state / "manifest.previous"
             manifest_new = state / "manifest.new"
+            template = state / "chat-template.jinja"
+            template_backup = state / "chat-template.jinja.previous"
+            template_hash = state / "template.sha256"
+            template_hash_backup = state / "template.sha256.previous"
             state.mkdir()
             unit.write_text("new unit\n")
             network_unit.write_text("network\n")
@@ -177,8 +189,14 @@ network_unit={shlex.quote(str(network_unit))}
 temporary={shlex.quote(str(temporary))}
 manifest_new={shlex.quote(str(manifest_new))}
 manifest_backup={shlex.quote(str(manifest_backup))}
+template_backup={shlex.quote(str(template_backup))}
+template_hash_backup={shlex.quote(str(template_hash_backup))}
 unit_staged=1
+template_staged=0
 network_staged=1
+service_touched=0
+service_was_active=0
+as_service() {{ printf 'SERVICE %s\\n' "$*"; }}
 {cleanup}
 cleanup_install
 """
@@ -196,6 +214,7 @@ cleanup_install
             (state / "network-owned").write_text("")
             manifest.write_text("committed\n")
             script = script.replace("unit_staged=1", "unit_staged=0")
+            script = script.replace("network_staged=1", "network_staged=0")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(network_unit.exists())
@@ -210,6 +229,7 @@ cleanup_install
             manifest_backup.write_text("committed manifest\n")
             manifest_new.write_text("replacement manifest\n")
             script = script.replace("unit_staged=0", "unit_staged=1")
+            script = script.replace("network_staged=0", "network_staged=1")
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(unit.read_text(), "committed unit\n")
@@ -217,6 +237,24 @@ cleanup_install
             self.assertFalse(manifest_new.exists())
             self.assertFalse(unit_backup.exists())
             self.assertFalse(manifest_backup.exists())
+            self.assertFalse(network_unit.exists())
+
+            template.write_text("new template\n")
+            template_hash.write_text("new hash\n")
+            template_backup.write_text("old template\n")
+            template_hash_backup.write_text("old hash\n")
+            script = script.replace("template_staged=0", "template_staged=1")
+            script = script.replace("service_touched=0", "service_touched=1")
+            script = script.replace("service_was_active=0", "service_was_active=1")
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(template.read_text(), "old template\n")
+            self.assertEqual(template_hash.read_text(), "old hash\n")
+            self.assertFalse(template_backup.exists())
+            self.assertFalse(template_hash_backup.exists())
+            self.assertIn('SERVICE systemctl --user stop praxis-vllm.service', result.stdout)
+            self.assertIn('SERVICE systemctl --user daemon-reload', result.stdout)
+            self.assertIn('SERVICE systemctl --user restart praxis-vllm.service', result.stdout)
 
     def test_model_selection_rejects_unknown_and_duplicate_presets(self):
         for args in (("--model", "unknown", "cpu"), ("--model", "../qwen3-8b", "cpu"),

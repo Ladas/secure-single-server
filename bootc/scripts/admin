@@ -39,7 +39,8 @@ EOF
         backend="$(inference_backend)"
         printf 'Praxis upstream: %s\n' "${backend}"
         if [[ "${backend}" == remote-vllm ]]; then
-          printf 'Remote vLLM endpoint: %s\n' "$(inference_vllm_endpoint)"
+          endpoint="$(inference_vllm_endpoint)"
+          printf 'Remote vLLM endpoint: %s\n' "${endpoint}"
         fi
         exit 0
         ;;
@@ -103,7 +104,8 @@ EOF
     action="${2:-}"
     case "${action}" in create|connect) ;; *) die 'expected create or connect' ;; esac
     shift 2
-    if [[ "${action}" == create && "$(inference_backend)" =~ ^(vllm|remote-vllm)$ ]]; then
+    backend="$(inference_backend)"
+    if [[ "${action}" == create && "${backend}" =~ ^(vllm|remote-vllm)$ ]]; then
       [[ "${harness}" == opencode ]] || die 'Praxis vLLM integration currently supports the OpenCode OS variant only'
       for argument in "$@"; do
         case "${argument}" in --provider|--config|--provider=*|--config=*) die 'Praxis vLLM integration owns provider configuration; omit --provider and --config' ;; esac

@@ -82,18 +82,7 @@ done
 [[ -n "${mode}" ]] || die 'expected cpu or gpu'
 model="${model:-qwen3-8b}"
 if [[ -n "${remote_listen}" ]]; then
-  require_command python3
-  python3 - "${remote_listen}" <<'PY'
-import ipaddress, sys
-try:
-    address = ipaddress.ip_address(sys.argv[1])
-except ValueError:
-    raise SystemExit("--remote requires an RFC1918 IPv4 address")
-private = any(address in ipaddress.ip_network(network) for network in (
-    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
-if address.version != 4 or not private:
-    raise SystemExit("--remote requires an RFC1918 IPv4 address")
-PY
+  validate_vllm_endpoint "${remote_listen}:8000"
 fi
 VLLM_CONTEXT=16384
 VLLM_TOOL_PARSER=hermes
@@ -154,10 +143,15 @@ network_unit="/etc/containers/systemd/users/${uid}/praxis.network"
 state=/etc/praxis-vllm
 network_staged=0
 unit_staged=0
+template_staged=0
+service_touched=0
+service_was_active=0
 temporary=''
 unit_backup="${unit}.previous"
 manifest_backup="${state}/manifest.previous"
 manifest_new="${state}/manifest.new"
+template_backup="${state}/chat-template.jinja.previous"
+template_hash_backup="${state}/template.sha256.previous"
 # shellcheck disable=SC2329
 cleanup_install() {
   if (( unit_staged )); then
@@ -168,8 +162,28 @@ cleanup_install() {
       rm -f "${unit}" "${state}/manifest"
     fi
   fi
-  rm -f "${temporary}" "${manifest_new}" "${unit_backup}" "${manifest_backup}"
-  if (( network_staged )) && [[ ! -f "${state}/manifest" ]]; then
+  if (( template_staged )); then
+    if [[ -f "${template_backup}" ]]; then
+      mv -f "${template_backup}" "${state}/chat-template.jinja"
+    else
+      rm -f "${state}/chat-template.jinja"
+    fi
+    if [[ -f "${template_hash_backup}" ]]; then
+      mv -f "${template_hash_backup}" "${state}/template.sha256"
+    else
+      rm -f "${state}/template.sha256"
+    fi
+  fi
+  if (( service_touched )); then
+    as_service systemctl --user stop praxis-vllm.service
+    as_service systemctl --user daemon-reload
+    if (( service_was_active )); then
+      as_service systemctl --user restart praxis-vllm.service
+    fi
+  fi
+  rm -f "${temporary}" "${manifest_new}" "${unit_backup}" "${manifest_backup}" \
+    "${template_backup}" "${template_hash_backup}"
+  if (( network_staged )); then
     rm -f "${network_unit}" "${state}/network-owned"
   fi
 }
@@ -200,6 +214,13 @@ else
   touch "${state}/network-owned"
 fi
 if [[ -n "${VLLM_CHAT_TEMPLATE}" ]]; then
+  if [[ -e "${state}/chat-template.jinja" ]]; then
+    cp -p "${state}/chat-template.jinja" "${template_backup}"
+  fi
+  if [[ -e "${state}/template.sha256" ]]; then
+    cp -p "${state}/template.sha256" "${template_hash_backup}"
+  fi
+  template_staged=1
   install -o root -g "${gid}" -m 0640 "${VLLM_CHAT_TEMPLATE}" "${state}/chat-template.jinja"
   if ! semanage fcontext -a -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$' 2>/dev/null; then
     semanage fcontext -m -t container_file_t '^/etc/praxis-vllm/chat-template\.jinja$'
@@ -210,6 +231,9 @@ fi
 temporary="$(mktemp)"
 render "${mode}" >"${temporary}"
 if [[ -e "${unit}" ]]; then
+  if as_service systemctl --user is-active --quiet praxis-vllm.service; then
+    service_was_active=1
+  fi
   cp -p "${unit}" "${unit_backup}"
   cp -p "${state}/manifest" "${manifest_backup}"
 fi
@@ -217,18 +241,7 @@ unit_staged=1
 sha256_file "${temporary}" >"${manifest_new}"
 install -o root -g "${gid}" -m 0640 "${temporary}" "${unit}"
 install -o root -g "${gid}" -m 0640 "${manifest_new}" "${state}/manifest"
-printf '%s\n' "${mode}" >"${state}/mode"
-printf '%s\n' "${model}" >"${state}/model"
-if [[ -f "${state}/network-owned" && ! -f "/etc/containers/systemd/users/${uid}/praxis.container" ]]; then
-  touch "${state}/network-owned"
-else
-  rm -f "${state}/network-owned"
-fi
-if [[ -n "${remote_listen}" ]]; then
-  printf '%s\n' "${remote_listen}" >"${state}/listen-address"
-else
-  rm -f "${state}/listen-address"
-fi
+service_touched=1
 as_service systemctl --user daemon-reload
 as_service systemctl --user restart praxis-vllm.service
 for (( attempt=0; attempt<360; attempt++ )); do
@@ -242,8 +255,22 @@ for (( attempt=0; attempt<360; attempt++ )); do
       [[ -z "$(as_service podman port praxis-vllm)" ]] || die 'vLLM unexpectedly publishes a host port'
       note "vLLM ${mode} ready: ${model}, private container port 8000; no host publication"
     fi
+    printf '%s\n' "${mode}" >"${state}/mode"
+    printf '%s\n' "${model}" >"${state}/model"
+    if [[ -f "${state}/network-owned" && ! -f "/etc/containers/systemd/users/${uid}/praxis.container" ]]; then
+      touch "${state}/network-owned"
+    else
+      rm -f "${state}/network-owned"
+    fi
+    if [[ -n "${remote_listen}" ]]; then
+      printf '%s\n' "${remote_listen}" >"${state}/listen-address"
+    else
+      rm -f "${state}/listen-address"
+    fi
     unit_staged=0
+    template_staged=0
     network_staged=0
+    service_touched=0
     exit 0
   fi
   if (( attempt % 6 == 0 )); then note 'waiting for vLLM model download/startup; inspect praxis-vllm container logs for progress'; fi
