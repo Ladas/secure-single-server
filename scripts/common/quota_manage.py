@@ -20,14 +20,20 @@ def listing(config, *, provider=None, names=None):
     unknown = set(names or []) - set(available)
     if unknown:
         raise ValueError("unknown or disabled quota rules: " + ", ".join(sorted(unknown)))
-    rows = []
+    providers_available = list(PROVIDERS) + sorted({n.rsplit('-', 3)[0] for n in available
+        if n.endswith(('-openai-rolling-day', '-anthropic-rolling-day'))
+        and not n.startswith(tuple(p + '-' for p in PROVIDERS))})
+    rows, seen = [], set()
     for chain in config["filter_chains"]:
         for item in chain["filters"]:
             if item["filter"] != "token_rate_limit":
                 continue
             for rule in item["rules"]:
                 name = rule["name"]
-                owner = next((p for p in PROVIDERS if name.startswith(p + "-")), None)
+                if name in seen:
+                    continue
+                seen.add(name)
+                owner = next((p for p in sorted(providers_available, key=len, reverse=True) if name.startswith(p + "-")), None)
                 if (provider and owner != provider) or (names and name not in names):
                     continue
                 minimum, reason = None, ""
@@ -39,7 +45,7 @@ def listing(config, *, provider=None, names=None):
                              "window": rule.get("window", "-"), "capacity": rule["capacity"],
                              "minimum_capacity": minimum, "settable": not reason, "reason": reason})
     providers = []
-    for name in PROVIDERS:
+    for name in providers_available:
         if provider and name != provider:
             continue
         matches = [row for row in rows if row["provider"] == name]
@@ -83,7 +89,7 @@ def plan(config, overrides, value, *, provider=None, names=None):
     available = quota_config.rules(config)
     selected = list(dict.fromkeys(names or []))
     if provider:
-        selected = [name for name in available if name.startswith(provider + "-")]
+        selected = [row["rule"] for row in listing(config, provider=provider)["rules"]]
     if not selected:
         raise ValueError("no matching enabled quota rules; run quota-set --list first")
     unknown = set(selected) - set(available)
@@ -120,7 +126,7 @@ def parse_args(argv=None):
     parser.add_argument("--list", action="store_true", help="list installed providers and settable rules without changing them")
     parser.add_argument("--json", action="store_true", help="emit structured output with --list")
     select = parser.add_mutually_exclusive_group()
-    select.add_argument("--provider", choices=PROVIDERS,
+    select.add_argument("--provider",
                         help="select all enabled quota rules for this provider")
     select.add_argument("--rule", action="append", help="select an exact rule name; repeat for multiple rules")
     parser.add_argument("--capacity", type=int, help="total tokens per existing rolling window")

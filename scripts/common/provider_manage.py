@@ -15,7 +15,7 @@ import tempfile
 import time
 import uuid
 
-from provider_config import SingleValueAction, render, validate_vllm_endpoint
+from provider_config import SingleValueAction, render, validate_vllm_endpoint, custom_name, endpoint
 import quota_config
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,9 +36,22 @@ def updated_config(template, installed, previous, selected, *, legacy=False, ove
     def configured(state):
         return quota_config.apply(render(template, vllm=state["vllm"], openai=bool(state["openai_secret"]),
                       anthropic=bool(state["anthropic_secret"]),
-                      vllm_endpoint=state.get("vllm_endpoint", "")), overrides or {})
+                      vllm_endpoint=state.get("vllm_endpoint", ""),
+                      shared_vllm=state.get("shared_vllm_quota", False), custom=state.get("custom_providers")), overrides or {})
 
     expected = quota_config.apply(template, overrides or {}) if legacy else configured(previous)
+    if installed != expected and not legacy:
+        # Older managed renderers omitted the Messages listener's model routes.
+        # Accept exactly that predecessor; all other settings must still match.
+        predecessor = json.loads(json.dumps(expected))
+        for chain in predecessor['filter_chains']:
+            if chain['name'] == 'anthropic':
+                for item in chain['filters']:
+                    if item['filter'] == 'router':
+                        item['routes'] = [r for r in item['routes']
+                                          if r.get('path') not in ('/vllm/v1/models', '/v1/models')]
+        if installed == predecessor:
+            expected = predecessor
     if installed != expected:
         raise ValueError("installed settings differ from these templates; use the matching checkout before changing providers")
     return None if previous == selected else configured(selected)
@@ -124,7 +137,11 @@ def main():
     signal.signal(signal.SIGTERM, interrupted)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("show", "enable", "disable"))
-    parser.add_argument("provider", nargs="?", choices=("vllm", "openai", "anthropic"))
+    parser.add_argument("provider", nargs="?", help="vllm, openai, anthropic, or a custom provider name")
+    parser.add_argument('--openai-url', help='custom provider OpenAI-compatible HTTPS origin or /v1 URL')
+    parser.add_argument('--anthropic-url', help='custom provider native Messages HTTPS origin')
+    parser.add_argument("--shared-quota", action="store_true", help="enable vLLM with one Valkey allowance across both APIs")
+    parser.add_argument("--capacity", type=int, help="capacity for --shared-quota (required for first migration)")
     parser.add_argument("--secret", help="use an existing secret NAME; omit to enter a new cloud key at a hidden prompt")
     parser.add_argument("--vllm-endpoint",
                         help="enable the separate-server route with RFC1918_IP:PORT; omit for deprecated co-located mode",
@@ -132,8 +149,14 @@ def main():
     args = parser.parse_args()
     if args.action != "show" and not args.provider:
         parser.error("enable/disable requires a provider")
+    if args.shared_quota and (args.action != 'enable' or args.provider != 'vllm'):
+        parser.error('--shared-quota applies to enable vllm')
+    if args.capacity is not None and not args.shared_quota:
+        parser.error('--capacity requires --shared-quota')
+    if args.shared_quota and args.capacity is None:
+        parser.error('--shared-quota requires an explicit --capacity')
     if args.secret and (args.action != "enable" or args.provider == "vllm"):
-        parser.error("--secret applies only when enabling OpenAI/Anthropic")
+        parser.error("--secret applies only when enabling an upstream provider")
     if args.secret and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", args.secret):
         parser.error("invalid secret name")
     if args.vllm_endpoint is not None and (args.action != "enable" or args.provider != "vllm"):
@@ -145,6 +168,14 @@ def main():
             validate_vllm_endpoint(args.vllm_endpoint)
         except ValueError as error:
             parser.error(str(error))
+    custom = args.provider not in (None, 'vllm', 'openai', 'anthropic')
+    if custom:
+        custom_name(args.provider)
+    if (args.openai_url or args.anthropic_url) and (not custom or args.action != 'enable'):
+        parser.error('provider URLs apply only to enable CUSTOM_NAME')
+    for url in (args.openai_url, args.anthropic_url):
+        if url:
+            endpoint(url)
     account = pwd.getpwnam(os.environ.get("PRAXIS_SERVICE_USER", "praxis-svc"))
     profile = (CONFIG / "shared-gateway.profile").read_text().strip()
     scenario = (CONFIG / "gateway.scenario").read_text().strip()
@@ -161,15 +192,27 @@ def main():
     if state_file.exists():
         stored = json.loads(state_file.read_text())
         legacy_state = set(state) - {"vllm_endpoint"}
-        if set(stored) not in (set(state), legacy_state) or any(
+        if set(stored) - {"shared_vllm_quota", "custom_providers"} not in (set(state), legacy_state) or any(
                 stored[p] != state[p] for p in ("openai_secret", "anthropic_secret")):
             raise ValueError("provider state differs from the installed secret references")
         stored.setdefault("vllm_endpoint", "")
+        for slug, settings in stored.get('custom_providers', {}).items():
+            custom_name(slug)
+            target = 'CUSTOM_' + slug.upper().replace('-', '_') + '_API_KEY'
+            expected = f"Secret={settings['secret']},type=env,target={target}"
+            if expected not in unit.splitlines():
+                raise ValueError('custom provider state differs from installed secret references')
         state = stored
     if args.action == "show":
         print(json.dumps(state, indent=2))
         return
-    previous = state.copy()
+    previous = json.loads(json.dumps(state))
+    sharing = args.shared_quota and not state.get('shared_vllm_quota', False)
+    if sharing and not previous['vllm']:
+        parser.error('enable vllm first, then rerun with --shared-quota to preserve any retained API ledgers')
+    if args.shared_quota:
+        state['shared_vllm_quota'] = True
+
     version = None
     if args.provider == "vllm":
         state["vllm"] = args.action == "enable"
@@ -183,7 +226,20 @@ def main():
                 args.secret = f"praxis-{args.provider}-api-key-{version}"
             else:
                 service("podman", "secret", "inspect", args.secret, stdout=subprocess.DEVNULL)
-        state[args.provider + "_secret"] = args.secret if args.action == "enable" else ""
+        if custom:
+            configured = state.setdefault('custom_providers', {})
+            if args.action == 'disable':
+                configured.pop(args.provider, None)
+            else:
+                item = configured.get(args.provider, {}).copy()
+                item.update({api + '_url': value for api, value in
+                             (('openai', args.openai_url), ('anthropic', args.anthropic_url)) if value})
+                if not any(item.get(api + '_url') for api in ('openai', 'anthropic')):
+                    parser.error('a new custom provider needs --openai-url and/or --anthropic-url')
+                item['secret'] = args.secret
+                configured[args.provider] = item
+        else:
+            state[args.provider + "_secret"] = args.secret if args.action == "enable" else ""
     import yaml
     template = ROOT / ("configs/remote-gateway/gateway.yaml" if scenario == "remote-gateway" else
                        "configs/all-in-one/shared-gateway" + ("-valkey" if profile == "valkey" else "") + ".yaml")
@@ -194,25 +250,53 @@ def main():
                 provider = f["rules"][0]["name"].split("-")[0]
                 f["backend"] = {"kind": "valkey", "url": "${TOKEN_RATE_LIMIT_VALKEY_URL}",
                                 "namespace": "secure-single-server:limits:" + provider}
-    config = updated_config(config, yaml.safe_load((CONFIG / "shared-gateway.yaml").read_text()),
+    installed = yaml.safe_load((CONFIG / "shared-gateway.yaml").read_text())
+    overrides = quota_config.load(CONFIG / 'quota-overrides.json')
+    config = updated_config(config, installed,
                             previous, state, legacy=not state_file.exists(),
-                            overrides=quota_config.load(CONFIG / "quota-overrides.json"))
-    if config is None:
+                            overrides=overrides)
+    if args.shared_quota:
+        overrides['vllm-rolling-day'] = quota_config.capacity(args.capacity)
+        config = quota_config.apply(config or installed, overrides)
+    if config is None or (config == installed and state == previous):
         print("Provider configuration is unchanged.")
         return
     if version:
-        create_cloud_secret(args.provider, version)
+        if custom:
+            value = getpass.getpass(args.provider + ' API key: ')
+            if not value or any(c.isspace() for c in value):
+                raise ValueError('API key must be nonempty and contain no whitespace')
+            service('podman', 'secret', 'create', args.secret, '-', input=value, text=True,
+                    stdout=subprocess.DEVNULL)
+        else:
+            create_cloud_secret(args.provider, version)
     lines = [line for line in unit.splitlines() if not re.match(
-        r"Secret=.*target=(OPENAI|ANTHROPIC)_API_KEY$", line)]
+        r"Secret=.*target=(OPENAI|ANTHROPIC|CUSTOM_[A-Z0-9_]+)_API_KEY$", line)]
     insertion = lines.index("[Container]") + 1
     for provider in ("openai", "anthropic"):
         if state[provider + "_secret"]:
             lines.insert(insertion, f"Secret={state[provider + '_secret']},type=env,target={provider.upper()}_API_KEY")
+    for slug, settings in state.get('custom_providers', {}).items():
+        target = 'CUSTOM_' + slug.upper().replace('-', '_') + '_API_KEY'
+        lines.insert(insertion, f"Secret={settings['secret']},type=env,target={target}")
     changes = {CONFIG / "shared-gateway.yaml": (json.dumps(config, indent=2) + "\n").encode(),
                unit_path: ("\n".join(lines) + "\n").encode(),
                state_file: (json.dumps(state, indent=2) + "\n").encode()}
-    transaction(changes, CONFIG / "shared-gateway.manifest", account.pw_gid,
-                relabel=lambda: subprocess.run(["restorecon", "-F", str(CONFIG / "shared-gateway.yaml")], check=True))
+    if args.shared_quota:
+        changes[CONFIG / 'quota-overrides.json'] = (json.dumps(overrides, indent=2) + '\n').encode()
+    migrate = None
+    if sharing:
+        from quota_share import prepare
+        migrate = prepare(installed)
+    try:
+        if migrate:
+            service('systemctl', '--user', 'stop', 'praxis.service')
+            migrate()
+        transaction(changes, CONFIG / "shared-gateway.manifest", account.pw_gid,
+                    relabel=lambda: subprocess.run(["restorecon", "-F", str(CONFIG / "shared-gateway.yaml")], check=True))
+    finally:
+        if migrate:
+            service('systemctl', '--user', 'start', 'praxis.service')
     print("Provider change applied; TLS/JWT files, other secrets and Valkey data retained.")
 
 

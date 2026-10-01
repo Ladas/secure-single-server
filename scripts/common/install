@@ -255,7 +255,10 @@ elif [[ "${profile}" == switchyard ]]; then
 else
   require_command python3
   python3 -c 'import yaml' || die "install python3-pyyaml first"
-  [[ "${vllm}" == 1 || -n "${openai_secret}${anthropic_secret}" ]] || die "enable at least one provider"
+  if [[ "${vllm}" != 1 && -z "${openai_secret}${anthropic_secret}" ]]; then
+    python3 -c 'import json,sys; sys.exit(not bool(json.load(open(sys.argv[1])).get("custom_providers")))' \
+      "${CONFIG_DIR}/providers.json" || die "enable at least one provider"
+  fi
 fi
 [[ -z "${openai_secret}" ]] || require_secret "${openai_secret}"
 [[ -z "${anthropic_secret}" ]] || require_secret "${anthropic_secret}"
@@ -380,7 +383,7 @@ if [[ "${scenario}" == remote-gateway ]]; then
 fi
 
 if (( providers == 1 )); then
-  provider_args=(--directory "${tmp_dir}" --openai-secret "${openai_secret}" --anthropic-secret "${anthropic_secret}")
+  provider_args=(--directory "${tmp_dir}" --existing-state "${CONFIG_DIR}/providers.json" --openai-secret "${openai_secret}" --anthropic-secret "${anthropic_secret}")
   (( vllm == 0 )) || provider_args+=(--vllm)
   [[ -z "${vllm_endpoint}" ]] || provider_args+=(--vllm-endpoint "${vllm_endpoint}")
   python3 "${SCRIPT_DIR}/provider_config.py" "${provider_args[@]}"

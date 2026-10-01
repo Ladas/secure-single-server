@@ -1,84 +1,141 @@
 # Manage providers in an existing Praxis gateway
 
-Run these commands in the administrator's RHEL SSH session, from the matching
-deployment directory. They work for all-in-one and remote-gateway, with memory
-or Valkey quotas. Qwen and other enabled providers remain available.
+Run as the administrator, from the matching deployment checkout. These commands
+preserve other providers and listener authentication. Provider changes restart
+Praxis; finish active tasks first. Valkey quotas persist across restarts.
 
 ```console
 cd ~/secure-single-server-deploy
 sudo dnf install -y python3-pyyaml
 sudo scripts/common/providers show
+sudo scripts/common/quota-set --list
 ```
 
-## How providers share the gateway
-
-There is one Praxis service and one installed `/etc/praxis/shared-gateway.yaml`.
-The installer and provider helper render it from the selected all-in-one or
-remote-gateway template. Enabling vLLM adds routes to its private container;
-enabling OpenAI/Anthropic adds cloud routes and secret references to the same
-configuration. Existing listeners and remote TLS/JWT protection are preserved.
-
-| Client API | All-in-one listener | Remote-gateway listener | Destination |
-| --- | --- | --- | --- |
-| `/vllm/v1/responses`, `/vllm/v1/chat/completions` | Loopback `8080` | HTTPS/JWT `8443` | Private vLLM |
-| `/vllm/v1/messages` | Loopback `8081` | HTTPS/JWT `8443` | Private vLLM |
-| `/v1/responses`, `/v1/chat/completions` | Loopback `8080` | HTTPS/JWT `8443` | OpenAI, when enabled |
-| `/v1/messages` | Loopback `8081` | HTTPS/JWT `8443` | Anthropic, when enabled |
-
-No extra public listener or manual YAML merge is needed. The renderer strips
-`/vllm` before forwarding. `configs/vllm/praxis.yaml` is a separate bootc
-profile; mutable RHEL installation does not combine it with the gateway YAMLs.
-Use the matching deployment checkout: the helper rejects configuration drift.
-
-## Add OpenAI
+## OpenAI
 
 ```console
 sudo scripts/common/providers enable openai
+sudo scripts/common/quota-set --provider openai --capacity 2000000
+sudo scripts/common/quota-set --provider openai --capacity 2000000 --apply
 ```
 
-Enter the API key at the hidden prompt in a private terminal without input
-recording. The helper passes it through stdin into a Podman secret; it is not
-placed in command arguments or copied to users. OpenAI serves Codex and OpenCode.
+Enter the key at the hidden prompt. It becomes a versioned Podman secret; it is
+never passed in command arguments or given to harness users. The quota is an
+independent rolling 24-hour token allowance shared by this provider's users.
 
-## Add Anthropic
-
-This works independently of OpenAI:
+## Anthropic
 
 ```console
 sudo scripts/common/providers enable anthropic
+sudo scripts/common/quota-set --provider anthropic --capacity 2000000 --apply
 ```
 
-Enter its key at the hidden prompt. Anthropic serves Claude Code and OpenCode.
+## Another compatible provider
 
-## Verify and give users access
+Choose a unique lowercase name and replace the example URL. The upstream must
+speak the native API used by the harness: Responses for Codex, Chat Completions
+for OpenCode, or Messages for Claude Code. The helper does not translate APIs.
+
+```console
+sudo scripts/common/providers enable team \
+  --openai-url https://openai.example.com/v1
+sudo scripts/common/quota-set --list --provider team
+sudo scripts/common/quota-set --provider team --capacity 2000000 --apply
+```
+
+If the same provider/key also supports native Anthropic Messages, supply both
+endpoints when enabling it:
+
+```console
+sudo scripts/common/providers enable team \
+  --openai-url https://openai.example.com/v1 \
+  --anthropic-url https://messages.example.com
+```
+
+This prompts for the provider key again. Use separate provider names when the
+two endpoints require different keys. URLs must use HTTPS and an origin or
+`/v1` path; other upstream path prefixes are not supported by this helper.
+With both APIs enabled, `team-openai-rolling-day` and
+`team-anthropic-rolling-day` are independent quotas; `--provider team` selects
+both. Direct OpenAI, Anthropic and local vLLM budgets remain independent.
+
+## Share the local vLLM quota across harnesses
+
+On a Valkey gateway:
+
+```console
+sudo scripts/common/providers enable vllm --shared-quota --capacity 10000000
+sudo scripts/common/quota-set --list --provider vllm
+sudo scripts/common/quota-status
+```
+
+This creates one `vllm-rolling-day` budget for Chat, Responses and Messages.
+It migrates the two existing vLLM ledgers with their original timestamps and
+retains charges for interrupted reservations. Old ledgers remain for recovery;
+the allowance is the supplied capacity, not the sum of the former capacities.
+Migration requires the pinned image and managed 24h/300s Valkey rules.
+In-memory quotas cannot share a budget across the two all-in-one listeners.
+
+## Client URLs and models
+
+| API | All-in-one origin | Path |
+| --- | --- | --- |
+| Local vLLM Chat/Responses | `http://127.0.0.1:8080` | `/vllm/v1` |
+| Local vLLM Messages | `http://127.0.0.1:8081` | `/vllm` |
+| Direct OpenAI | `http://127.0.0.1:8080` | `/v1` |
+| Direct Anthropic | `http://127.0.0.1:8081` | no suffix |
+| Custom OpenAI-compatible provider | `http://127.0.0.1:8080` | `/providers/team/v1` |
+| Custom Messages provider | `http://127.0.0.1:8081` | `/providers/team` |
+
+Claude appends `/v1/messages`. For a remote gateway, replace the origin with
+the gateway's HTTPS origin and use a caller JWT. Provider keys stay on the server.
+The gateway removes `/vllm` or `/providers/team` before forwarding.
+
+List provider models from an all-in-one user session:
+
+```console
+curl --fail --silent --show-error http://127.0.0.1:8080/v1/models
+curl --fail --silent --show-error http://127.0.0.1:8080/providers/team/v1/models
+```
+
+Choose exact model IDs supported by that account and API. Configure the user
+menus with [harness configuration](harness-configuration.md). A configured menu
+is not a server-side model allowlist and does not grant account access. There is
+no aggregated gateway catalog. On a remote gateway, a provider with both APIs
+uses its OpenAI catalog at the shared `/v1/models` path; configure Claude entries
+explicitly there.
+
+## Inspect, rotate and disable
 
 ```console
 sudo scripts/common/providers show
+sudo scripts/common/quota-status
 sudo scripts/common/verify --host
 ```
 
-Give users approved model IDs available to the provider account, never the
-provider keys. Use [all-in-one user setup](../all-in-one/users.md) or
-[remote client setup](../remote-gateway/users.md). Calls use the administrator's
-provider account and its billing. The gateway forwards native APIs without translation.
-
-## Rotate, disable or add local inference
-
-Repeat `enable openai` or `enable anthropic` to rotate that key. To disable one
-route while retaining its stored secret, choose the matching command:
+Repeat `enable NAME` to rotate its key; saved custom URLs are retained. To reuse
+an existing Podman secret, add `--secret NAME` instead of entering a new key.
+To disable a provider while retaining its secret:
 
 ```console
-sudo scripts/common/providers disable openai
+sudo scripts/common/providers disable team
 ```
 
-```console
-sudo scripts/common/providers disable anthropic
-```
+Keep at least one provider enabled. Local inference installation is separate;
+see [vLLM installation](vllm.md).
 
-Keep at least one provider enabled. To add local Qwen, follow
-[vLLM installation](vllm.md); installing the model and enabling its route are
-separate steps.
+## Where settings live
 
-Provider changes preserve TLS/JWT settings and other providers. They restart
-Praxis: memory quotas reset; Valkey token counters persist. Root and the service
-account remain trusted with provider credentials.
+| Setting | Managed location |
+| --- | --- |
+| Enabled providers, custom URLs, secret references | `/etc/praxis/providers.json` |
+| Rendered routes, filters and quotas | `/etc/praxis/shared-gateway.yaml` |
+| Capacity overrides | `/etc/praxis/quota-overrides.json` |
+| Upstream keys | Rootless Podman secrets owned by `praxis-svc` |
+| Harness models and menus | User-owned CLI configuration files |
+
+Use the helpers for provider and capacity changes; hand edits to managed files
+are rejected as configuration drift. Upgrades retain custom providers and the
+shared-vLLM setting. Failed activation restores configuration from
+`/etc/praxis/rollback/`. A failed quota migration never overwrites a shared ledger;
+inspect its reported recovery state before retrying.

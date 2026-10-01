@@ -11,6 +11,7 @@ in [compatibility.md](compatibility.md).
 | Tool approvals | Native controls | Manual for Qwen; auto classifier blocked | Native controls | Depends on sandbox/adapter |
 | Inspect/change token quota | Praxis administrator commands | Same | Same | Same gateway controls; adapter pending |
 | CLI quota error and recovery | Mock test available; RHEL pending | Mock test available; RHEL pending | Mock test available; RHEL pending | Blocked |
+| Shared vLLM allowance | Shared Valkey budget across Responses, Chat and Messages; API-tested | Same | Same | Adapter pending |
 | Quota persistence | Via Praxis/Valkey | Via Praxis/Valkey | Via Praxis/Valkey | Adapter pending |
 
 “Configured” describes available configuration, not a new interactive test pass.
@@ -162,8 +163,10 @@ python3 tests/mocked-provider.py --suite gateways --engine podman
 ```
 
 Use `--engine docker` if needed. This covers both roles with memory and Valkey:
-settlement/denial, shared Chat/Responses allowance, independent Messages quota,
+settlement/denial, separate API quotas and the opt-in shared vLLM Valkey budget,
 window recovery, non-inference routes, authentication and backend failures.
+The extended provider checks cover migration without losing charges, cross-API
+denial/recovery, and additional compatible providers with independent quotas.
 Use `--feature-provider cloud` in the per-harness mock commands to test the
 synthetic OpenAI/Anthropic routes.
 
@@ -180,6 +183,10 @@ and Messages were admitted, then denied at a small quota. Denial survived
 Praxis and Valkey restarts; raising capacity restored inference. Normal
 capacities and namespaces were restored. This does not qualify CLI retry behavior.
 The status helper also read both hosts' persisted quota balances without restarting services.
+The GPU now uses one shared vLLM budget: migration preserved existing charges,
+and real Chat/Messages requests added their reported usage to that same ledger.
+Native-file Codex catalogs passed `model/list` and OpenCode's configured list
+passed `opencode models`; interactive selection and cloud inference remain separate checks.
 
 Remaining qualification: concurrent reservations, expiry during real CPU/GPU
 requests, active-stream cancellation, exact window boundaries, host reboot,

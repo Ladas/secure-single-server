@@ -15,6 +15,15 @@ from harness import configuration
 
 
 class ClientsTest(unittest.TestCase):
+    def test_custom_route_prefix_selects_the_native_api_without_exposing_upstream_keys(self):
+        for name, api in (('codex', 'openai'), ('opencode', 'openai'), ('claude-code', 'anthropic')):
+            command, env = configuration(name, api, 'model-id', 'https://gateway.test:8443', 'caller',
+                                         route_prefix='/providers/team')
+            self.assertIn('/providers/team', json.dumps([command, env]))
+            self.assertNotIn('openai.example', json.dumps([command, env]))
+        with self.assertRaises(ValueError):
+            configuration('codex', 'vllm', 'model', 'http://localhost:8080', 'caller', route_prefix='/providers/team')
+
     def test_claude_code_public_name_preserves_messages_routing_and_executable(self):
         with patch.object(sys, "argv", ["praxis-harness", "claude-code", "--model", "qwen3.8-27b-int4"]), \
              patch.object(os, "execvpe") as execute:

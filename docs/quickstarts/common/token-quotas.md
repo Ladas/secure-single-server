@@ -29,7 +29,6 @@ sudo scripts/common/quota-status --json
 ```console
 sudo scripts/common/quota-set --list
 sudo scripts/common/quota-set --list --provider vllm
-sudo scripts/common/quota-set --list --rule vllm-openai-rolling-day
 ```
 
 The list shows enabled providers, current and minimum capacities, and whether
@@ -41,7 +40,7 @@ with `sudo scripts/common/providers show`; enable them using [provider setup](pr
 
 ## Adjust capacities
 
-List and preview both vLLM API allowances:
+List and preview the vLLM allowance:
 
 ```console
 sudo scripts/common/quota-set --list --provider vllm
@@ -70,11 +69,13 @@ sudo scripts/common/quota-set --list --provider anthropic
 sudo scripts/common/quota-set --provider anthropic --capacity 2000000
 ```
 
-To change one rule, use its exact name; `--rule` can be repeated:
+To change one rule, use its exact name; `--rule` can be repeated. This example
+requires the [shared vLLM quota](providers.md#share-the-local-vllm-quota-across-harnesses);
+otherwise choose a name printed by `--list`:
 
 ```console
-sudo scripts/common/quota-set --list --rule vllm-openai-rolling-day
-sudo scripts/common/quota-set --rule vllm-openai-rolling-day --capacity 5000000
+sudo scripts/common/quota-set --list --rule vllm-rolling-day
+sudo scripts/common/quota-set --rule vllm-rolling-day --capacity 5000000
 ```
 
 Capacity must cover the reservation shown by the list (`10000` by default).
@@ -86,10 +87,11 @@ credentials, images and quota windows stay unchanged.
 
 | Rule | Shared allowance |
 | --- | --- |
-| `vllm-openai-rolling-day` | Local Qwen Chat/Responses: OpenCode and Codex |
-| `vllm-anthropic-rolling-day` | Local Qwen Messages: Claude Code |
+| `vllm-rolling-day` | Local Chat, Responses and Messages after [enabling the shared Valkey quota](providers.md#share-the-local-vllm-quota-across-harnesses) |
+| `vllm-openai-rolling-day`, `vllm-anthropic-rolling-day` | Separate API allowances before migration, or on memory gateways |
 | `openai-rolling-day` | Enabled OpenAI routes |
 | `anthropic-rolling-day` | Enabled Anthropic routes |
+| `NAME-openai-rolling-day`, `NAME-anthropic-rolling-day` | A custom provider’s enabled native APIs |
 
 All users share these allowances. Shipped values are `1000000` tokens per
 rolling `24h`, a `10000` reservation and a `300s` reservation timeout. Use the
@@ -155,7 +157,7 @@ workstation checkout with its administrator login and SSH key:
 scp -p -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" \
   scripts/common/quota-status scripts/common/quota_status.py \
   scripts/common/quota-set scripts/common/quota_manage.py scripts/common/quota_config.py \
-  scripts/common/provider_manage.py scripts/common/provider_config.py \
+  scripts/common/provider_manage.py scripts/common/provider_config.py scripts/common/quota_share.py \
   scripts/common/lib.sh scripts/common/install \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/common/"
 ```

@@ -13,6 +13,7 @@ import sys
 from urllib.parse import unquote, urlsplit
 
 import yaml
+import quota_config
 
 LIB = Path(__file__).with_name("lib.sh")
 PREFIX = "praxis_ai_token_rate_limit_"
@@ -71,7 +72,8 @@ def valkey_balance(snapshot, window_ms, timeout_ms):
 
 
 def read_valkey_balances(config, rows):
-    selected = []
+    quota_config.rules(config)
+    selected, seen = [], set()
     by_name = {row["rule"]: row for row in rows}
     for chain in config["filter_chains"]:
         for item in chain["filters"]:
@@ -79,6 +81,9 @@ def read_valkey_balances(config, rows):
             if item["filter"] != "token_rate_limit" or backend.get("kind") != "valkey":
                 continue
             for rule in item["rules"]:
+                if rule["name"] in seen:
+                    continue
+                seen.add(rule["name"])
                 row = by_name[rule["name"]]
                 window = window_seconds(rule.get("window"))
                 timeout = window_seconds(rule.get("reservation_timeout", "30s"))
@@ -97,6 +102,17 @@ def read_valkey_balances(config, rows):
         for _, _, row, _, _ in selected:
             row["balance_note"] = "Valkey ledger format is not qualified for this Praxis image."
         return
+    query = valkey_client()
+    for backend, rule, row, window, timeout in selected:
+        keys = valkey_keys(backend.get("namespace", "praxis:token_rate_limit"), rule["name"])
+        result = query("EVAL", LEDGER_READ, "2", *keys, str(window))
+        balance = valkey_balance(json.loads(result), window, timeout)
+        remaining = max(0, row["capacity"] - balance["charged"])
+        row.update(balance, remaining=remaining, basis="valkey ledger",
+                   room_for_reservation=None if row["reservation"] is None else remaining >= row["reservation"])
+
+
+def valkey_client():
     # Capture the existing secret privately; never put credentials in argv or errors.
     connection = urlsplit(service("podman", "exec", "praxis-shared-gateway", "sh", "-c",
                                   'printf "%s" "$TOKEN_RATE_LIMIT_VALKEY_URL"').strip())
@@ -106,17 +122,12 @@ def read_valkey_balances(config, rows):
             or connection.query or connection.fragment or user != "praxis" or not password
             or any(character in password for character in "\r\n\0")):
         raise ValueError("Valkey reading requires the managed local praxis connection on database 0")
-    for backend, rule, row, window, timeout in selected:
-        keys = valkey_keys(backend.get("namespace", "praxis:token_rate_limit"), rule["name"])
-        result = service("podman", "exec", "-i", "praxis-valkey", "sh", "-c",
-                         'IFS= read -r VALKEYCLI_AUTH || exit 1; export VALKEYCLI_AUTH; '
-                         'exec valkey-cli --no-auth-warning --json --user praxis "$@"',
-                         "quota-status", "EVAL", LEDGER_READ, "2", *keys, str(window),
-                         input_text=password + "\n")
-        balance = valkey_balance(json.loads(result), window, timeout)
-        remaining = max(0, row["capacity"] - balance["charged"])
-        row.update(balance, remaining=remaining, basis="valkey ledger",
-                   room_for_reservation=None if row["reservation"] is None else remaining >= row["reservation"])
+    def query(*args, input_payload=""):
+        return service("podman", "exec", "-i", "praxis-valkey", "sh", "-c",
+                       'IFS= read -r VALKEYCLI_AUTH || exit 1; export VALKEYCLI_AUTH; '
+                       'exec valkey-cli --no-auth-warning --json --user praxis "$@"',
+                       "quota-status", *args, input_text=password + "\n" + input_payload)
+    return query
 
 
 def parse_metrics(text):
@@ -179,6 +190,7 @@ def balance_basis(item, rule, points, started, now, modified):
 
 
 def summarize(config, metrics, started, now, modified):
+    quota_config.rules(config)
     points, rows, names = parse_metrics(metrics), [], set()
     for chain in config["filter_chains"]:
         for item in chain["filters"]:
@@ -187,7 +199,7 @@ def summarize(config, metrics, started, now, modified):
             for rule in item["rules"]:
                 name = rule["name"]
                 if name in names:
-                    raise ValueError("quota rule names must be unique to interpret metrics")
+                    continue
                 names.add(name)
                 tokens = {kind: sample(points, "tokens_total", name, kind=kind)
                           for kind in ("estimated", "actual", "refunded", "overage")}

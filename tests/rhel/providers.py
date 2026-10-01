@@ -60,6 +60,18 @@ class ProvidersTest(unittest.TestCase):
             manager.updated_config(template, installed, state, {**state, "openai_secret": "new-key"})
         self.assertEqual(installed["admin"]["address"], "127.0.0.1:9999")
 
+    def test_upgrade_accepts_only_the_known_missing_messages_catalog_route(self):
+        template = source('all-in-one')
+        state = {'vllm': True, 'openai_secret': '', 'anthropic_secret': ''}
+        installed = providers.render(template, vllm=True, openai=False, anthropic=False)
+        routes = next(f['routes'] for f in installed['filter_chains'][1]['filters'] if f['filter'] == 'router')
+        routes[:] = [r for r in routes if r.get('path') != '/vllm/v1/models']
+        result = manager.updated_config(template, installed, state, {**state, 'openai_secret': 'new'})
+        self.assertIn('/vllm/v1/models', json.dumps(result['filter_chains'][1]))
+        installed['listeners'][1]['address'] = '0.0.0.0:9999'
+        with self.assertRaisesRegex(ValueError, 'matching checkout'):
+            manager.updated_config(template, installed, state, {**state, 'openai_secret': 'new'})
+
     def test_unchanged_provider_state_does_not_require_restart(self):
         template = source("all-in-one")
         state = {"vllm": True, "vllm_endpoint": "", "openai_secret": "", "anthropic_secret": ""}

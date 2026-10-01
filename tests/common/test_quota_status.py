@@ -4,10 +4,12 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/common"))
 spec = importlib.util.spec_from_file_location("quota_status", ROOT / "scripts/common/quota_status.py")
 quota = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(quota)

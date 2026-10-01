@@ -32,6 +32,8 @@ def main():
                      for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
         commands += [[sys.executable, "tests/rhel/provider-image.py", "--scenario", scenario, *backend]
                      for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
+        commands += [[sys.executable, "tests/rhel/provider-image.py", "--scenario", scenario, "--valkey", "--extended"]
+                     for scenario in ("all-in-one", "remote")]
         commands += [[sys.executable, "tests/rhel/features-image.py", "--scenario", scenario, *backend]
                      for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
     if args.suite == "openshell":

@@ -5,12 +5,24 @@ Use [all-in-one user setup](../all-in-one/users.md) or
 explains the installed `praxis-harness` launcher and file-based alternatives.
 It configures the selected CLI; Praxis is the server handling inference.
 
-The launcher builds settings for each invocation and replaces itself with the
-CLI. It does not rewrite your client settings, install a model, or discover
-an aggregated model catalog. For local Codex it writes a generated catalog
-under `~/.cache/praxis-harness/` and passes its path to the CLI. Existing CLI
-settings can still apply. Pass the
-served model explicitly; omitting `--model` on vLLM selects `qwen3-8b`.
+## Native files or the launcher
+
+For ongoing use, configure the CLI's files and launch the CLI directly. The
+`praxis-harness` helper is optional: it supplies per-launch provider settings,
+known Qwen limits, environment cleanup and bounded smoke-test options without
+rewriting your usual configuration. Its source is `scripts/common/harness.py`,
+installed as `/usr/local/bin/praxis-harness` by `scripts/common/harness-user`.
+
+| CLI menu | Where the list comes from | Switching limits |
+| --- | --- | --- |
+| Codex `/model` | Bundled catalog or a configured `model_catalog_json` | Entries must work at the selected provider's Responses URL; changing the provider connection needs a new launch |
+| OpenCode `/models` | Configured `provider.NAME.models` entries | Multiple configured provider/model pairs can coexist in one session |
+| Claude Code `/model` | Configured picker entries; optional native gateway discovery | One Messages base per launch; discovery filters out IDs without `claude`/`anthropic`, so configure Qwen explicitly |
+
+A model menu does not install weights, enforce a gateway allowlist, prove account
+access, or combine gateway catalogs. Give each harness the exact served IDs and
+appropriate context limits. The helper currently supplies one selected local
+model; persistent files are the better choice for a maintained multi-model menu.
 
 | Provider | Codex | OpenCode | Claude Code |
 | --- | --- | --- | --- |
@@ -27,8 +39,8 @@ provider keys stay with Praxis.
 The examples below target **27B after the server is updated to 32,768 tokens**.
 For 8B, use `qwen3-8b`, context 16,384, output 4,096 and Codex compaction 12,288.
 Thinking consumes output tokens. See [preset limits](vllm.md#requirements).
-Merge file settings deliberately with existing configuration; file-based
-alternatives require their own acceptance run and do not inherit launcher updates.
+Merge file settings deliberately with existing configuration. Native files do not
+inherit future launcher fixes; verify menu selection and a tool query after editing.
 
 ## Codex
 
@@ -214,6 +226,49 @@ returns OpenAI's catalog, so use configured Claude entries there.
 [gateway discovery](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery).
 
 </details>
+
+## Additional compatible providers
+
+[Enable the provider on the server](providers.md#another-compatible-provider),
+then configure its route in the native CLI files above. For provider `team`:
+
+| Client | Local base URL |
+| --- | --- |
+| Codex / OpenCode OpenAI-compatible | `http://127.0.0.1:8080/providers/team/v1` |
+| Claude Code | `http://127.0.0.1:8081/providers/team` |
+| OpenCode Anthropic | `http://127.0.0.1:8081/providers/team/v1` |
+
+For a quick single-model launch without file edits:
+
+```console
+praxis-harness codex --provider openai --route-prefix /providers/team --model MODEL_ID
+praxis-harness opencode --provider openai --route-prefix /providers/team --model MODEL_ID
+praxis-harness claude-code --provider anthropic --route-prefix /providers/team --model MODEL_ID
+```
+
+Here `--provider` selects the API dialect; `--route-prefix` selects the upstream
+provider configured in Praxis. A hosted Qwen model can need model-specific context,
+reasoning and permission settings; do not assume the local-vLLM preset matches it.
+
+To maintain several OpenCode providers, add separately named entries under
+`provider`, each with its URL and `models` map. Use distinct custom IDs such as `praxis-local`,
+`praxis-openai` and `praxis-team` (built-in IDs can merge extra catalog entries); `/models` can then switch among their entries. For Codex,
+maintain a catalog per Responses connection and select that connection at launch.
+
+For Claude, add non-Claude models explicitly to its settings file:
+
+```json
+{
+  "modelPicker": {
+    "options": [{"model": "EXACT_SERVED_ID", "label": "Hosted model"}]
+  }
+}
+```
+
+Its built-in aliases can still appear. Configure only models supported by the
+selected Messages endpoint. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` is
+optional and does not discover arbitrary Qwen IDs. A second Messages endpoint
+needs a separate settings file and launch, not another model-picker label.
 
 ## Remote and automated use
 

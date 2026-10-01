@@ -12,7 +12,8 @@ def capacity(value):
     return value
 
 
-def rules(config):
+def entries(config):
+    """One entry per distinct budget; identical Valkey rules can share a ledger."""
     result = {}
     for chain in config["filter_chains"]:
         for item in chain["filters"]:
@@ -21,9 +22,19 @@ def rules(config):
             for rule in item["rules"]:
                 name = rule["name"]
                 if name in result:
-                    raise ValueError("quota rule names must be unique")
-                result[name] = rule
+                    previous, old = result[name]
+                    if (item.get('backend', {}).get('kind') != 'valkey'
+                            or item.get('backend') != previous.get('backend')
+                            or item.get('key', 'global') != previous.get('key', 'global')
+                            or old != rule):
+                        raise ValueError('quota rule names must be unique unless sharing identical Valkey settings')
+                else:
+                    result[name] = (item, rule)
     return result
+
+
+def rules(config):
+    return {name: rule for name, (_, rule) in entries(config).items()}
 
 
 def validate(overrides):
@@ -53,7 +64,11 @@ def apply(original, overrides):
     """Inactive providers retain saved capacities until they are enabled again."""
     validate(overrides)
     result = copy.deepcopy(original)
-    for name, rule in rules(result).items():
+    rules(result)  # Validate duplicates before changing every copy of a shared rule.
+    all_rules = [r for c in result['filter_chains'] for f in c['filters']
+                 if f['filter'] == 'token_rate_limit' for r in f['rules']]
+    for rule in all_rules:
+        name = rule['name']
         if name not in overrides:
             continue
         if overrides[name] < minimum_capacity(rule):

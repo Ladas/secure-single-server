@@ -46,15 +46,17 @@ def write_codex_catalog(model, directory):
 
 
 def configuration(name, provider, model, base, caller, *, prompt=None, messages_base=None,
-                  catalog_path=None, gateway_discovery=False):
+                  catalog_path=None, gateway_discovery=False, route_prefix=""):
+    if route_prefix and (provider == "vllm" or not re.fullmatch(r"/providers/[a-z][a-z0-9-]{0,31}", route_prefix)):
+        raise ValueError("route prefix requires a custom /providers/NAME route and an OpenAI or Anthropic API")
     name = "claude" if name == "claude-code" else name
     if gateway_discovery and name != "claude":
         raise ValueError("native gateway discovery is a Claude option; Codex/OpenCode use configured catalogs")
     if (name, provider) in (("codex", "anthropic"), ("claude", "openai")):
         raise ValueError("this harness requires a different native API; no provider translation is configured")
     context, output = qwen_limits(model) if provider == "vllm" else (128000, 4096)
-    base = base.rstrip("/")
-    messages_base = (messages_base or base).rstrip("/")
+    messages_base = (messages_base or base).rstrip("/") + route_prefix
+    base = base.rstrip("/") + route_prefix
     if provider == "vllm":
         base += "/vllm"
         messages_base += "/vllm"
@@ -125,6 +127,7 @@ def main():
     parser.add_argument("--provider", choices=("vllm", "openai", "anthropic"), default="vllm")
     parser.add_argument("--model", help="Qwen defaults to qwen3-8b; cloud models must be selected explicitly")
     parser.add_argument("--url", help="gateway origin, without /v1 or /vllm; defaults to the harness's local listener")
+    parser.add_argument("--route-prefix", default="", help="custom provider route, e.g. /providers/team")
     parser.add_argument("--token-file", type=Path, help="remote caller JWT file, never a provider API key")
     parser.add_argument("--ca-file", type=Path, help="CA certificate for a lab HTTPS gateway")
     parser.add_argument("--prompt", help="noninteractive task; omit to start an interactive session")
@@ -152,7 +155,8 @@ def main():
         catalog = (write_codex_catalog(model, Path.home() / ".cache/praxis-harness")
                    if args.harness == "codex" and args.provider == "vllm" else None)
         command, additions = configuration(args.harness, args.provider, model, base, caller, prompt=args.prompt,
-                                           catalog_path=catalog, gateway_discovery=args.gateway_model_discovery)
+                                           catalog_path=catalog, gateway_discovery=args.gateway_model_discovery,
+                                           route_prefix=args.route_prefix)
     except ValueError as error:
         parser.error(str(error))
     environment = {key: value for key, value in os.environ.items()
