@@ -142,6 +142,17 @@ class VllmTest(unittest.TestCase):
     def test_remote_install_rolls_back_staged_unit_and_network(self):
         source = (ROOT / 'scripts/vllm/install').read_text()
         cleanup = source[source.index('cleanup_install() {'):source.index('trap cleanup_install EXIT')]
+        install_block = source[
+            source.index('unit_staged=1'):
+            source.index('as_service systemctl --user daemon-reload')]
+        success_block = source[
+            source.index('as_service systemctl --user daemon-reload'):
+            source.index("die 'vLLM did not become ready")]
+        self.assertNotIn('unit_staged=0', install_block)
+        self.assertNotIn('network_staged=0', install_block)
+        self.assertIn('unit_staged=0', success_block)
+        self.assertIn('network_staged=0', success_block)
+        self.assertLess(success_block.index('unit_staged=0'), success_block.index('exit 0'))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             state = root / "state"

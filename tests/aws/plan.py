@@ -532,7 +532,8 @@ class PlanTest(unittest.TestCase):
             args.apply = True
             aws = vm.Aws(args.region, None, False)
             confirmation = "grant 123456789012 eu-central-1 sg-vllm sg-client"
-            with patch.object(aws, "call", side_effect=[*replies, {}]) as calls, \
+            with patch.object(aws, "call", side_effect=[*replies,
+                                                        {"SecurityGroups": [group]}, {}]) as calls, \
                     patch("builtins.input", return_value=confirmation), \
                     contextlib.redirect_stdout(io.StringIO()):
                 vm.vllm_grant(aws, args)
@@ -544,12 +545,16 @@ class PlanTest(unittest.TestCase):
                                "Description": "secure-single-server Praxis client"}])
             self.assertEqual(json.loads(vllm_state_path.read_text()).get("ManagedGrants"), ["sg-client"])
 
-            rule_group = {"GroupId": "sg-vllm", "IpPermissions": [{"IpProtocol": "tcp",
-                            "FromPort": 8000, "ToPort": 8000,
-                            "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            rule_group = {"GroupId": "sg-vllm", "IpPermissions": [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                 "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
             rule_group["Tags"] = group["Tags"]
             duplicate = vm.AwsError("InvalidPermission.Duplicate", "rule already exists")
-            with patch.object(aws, "call", side_effect=[*replies, duplicate,
+            vm.update_state(vllm_state_path, vllm_state)
+            with patch.object(aws, "call", side_effect=[*replies,
+                                                        {"SecurityGroups": [group]},
+                                                        duplicate,
                                                         {"SecurityGroups": [rule_group]}]) as calls, \
                     patch("builtins.input", return_value=confirmation), \
                     contextlib.redirect_stdout(io.StringIO()) as output:
@@ -557,6 +562,45 @@ class PlanTest(unittest.TestCase):
             self.assertEqual(calls.call_args_list[-1].args[1], "describe-security-groups")
             self.assertIn("Granted private TCP 8000 access", output.getvalue())
             self.assertEqual(json.loads(vllm_state_path.read_text()).get("ManagedGrants"), ["sg-client"])
+            vm.update_state(vllm_state_path, vllm_state)
+
+            stale_state = dict(vllm_state)
+            stale_state["ManagedGrants"] = ["sg-client"]
+            stale_path = root / "stale.json"
+            vm.save_state(stale_path, stale_state)
+            stale_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                         client_state_file=client_state_path,
+                                         vllm_state_file=stale_path, apply=True)
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2],
+                                                        {"SecurityGroups": [group]}]) as calls, \
+                    patch("builtins.input", return_value=confirmation), \
+                    self.assertRaisesRegex(ValueError, "managed vLLM grants differ"):
+                vm.vllm_grant(aws, stale_args)
+            self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
+            drifted_group = copy.deepcopy(group)
+            drifted_group["Tags"] = vm.tags("attacker", "vllm-server")
+            drift_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                         client_state_file=client_state_path,
+                                         vllm_state_file=vllm_state_path, apply=True)
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2],
+                                                        {"SecurityGroups": [group]},
+                                                        {"SecurityGroups": [drifted_group]}]) as calls, \
+                    patch("builtins.input", return_value=confirmation), \
+                    self.assertRaisesRegex(ValueError, "security-group ownership"):
+                vm.vllm_grant(aws, drift_args)
+            self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
+            public_group = copy.deepcopy(group)
+            public_group["IpPermissions"] = [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": vm.VLLM_PORT, "ToPort": vm.VLLM_PORT,
+                 "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]
+            public_state = {**vllm_state,
+                            "Ingress": copy.deepcopy(public_group["IpPermissions"])}
+            with patch.object(aws, "call", return_value={"SecurityGroups": [public_group]}):
+                with self.assertRaisesRegex(ValueError, "exposes port 8000"):
+                    vm.validate_vllm_grant_state(aws, public_state, "sg-client")
 
             all_protocol_group = {"GroupId": "sg-vllm", "IpPermissions": [{"IpProtocol": "-1",
                                     "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}

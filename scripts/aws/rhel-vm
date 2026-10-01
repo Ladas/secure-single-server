@@ -269,6 +269,32 @@ def source_group_grant_exists(group, source_group_id):
     return False
 
 
+def validate_vllm_grant_state(aws, vllm_state, client_security_group_id):
+    groups = aws.call(
+        "ec2",
+        "describe-security-groups",
+        group_ids=[vllm_state["SecurityGroupId"]],
+    )["SecurityGroups"]
+    if len(groups) != 1 or not owned_tags(groups[0], vllm_state["Prefix"], "vllm-server"):
+        raise ValueError("vLLM security-group ownership/scenario tags do not match")
+
+    group = groups[0]
+    existing = source_group_grant_exists(group, client_security_group_id)
+    validation_state = vllm_state
+    if existing and client_security_group_id not in vllm_state.get("ManagedGrants", []):
+        validation_state = {
+            **vllm_state,
+            "ManagedGrants": [
+                *vllm_state.get("ManagedGrants", []),
+                client_security_group_id,
+            ],
+        }
+
+    check_ingress(group, validation_state)
+    check_no_public_vllm_ingress(groups)
+    return group, existing
+
+
 def vllm_grant(aws, args):
     check_identity(aws, args.account_id)
     client_state = launch_state(args.client_state_file, args)
@@ -279,17 +305,7 @@ def vllm_grant(aws, args):
     vllm = described_instance(aws, vllm_state, "vllm-server")
     if client.get("VpcId") != vllm.get("VpcId"):
         raise ValueError("single server and vLLM server must be in the same VPC")
-    groups = aws.call("ec2", "describe-security-groups", group_ids=[vllm_state["SecurityGroupId"]])["SecurityGroups"]
-    if len(groups) != 1 or not owned_tags(groups[0], vllm_state["Prefix"], "vllm-server"):
-        raise ValueError("vLLM security-group ownership/scenario tags do not match")
-    group = groups[0]
-    existing = source_group_grant_exists(group, client_state["SecurityGroupId"])
-    validation_state = vllm_state
-    if existing and client_state["SecurityGroupId"] not in vllm_state.get("ManagedGrants", []):
-        validation_state = {**vllm_state, "ManagedGrants": [
-            *vllm_state.get("ManagedGrants", []), client_state["SecurityGroupId"]]}
-    check_ingress(group, validation_state, require_managed_grants=False)
-    check_no_public_vllm_ingress(groups)
+    group, existing = validate_vllm_grant_state(aws, vllm_state, client_state["SecurityGroupId"])
     proposal = {"ClientInstanceId": client["InstanceId"], "VllmInstanceId": vllm["InstanceId"],
                 "ClientSecurityGroupId": client_state["SecurityGroupId"],
                 "VllmSecurityGroupId": vllm_state["SecurityGroupId"], "Port": VLLM_PORT,
@@ -307,6 +323,11 @@ def vllm_grant(aws, args):
     if input("Billable-free security-group rule. Type exactly '" + confirmation + "': ") != confirmation:
         raise ValueError("confirmation did not match; no changes made")
     aws.apply = True
+    group, existing = validate_vllm_grant_state(aws, vllm_state, client_state["SecurityGroupId"])
+    if existing:
+        print("Private vLLM access already granted; no AWS resource changed.")
+        record_vllm_grant(vllm_state, args, client_state["SecurityGroupId"])
+        return
     try:
         aws.call("ec2", "authorize-security-group-ingress", group_id=vllm_state["SecurityGroupId"],
                  ip_permissions=[{"IpProtocol": "tcp", "FromPort": VLLM_PORT, "ToPort": VLLM_PORT,
@@ -315,10 +336,7 @@ def vllm_grant(aws, args):
     except AwsError as error:
         if error.code != "InvalidPermission.Duplicate":
             raise
-        groups = aws.call("ec2", "describe-security-groups",
-                          group_ids=[vllm_state["SecurityGroupId"]])["SecurityGroups"]
-        if not source_group_grant_exists(groups[0], client_state["SecurityGroupId"]):
-            raise
+        validate_vllm_grant_state(aws, vllm_state, client_state["SecurityGroupId"])
     record_vllm_grant(vllm_state, args, client_state["SecurityGroupId"])
     print("Granted private TCP 8000 access from the single server security group.")
 

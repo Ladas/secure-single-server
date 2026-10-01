@@ -217,8 +217,6 @@ unit_staged=1
 sha256_file "${temporary}" >"${manifest_new}"
 install -o root -g "${gid}" -m 0640 "${temporary}" "${unit}"
 install -o root -g "${gid}" -m 0640 "${manifest_new}" "${state}/manifest"
-unit_staged=0
-network_staged=0
 printf '%s\n' "${mode}" >"${state}/mode"
 printf '%s\n' "${model}" >"${state}/model"
 if [[ -f "${state}/network-owned" && ! -f "/etc/containers/systemd/users/${uid}/praxis.container" ]]; then
@@ -244,6 +242,8 @@ for (( attempt=0; attempt<360; attempt++ )); do
       [[ -z "$(as_service podman port praxis-vllm)" ]] || die 'vLLM unexpectedly publishes a host port'
       note "vLLM ${mode} ready: ${model}, private container port 8000; no host publication"
     fi
+    unit_staged=0
+    network_staged=0
     exit 0
   fi
   if (( attempt % 6 == 0 )); then note 'waiting for vLLM model download/startup; inspect praxis-vllm container logs for progress'; fi
