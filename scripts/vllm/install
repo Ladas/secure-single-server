@@ -175,17 +175,39 @@ cleanup_install() {
     fi
   fi
   if (( service_touched )); then
-    as_service systemctl --user stop praxis-vllm.service
-    as_service systemctl --user daemon-reload
+    as_service systemctl --user stop praxis-vllm.service || true
+    as_service systemctl --user daemon-reload || true
     if (( service_was_active )); then
-      as_service systemctl --user restart praxis-vllm.service
+      as_service systemctl --user restart praxis-vllm.service || true
     fi
   fi
   rm -f "${temporary}" "${manifest_new}" "${unit_backup}" "${manifest_backup}" \
     "${template_backup}" "${template_hash_backup}"
   if (( network_staged )); then
+    as_service systemctl --user stop praxis-network.service || true
     rm -f "${network_unit}" "${state}/network-owned"
+    as_service podman network rm praxis-private >/dev/null 2>&1 || true
+    as_service systemctl --user daemon-reload || true
   fi
+}
+
+commit_install_state() {
+  printf '%s\n' "${mode}" >"${state}/mode"
+  printf '%s\n' "${model}" >"${state}/model"
+  if [[ -f "${state}/network-owned" && ! -f "/etc/containers/systemd/users/${uid}/praxis.container" ]]; then
+    touch "${state}/network-owned"
+  else
+    rm -f "${state}/network-owned"
+  fi
+  if [[ -n "${remote_listen}" ]]; then
+    printf '%s\n' "${remote_listen}" >"${state}/listen-address"
+  else
+    rm -f "${state}/listen-address"
+  fi
+  unit_staged=0
+  template_staged=0
+  network_staged=0
+  service_touched=0
 }
 trap cleanup_install EXIT
 if [[ -e "${unit}" ]]; then
@@ -255,22 +277,7 @@ for (( attempt=0; attempt<360; attempt++ )); do
       [[ -z "$(as_service podman port praxis-vllm)" ]] || die 'vLLM unexpectedly publishes a host port'
       note "vLLM ${mode} ready: ${model}, private container port 8000; no host publication"
     fi
-    printf '%s\n' "${mode}" >"${state}/mode"
-    printf '%s\n' "${model}" >"${state}/model"
-    if [[ -f "${state}/network-owned" && ! -f "/etc/containers/systemd/users/${uid}/praxis.container" ]]; then
-      touch "${state}/network-owned"
-    else
-      rm -f "${state}/network-owned"
-    fi
-    if [[ -n "${remote_listen}" ]]; then
-      printf '%s\n' "${remote_listen}" >"${state}/listen-address"
-    else
-      rm -f "${state}/listen-address"
-    fi
-    unit_staged=0
-    template_staged=0
-    network_staged=0
-    service_touched=0
+    commit_install_state
     exit 0
   fi
   if (( attempt % 6 == 0 )); then note 'waiting for vLLM model download/startup; inspect praxis-vllm container logs for progress'; fi

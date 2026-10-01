@@ -142,25 +142,6 @@ class VllmTest(unittest.TestCase):
     def test_remote_install_rolls_back_staged_unit_and_network(self):
         source = (ROOT / 'scripts/vllm/install').read_text()
         cleanup = source[source.index('cleanup_install() {'):source.index('trap cleanup_install EXIT')]
-        install_block = source[
-            source.index('unit_staged=1'):
-            source.index('as_service systemctl --user daemon-reload')]
-        success_block = source[
-            source.index('as_service systemctl --user daemon-reload'):
-            source.index("die 'vLLM did not become ready")]
-        self.assertNotIn('unit_staged=0', install_block)
-        self.assertNotIn('network_staged=0', install_block)
-        self.assertNotIn('>"${state}/mode"', install_block)
-        self.assertNotIn('>"${state}/model"', install_block)
-        self.assertNotIn('>"${state}/listen-address"', install_block)
-        self.assertIn('unit_staged=0', success_block)
-        self.assertIn('template_staged=0', success_block)
-        self.assertIn('network_staged=0', success_block)
-        self.assertIn('service_touched=0', success_block)
-        self.assertIn('>"${state}/mode"', success_block)
-        self.assertIn('>"${state}/model"', success_block)
-        self.assertIn('>"${state}/listen-address"', success_block)
-        self.assertLess(success_block.index('unit_staged=0'), success_block.index('exit 0'))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             state = root / "state"
@@ -175,6 +156,7 @@ class VllmTest(unittest.TestCase):
             template_backup = state / "chat-template.jinja.previous"
             template_hash = state / "template.sha256"
             template_hash_backup = state / "template.sha256.previous"
+            network_rm_marker = root / "network-rm"
             state.mkdir()
             unit.write_text("new unit\n")
             network_unit.write_text("network\n")
@@ -196,7 +178,12 @@ template_staged=0
 network_staged=1
 service_touched=0
 service_was_active=0
-as_service() {{ printf 'SERVICE %s\\n' "$*"; }}
+as_service() {{
+  if [[ "$1" == podman && "$2" == network && "$3" == rm ]]; then
+    touch {shlex.quote(str(network_rm_marker))}
+  fi
+  printf 'SERVICE %s\\n' "$*"
+}}
 {cleanup}
 cleanup_install
 """
@@ -255,6 +242,47 @@ cleanup_install
             self.assertIn('SERVICE systemctl --user stop praxis-vllm.service', result.stdout)
             self.assertIn('SERVICE systemctl --user daemon-reload', result.stdout)
             self.assertIn('SERVICE systemctl --user restart praxis-vllm.service', result.stdout)
+            self.assertIn('SERVICE systemctl --user stop praxis-network.service', result.stdout)
+            self.assertTrue(network_rm_marker.exists())
+
+    def test_remote_install_commits_state_and_clears_staging(self):
+        source = (ROOT / 'scripts/vllm/install').read_text()
+        commit = source[source.index('commit_install_state() {'):source.index('trap cleanup_install EXIT')]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            gateway_unit = root / "praxis.container"
+            state.mkdir()
+            (state / "network-owned").write_text("")
+            commit = commit.replace(
+                '/etc/containers/systemd/users/${uid}/praxis.container', str(gateway_unit))
+            script = f"""
+set -euo pipefail
+state={shlex.quote(str(state))}
+mode=gpu
+model=test-model
+remote_listen=10.0.1.10
+uid=1001
+unit_staged=1
+template_staged=1
+network_staged=1
+service_touched=1
+{commit}
+commit_install_state
+printf '%s\\n' "$unit_staged" "$template_staged" "$network_staged" "$service_touched"
+"""
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((state / "mode").read_text(), "gpu\n")
+            self.assertEqual((state / "model").read_text(), "test-model\n")
+            self.assertEqual((state / "listen-address").read_text(), "10.0.1.10\n")
+            self.assertTrue((state / "network-owned").exists())
+            self.assertEqual(result.stdout, "0\n0\n0\n0\n")
+
+            gateway_unit.write_text("gateway\n")
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((state / "network-owned").exists())
 
     def test_model_selection_rejects_unknown_and_duplicate_presets(self):
         for args in (("--model", "unknown", "cpu"), ("--model", "../qwen3-8b", "cpu"),
