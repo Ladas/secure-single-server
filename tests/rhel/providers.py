@@ -23,6 +23,11 @@ def source(scenario):
 
 
 class ProvidersTest(unittest.TestCase):
+    def test_provider_wrapper_locks_the_selected_service_account(self):
+        source = (ROOT / "scripts/common/providers").read_text()
+        self.assertIn('exec 9>"$(gateway_lock_path "${SERVICE_USER}")"', source)
+        self.assertNotIn("/run/lock/praxis-gateway.lock", source)
+
     def test_prompted_credentials_use_existing_secret_helper_stdin_only(self):
         execute = Mock()
         manager.create_cloud_secret("openai", "new-version", reader=lambda prompt: "synthetic-private-key", execute=execute)
@@ -49,6 +54,12 @@ class ProvidersTest(unittest.TestCase):
     def test_legacy_cloud_configuration_can_add_qwen_without_changing_listeners(self):
         template = source("all-in-one")
         state = {"vllm": False, "vllm_endpoint": "", "openai_secret": "openai-key", "anthropic_secret": "anthropic-key"}
+        result = manager.updated_config(template, template, state, {**state, "vllm": True}, legacy=True)
+        self.assertEqual(result["listeners"], template["listeners"])
+
+    def test_legacy_state_without_a_remote_endpoint_still_normalizes(self):
+        template = source("all-in-one")
+        state = {"vllm": False, "openai_secret": "openai-key", "anthropic_secret": ""}
         result = manager.updated_config(template, template, state, {**state, "vllm": True}, legacy=True)
         self.assertEqual(result["listeners"], template["listeners"])
 

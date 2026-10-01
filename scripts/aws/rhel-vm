@@ -226,9 +226,11 @@ def vllm_endpoint(aws, args):
         raise ValueError("vLLM instance private address must be RFC1918")
     if instance.get("VpcId") != args.client_vpc_id:
         raise ValueError("vLLM instance is not in the single server's VPC")
+    expected_prefix = actual_tags.get("ResourcePrefix")
+    if not expected_prefix or not owned_tags(instance, expected_prefix, "vllm-server"):
+        raise ValueError("vLLM instance ownership/scenario tags do not match")
     group_ids = [group["GroupId"] for group in instance.get("SecurityGroups", [])]
     groups = aws.call("ec2", "describe-security-groups", group_ids=group_ids)["SecurityGroups"] if group_ids else []
-    expected_prefix = actual_tags.get("ResourcePrefix")
     if (not group_ids or len(groups) != len(group_ids)
             or any(not owned_tags(group, expected_prefix, "vllm-server") for group in groups)):
         raise ValueError("vLLM security-group ownership/scenario tags do not match")
@@ -626,7 +628,8 @@ def check_ingress(group, state, *, require_managed_grants=True):
         pairs = permission.get("UserIdGroupPairs", [])
         if pairs:
             pair_groups = {item.get("GroupId") for item in pairs}
-            grant_matches = (bool(pair_groups) and pair_groups <= managed_grants and
+            grant_matches = (state.get("Scenario") == "vllm-server" and bool(pair_groups)
+                             and pair_groups <= managed_grants and
                              permission.get("IpProtocol") == "tcp" and
                               permission.get("FromPort") == VLLM_PORT and
                               permission.get("ToPort") == VLLM_PORT)

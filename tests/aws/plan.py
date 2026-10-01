@@ -504,6 +504,14 @@ class PlanTest(unittest.TestCase):
                     self.assertRaisesRegex(ValueError, "exact TCP source-group rule"):
                 vm.vllm_endpoint(aws, endpoint_args)
 
+            missing_prefix_instance = copy.deepcopy(instance)
+            missing_prefix_instance["Tags"] = [tag for tag in missing_prefix_instance["Tags"]
+                                               if tag["Key"] != "ResourcePrefix"]
+            with patch.object(aws, "call", side_effect=[identity, client_reply,
+                                                        {"Reservations": [{"Instances": [missing_prefix_instance]}]}]), \
+                    self.assertRaisesRegex(ValueError, "instance ownership"):
+                vm.vllm_endpoint(aws, endpoint_args)
+
             unmanaged_group = copy.deepcopy(group)
             unmanaged_group["Tags"] = vm.tags("attacker", "vllm-server")
             with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
@@ -918,8 +926,12 @@ class PlanTest(unittest.TestCase):
             managed_rule = {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
                             "UserIdGroupPairs": [{"GroupId": "sg-client"}]}
             responses[3]["SecurityGroups"][0]["IpPermissions"].append(managed_rule)
-            with patch.object(aws, "call", side_effect=responses), contextlib.redirect_stdout(io.StringIO()):
+            with patch.object(aws, "call", side_effect=responses), self.assertRaisesRegex(ValueError, "ingress"):
                 vm.verify(aws, args)
+            vllm_grant_state = {**state, "Scenario": "vllm-server",
+                                "Ingress": vm.ingress("vllm-server", "192.0.2.1/32")}
+            vm.check_ingress({"IpPermissions": [*vllm_grant_state["Ingress"], managed_rule]},
+                             vllm_grant_state)
             managed_rule["UserIdGroupPairs"] = [{"GroupId": "sg-unrelated"}]
             with patch.object(aws, "call", side_effect=responses), self.assertRaisesRegex(ValueError, "ingress"):
                 vm.verify(aws, args)

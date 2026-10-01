@@ -35,7 +35,7 @@ def updated_config(template, installed, previous, selected, *, legacy=False):
     def configured(state):
         return render(template, vllm=state["vllm"], openai=bool(state["openai_secret"]),
                       anthropic=bool(state["anthropic_secret"]),
-                      vllm_endpoint=state["vllm_endpoint"])
+                      vllm_endpoint=state.get("vllm_endpoint", ""))
 
     expected = template if legacy else configured(previous)
     if installed != expected:
