@@ -1,9 +1,10 @@
 # OpenShell experimental deployment boundaries
 
-Use a disposable, trusted single-operator host. The loopback management API allows
-unauthenticated local users and controls its owner's rootless Podman socket.
-Loopback is not per-user authorization; sandbox JWTs do not authenticate ordinary
-local operators. This is not a secure shared-host multi-tenant deployment.
+Use a dedicated, trusted single-operator host. The loopback management API
+requires TLS/mTLS for its registered operator and controls that owner's
+rootless Podman socket. Loopback placement is not per-user authorization;
+sandbox JWTs do not authenticate ordinary local operators. This is not a secure
+shared-host multi-tenant deployment.
 
 Policies express per-binary network allowlists and filesystem permissions. Their
 presence is not proof of enforcement. Test a controlled reachable destination,
@@ -15,9 +16,11 @@ without a destination request. It fails closed when the result is inconclusive.
 
 `landlock.compatibility: best_effort` can degrade filesystem protection. Record
 the actual supervisor/kernel enforcement result; host SELinux Enforcing alone is
-insufficient. The gateway Quadlet disables SELinux labeling to operate its Podman
-socket. This is distinct from per-container confinement. No blanket enforcement
-claim is made for unqualified kernel/profile combinations.
+insufficient. The gateway Quadlet disables SELinux labeling to operate its
+Podman socket, so rootless execution, loopback-only management, and the locked
+service account are compensating controls rather than replacements for a
+SELinux container label. No blanket enforcement claim is made for unqualified
+kernel/profile combinations.
 
 `include_workdir` grants policy permissions; it neither mounts a host checkout nor
 proves persistence. Deleting a sandbox can destroy its work. Export data before

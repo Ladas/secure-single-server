@@ -11,6 +11,13 @@ Model routing is intentionally out of scope here; the existing
 [OpenShell + Praxis workflow](../openshell-praxis/README.md) remains available
 for administrators who select that integration.
 
+## Current qualification status
+
+| Harness | Qualified in the single-server OpenShell path | Explicitly not qualified |
+| --- | --- | --- |
+| OpenCode | Sandbox creation, CLI version, shell/file operations, policy allow/deny, runtime limits | Optional Praxis model routing and real inference; the narrower `review` profile |
+| OpenClaw | Sandbox creation, CLI version, shell access, policy allow/deny, runtime limits | Browser/service command, authentication, retained sessions, `--backend`, and Praxis integration |
+
 ## AWS verification
 
 On 2026-10-02, the manual path was exercised on a disposable RHEL 9 x86_64 EC2
@@ -46,7 +53,8 @@ tools. OpenShell supplies the operational boundary around that experience:
 - Filesystem rules distinguish read-only host paths from writable workspace
   paths, reducing accidental or prompt-driven changes outside the sandbox.
 - Network rules are per-binary allowlists rather than broad host egress.
-- Each sandbox has default Podman runtime ceilings of two CPUs and 4 GiB of RAM.
+- Each sandbox has default Podman runtime ceilings of two CPUs, 4 GiB of RAM,
+  and 2048 PIDs.
 - Policy decisions are visible in OpenShell logs and acceptance tests, so a
   denial can be distinguished from an unrelated connection failure.
 - The bootc image packages the pinned OpenShell control-plane and selected
@@ -72,7 +80,7 @@ policy afterward and hope the harness uses it.
 | --- | --- | --- |
 | Filesystem | Read-only and read-write path sets, plus optional workspace inclusion. | Inside the sandbox, `/usr`, `/lib`, `/lib64`, `/etc`, `/proc`, `/dev/urandom`, and `/opt` are read-only. `/sandbox`, `/home`, `/tmp`, and `/dev/null` are writable. |
 | Network | Named endpoint allowlists scoped to exact harness/tool binary paths. | OpenCode permits selected model, OpenCode registry, GitHub, and npm endpoints. OpenClaw permits selected model, GitHub, and npm endpoints. Other destinations are denied. |
-| Runtime | Rootless Podman execution with per-sandbox CPU and memory limits. | Two CPUs and 4 GiB of memory by default; these are per-sandbox limits, not a host-wide budget. |
+| Runtime | Rootless Podman execution with per-sandbox CPU, memory, and PID limits. | Two CPUs, 4 GiB of memory, and 2048 PIDs by default; these are per-sandbox limits, not a host-wide budget. |
 | Credentials | No provider key is forwarded by the SSH helper. | Standalone credentials must be explicitly registered and attached. Integrated model-routing mode rejects direct provider attachment. |
 
 The default development endpoints are:
@@ -90,11 +98,9 @@ before deployment rather than inferring it from the profile name:
 - [Full policy qualification contract](../../../openshell/docs/policy-walkthrough.md)
 
 Start with the `dev` profile for the first smoke test. It is intentionally wide
-enough for the CLI to operate. The narrower `review` profile is not currently
-usable with OpenCode because OpenCode writes runtime state under `/sandbox`; do
-not broaden its workspace rules as a workaround. Treat a move to `automation`,
-`interactive`, or a custom profile as a reviewed policy change with fresh
-positive and negative network tests.
+enough for the CLI to operate; the manual section records current harness
+limitations. Treat a move to `automation`, `interactive`, or a custom profile as
+a reviewed policy change with fresh positive and negative network tests.
 
 Important limits:
 
@@ -109,9 +115,11 @@ Important limits:
 
 ## Manual RHEL deployment
 
-Use a disposable RHEL 9 x86_64 host. On the host, install Podman, Python 3,
-OpenSSH clients, curl, and the SELinux management tools, then transfer or check
-out the reviewed repository revision. Run from the repository root:
+Use a dedicated RHEL 9 x86_64 host. For first qualification, use a disposable
+instance before changing a long-lived server. On the host, install Podman,
+Python 3, OpenSSH clients, curl, and the SELinux management tools, then
+transfer or check out the reviewed repository revision. Run from the repository
+root:
 
 ```bash
 sudo dnf install -y podman python3 policycoreutils openssh-clients curl
@@ -124,6 +132,9 @@ sudo openshell/scripts/install.sh --owner openshell-svc
 The installer creates the locked `openshell-svc` account, enables lingering so
 the gateway remains available after logout, and starts the loopback-only
 OpenShell gateway with TLS/mTLS for the service operator.
+It pre-pulls every pinned supported harness image; the selected harness is
+chosen when its sandbox is created. If it reports that cgroup delegation needs
+a host reboot, reboot and rerun the same installer.
 
 Create the selected harness with its `dev` policy. The profile is part of the
 create operation:
@@ -152,6 +163,57 @@ sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
 OpenCode launches its CLI. OpenClaw opens a shell in the sandbox because its
 service command and authentication are not yet qualified. Keep the checkout and
 its parent directories readable by `openshell-svc`.
+
+Use the `dev` profile for OpenCode. Its `review` profile currently denies the
+CLI runtime-state directory, so sandbox creation can succeed while the CLI
+fails. OpenClaw's `--backend` option is unsupported; it previously printed a
+value without configuring anything. No OpenClaw browser workflow or retained
+service session is qualified, and no management or browser port should be
+published to make remote access work.
+
+Each sandbox has a per-sandbox runtime ceiling of two CPUs, 4 GiB, and 2048
+PIDs by default. To change a deployment under review, set
+`OPENSHELL_SANDBOX_CPU` and `OPENSHELL_SANDBOX_MEMORY` in the same
+service-owner environment used for `create.sh`; for example, `1` and `512Mi`.
+These are not aggregate host reservations.
+
+Standalone model credentials are never forwarded through the SSH helper. If a
+reviewed deployment needs one, import an administrator-reviewed provider
+profile, register the credential from a hidden prompt in the service-owner
+environment, and attach it explicitly with `create.sh --provider NAME`:
+
+```bash
+sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
+  PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
+  XDG_RUNTIME_DIR=/run/user/"$uid" \
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$uid"/bus \
+  bash -c '
+openshell profile lint -f /path/to/reviewed-provider-profile.yaml
+openshell profile import -f /path/to/reviewed-provider-profile.yaml
+read -r -s -p "Synthetic provider key: " PROVIDER_KEY; printf "\n"
+export PROVIDER_KEY
+openshell provider create --name test-provider --type openai \
+  --credential PROVIDER_KEY
+unset PROVIDER_KEY
+'
+```
+
+Use synthetic credentials first. If you select the optional OpenCode Praxis
+integration, do not attach a direct provider: integrated mode rejects the
+binding and the separate [Praxis workflow](../openshell-praxis/README.md)
+documents its own qualification limits.
+
+When creating a standalone sandbox that uses the registered provider, append
+`--provider test-provider` to the selected `create.sh` command:
+
+```bash
+sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
+  PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
+  XDG_RUNTIME_DIR=/run/user/"$uid" \
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$uid"/bus \
+  "$PWD/openshell/harnesses/$harness/create.sh" \
+  --profile dev --name "$harness"-dev --provider test-provider
+```
 
 For a one-off network requirement, add `--policy-advisor` when creating the
 sandbox. After the harness reports a denial and proposal, review and approve it
@@ -187,9 +249,6 @@ sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$uid"/bus \
   openshell sandbox delete HARNESS-dev
 ```
-
-See the [shared sandbox setup](../../../openshell/docs/quickstarts/common.md)
-for provider bindings, environment variables, and lifecycle details.
 
 Verify the runtime ceilings from the host rather than trusting the sandbox name:
 
@@ -243,15 +302,20 @@ quay.io/redhat-et/secure-single-server-openclaw:v0.1
 At validation time, those tags resolved to the digests recorded in
 [AWS verification](#aws-verification). Resolve them again before an auditable
 deployment because registry tags are mutable.
+The image contains the optional Praxis service, but it does not become a model
+route until its separate secrets and activation workflow are configured; the
+OpenShell sandbox checks do not depend on that service.
 
 For an auditable deployment, resolve the mutable `v0.1` tag to its digest and
-boot that digest. Record the digest separately from the tag:
+boot that digest. Run `skopeo inspect` on the host or another trusted system
+with `skopeo` installed, record the digest separately from the tag, and run
+`bootc switch` on the target host:
 
 ```bash
-skopeo inspect --format '{{.Digest}}' \
-  docker://quay.io/redhat-et/secure-single-server-opencode:v0.1
-sudo bootc switch \
-  quay.io/redhat-et/secure-single-server-opencode@RESOLVED_DIGEST
+digest="$(skopeo inspect --format '{{.Digest}}' \
+  docker://quay.io/redhat-et/secure-single-server-opencode:v0.1)"
+printf 'Deploying digest: %s\n' "$digest"
+sudo bootc switch "quay.io/redhat-et/secure-single-server-opencode@$digest"
 ```
 
 Use an image that includes the `sandbox_runtime_image` fix. Before trusting an
@@ -269,7 +333,7 @@ sudo grep '^sandbox_runtime_image' \
 On a booted RHEL image-mode host, stage the selected image and reboot:
 
 ```console
-sudo bootc switch quay.io/redhat-et/secure-single-server-opencode:v0.1
+sudo bootc switch quay.io/redhat-et/secure-single-server-opencode@RESOLVED_DIGEST
 sudo bootc status
 sudo systemctl reboot
 ```
@@ -299,8 +363,9 @@ sudo sss-bootc openshell sandbox list
 
 The default bootc service can leave its optional model-routing service waiting
 for separately provisioned secrets while OpenShell is already ready. Complete
-model access through the selected harness recipe or the
-[model-routing guide](../openshell-praxis/README.md) before running the model
+standalone model access with the provider guidance in
+[Manual RHEL deployment](#manual-rhel-deployment), or select the optional
+[model-routing guide](../openshell-praxis/README.md), before running the model
 prompt below. The OpenShell policy and sandbox commands do not require that
 optional service to be active.
 
@@ -440,8 +505,6 @@ inside the sandbox.
 
 ## Continue
 
-- [OpenCode recipe](../../../openshell/docs/quickstarts/opencode.md)
-- [OpenClaw recipe](../../../openshell/docs/quickstarts/openclaw.md)
 - [OpenShell threat model](../../../openshell/docs/threat-model.md)
 - [Policy qualification](../../../openshell/docs/policy-walkthrough.md)
 - [Bootc deployment details](../../../bootc/README.md)

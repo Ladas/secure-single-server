@@ -1,13 +1,11 @@
 # RHEL 9 bootc images
 
-bootc turns the reviewed Praxis/OpenShell setup into a repeatable host deployment.
-Choose a harness image, provision credentials separately, then update or roll back
-the OS as an image. OpenShell supplies the sandbox; Praxis supplies model access
-and shared quotas. Their combined inference path remains
-[experimental](../docs/quickstarts/openshell-praxis/users.md).
-
-For the curated OpenCode/OpenClaw deployment path, start with the
+bootc turns the reviewed OpenShell setup and selected harness into a repeatable
+RHEL host deployment. For the curated OpenCode/OpenClaw manual and quickstart
+paths, start with the
 [OpenShell single-server guide](../docs/quickstarts/openshell-single-server/README.md).
+Praxis is optional model routing and shared-quota tooling; its integration
+remains [experimental](../docs/quickstarts/openshell-praxis/users.md).
 
 Build one x86_64 internal base, standalone Praxis and vLLM images, and these
 deployable OS images:
@@ -24,17 +22,19 @@ RHEL 9 bootc → secure-single-server:vllm-gpu
 ```
 
 The base remains the parent for harness images. It includes Podman, the native
-OpenShell CLI, deployment configuration, and a boot service for the existing
-OpenShell/Praxis path. The standalone `praxis` image is a slimmer direct RHEL
+OpenShell CLI, deployment configuration, and a boot service for OpenShell and
+the optional, separately activated Praxis path. The standalone `praxis` image is
+a slimmer direct RHEL
 bootc image for gateway-only deployments; it excludes OpenShell, harnesses, and
 NVIDIA components. The standalone `vllm-cpu` and `vllm-gpu` images are also
 direct RHEL bootc images; they exclude Praxis and OpenShell. The CPU image
 omits NVIDIA components, while the GPU image includes the NVIDIA 580 open
 driver and Container Toolkit. Each harness image adds one harness's selection
 and scripts/policies. Harness binaries run in the pinned workload containers,
-not directly on the host. This initial bootc path uses Praxis's in-memory quota
-profile and administrator-operated OpenShell. It does not yet provide Valkey,
-remote-gateway TLS/JWT, or ordinary-user access to OpenShell. It is a deployment
+not directly on the host. When Praxis is activated, this path uses its
+in-memory quota profile; OpenShell is administrator-operated. It does not yet
+provide Valkey, remote-gateway TLS/JWT, or ordinary-user access to OpenShell.
+It is a deployment
 foundation for the [phased gateway goals](../docs/roadmap.md), not completion of
 the durable-quota or retained-session requirements.
 
@@ -67,6 +67,8 @@ plus only the selected harness image. This keeps OS distribution smaller;
 the installed host still needs disk space for the OS, container cache and
 workspace data. The native OpenShell CLI is copied from its pinned image at
 build time so boot never writes into `/usr`.
+The Praxis image is present for the optional route; without secrets and
+activation it does not provide model access, while OpenShell remains usable.
 
 Pulls use persistent, separate rootless stores for `praxis-svc` and
 `openshell-svc`. Each boot checks for the exact pinned images locally before
@@ -156,11 +158,14 @@ dedicated vLLM install and OCI-archive switch commands, see
 The service creates locked, separate rootless accounts and enables lingering.
 OpenShell listens on loopback ports 8090/8091 and gets only its own Podman
 socket. It generates per-machine signing keys under `/var/lib/openshell`.
-The OpenShell gateway retains the existing demo's SELinux-label-disable setting;
-the host itself must keep SELinux enforcing. This is an administrator-trusted
+The OpenShell gateway container retains the existing demo's
+SELinux-label-disable setting, so that container is not protected by a SELinux
+container label. The host itself must keep SELinux enforcing. Rootless Podman,
+loopback-only management, the locked service account, and the policy
+qualification are the compensating controls. This is an administrator-trusted
 demo boundary, not multi-tenant isolation.
 
-## Provision Praxis secrets
+## Optional Praxis secrets
 
 Wait for the initial boot service to finish. It reports that Praxis awaits
 secrets; OpenShell can already be inspected. Provider keys go through stdin to

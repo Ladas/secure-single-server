@@ -1,10 +1,8 @@
-# Shared sandbox setup (experimental)
+# Advanced sandbox operations (experimental)
 
-Use a disposable, trusted single-operator RHEL 9 x86_64 host. This is not a
-qualified provider/tool-task quickstart. See [validation](../../../bootc/VALIDATION.md)
-for the combinations exercised. Select a harness recipe for its limitations:
-[Codex](codex.md), [OpenCode](opencode.md), or [OpenClaw](openclaw.md).
-For the curated manual-and-bootc deployment path, start with the
+These operations support the experimental [Codex recipe](codex.md) and
+administrator-reviewed custom deployments. They are not an alternate customer
+quickstart. For OpenCode or OpenClaw, use only the
 [OpenShell single-server guide](../../../docs/quickstarts/openshell-single-server/README.md).
 
 On your workstation, clone this repository and transfer/checkout the same revision
@@ -24,7 +22,7 @@ gateway calls are rejected. The CLI imports its client bundle from
 Run CLI/harness commands as that account, with its HOME and runtime bus:
 
 ```bash
-harness=codex  # codex, opencode, or openclaw
+harness=codex
 uid=$(id -u openshell-svc)
 sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
   XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus \
@@ -76,9 +74,9 @@ unset OPENAI_API_KEY
 ```
 
 Initially use synthetic credentials: actual provider rewriting and real tool tasks
-remain unqualified. Do not attach a direct provider in Praxis mode. Codex and
-OpenClaw reject `--config`; OpenCode has an experimental Praxis config path.
-See [integration status](../../../docs/quickstarts/openshell-praxis/users.md).
+remain unqualified. Do not attach a direct provider in Praxis mode. Codex
+rejects `--config`. See
+[integration status](../../../docs/quickstarts/openshell-praxis/users.md).
 
 Connect with the same owner environment and `connect.sh --name HARNESS-dev`.
 Delete with `openshell sandbox delete HARNESS-dev` as that owner. Deleting/recreating a

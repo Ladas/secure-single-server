@@ -1,6 +1,10 @@
-# OpenShell acceptance on all-in-one
+# OpenShell engineering acceptance on all-in-one
 
-Run after [direct harness acceptance](harnesses.md). Keep real Qwen installed.
+This is an engineering acceptance page, not a customer deployment guide. For
+the OpenCode or OpenClaw manual and bootc paths, start with the
+[single-server guide](../quickstarts/openshell-single-server/README.md). Run
+these all-in-one checks after [direct harness acceptance](harnesses.md) and
+keep real Qwen installed.
 The [matrix](compatibility.md#openshell) separates CPU/GPU, service-operator
 checks and ordinary-user access. Bootc results do not qualify mutable RHEL.
 

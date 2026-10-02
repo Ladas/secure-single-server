@@ -32,7 +32,8 @@ OpenShell turns agent execution into an explicit policy decision:
 - **Network blast radius:** endpoints are allowlisted per harness or tool
   binary; unapproved destinations are denied.
 - **Least-privilege runtime:** the gateway and sandbox use a locked account,
-  rootless Podman, and default per-sandbox limits of two CPUs and 4 GiB RAM.
+  rootless Podman, and default per-sandbox limits of two CPUs, 4 GiB RAM, and
+  2048 PIDs.
 - **Always-on operation:** lingering services keep the sandbox host available
   after SSH disconnect, while management remains loopback-only.
 - **Auditable decisions:** logs and qualification scripts distinguish an actual
