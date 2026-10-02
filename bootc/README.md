@@ -133,10 +133,17 @@ host's existing RHEL AMI is not itself a test of bootc.
 On a booted host:
 
 ```console
+ssh cloud-user@BOOTC_HOST
 sudo journalctl -u secure-single-server.service -b
 sudo sss-bootc openshell --version
 sudo sss-bootc openshell sandbox list
 ```
+
+The bootc images include cloud-init and preserve AWS's `cloud-user`
+administrator login when converting a disposable RHEL host. Conversion changes
+SSH host keys; verify the new fingerprint through a trusted channel. For the
+dedicated vLLM install and OCI-archive switch commands, see
+[the vLLM deployment guide](VLLM.md#install-or-switch-a-dedicated-aws-host).
 
 The service creates locked, separate rootless accounts and enables lingering.
 OpenShell listens on loopback ports 8090/8091 and gets only its own Podman

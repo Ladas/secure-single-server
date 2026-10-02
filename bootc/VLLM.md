@@ -91,6 +91,50 @@ sudo env RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" AWS_RHUI_REGION=us-east-1 \
   bootc/build vllm-gpu localhost/secure-single-server
 ```
 
+### Install or switch a dedicated AWS host
+
+For a disposable existing RHEL host that does not yet run bootc, copy the image
+to that host and replace its root. The command is intentionally destructive:
+use it only on the dedicated vLLM instance, not on a builder or single-server
+VM. Cloud-init in the image retains the `cloud-user` account and its public key
+from the source RHEL instance.
+
+```console
+sudo podman load -i /var/tmp/vllm-cpu.tar
+sudo podman run --rm --privileged \
+  -v /dev:/dev \
+  -v /var/lib/containers:/var/lib/containers \
+  -v /:/target \
+  --pid=host \
+  --security-opt label=type:unconfined_t \
+  localhost/secure-single-server:vllm-cpu \
+  bootc install to-existing-root --acknowledge-destructive
+sudo systemctl reboot
+```
+
+On a host that is already bootc-managed, load the newer OCI archive and stage
+it in local container storage instead:
+
+```console
+sudo podman load -i /var/tmp/vllm-cpu.tar
+sudo bootc switch --transport containers-storage \
+  localhost/secure-single-server:vllm-cpu
+sudo systemctl reboot
+```
+
+When moving an OCI archive from the builder, save it in the OCI archive format
+and verify its checksum on both hosts before loading it:
+
+```console
+sudo podman save --format oci-archive \
+  -o /var/tmp/vllm-cpu.tar localhost/secure-single-server:vllm-cpu
+sha256sum /var/tmp/vllm-cpu.tar
+```
+
+Conversion changes the host's SSH host keys. Compare the new fingerprint
+through a trusted AWS or console channel before accepting it and reconnecting
+as `cloud-user@BOOTC_HOST`. Do not bypass host-key verification in production.
+
 GPU drivers are OS components; vLLM and model weights remain separate workload
 containers and persistent data. On the booted host, select the mode matching
 the image. Mismatched selections are rejected before starting a container:
@@ -110,17 +154,18 @@ prove inference readiness. Retry the health request while loading, inspecting
 logs if startup fails:
 
 ```console
-curl --fail http://127.0.0.1:8000/health
-curl --fail http://127.0.0.1:8000/v1/models
-curl --fail --max-time 600 http://127.0.0.1:8000/v1/chat/completions \
+curl --fail --max-time 30 "http://${VLLM_ENDPOINT:-127.0.0.1:8000}/health"
+curl --fail --max-time 30 "http://${VLLM_ENDPOINT:-127.0.0.1:8000}/v1/models"
+curl --fail --max-time 600 "http://${VLLM_ENDPOINT:-127.0.0.1:8000}/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -d '{"model":"Qwen/Qwen3-8B","messages":[{"role":"user","content":"Reply with a short greeting."}],"max_tokens":64,"temperature":0.7,"chat_template_kwargs":{"enable_thinking":false}}'
 ```
 
 Confirm a nonempty assistant response. CPU latency can be substantial. The
-API is unauthenticated and published only on host loopback; local host users
-can call it. Do not publish it externally. Use the Praxis route below for harness
-configuration; sandbox bypass denial remains a required qualification test.
+API is unauthenticated and listens on all host interfaces; restrict TCP 8000
+to the single-server security group and do not expose it to the Internet.
+Use the Praxis route below for harness configuration; sandbox bypass denial
+remains a required qualification test.
 
 ```console
 sudo sss-vllm select disabled

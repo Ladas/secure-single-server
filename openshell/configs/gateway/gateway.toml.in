@@ -33,5 +33,6 @@ ttl_secs         = 3600
 socket_path       = "/run/podman/podman.sock"
 default_image     = "@@ODH_OPENCODE_IMAGE@@"
 supervisor_image  = "@@ODH_SUPERVISOR_IMAGE@@"
+sandbox_runtime_image = "@@ODH_SANDBOX_IMAGE@@"
 image_pull_policy = "if_not_present"
 enable_bind_mounts = true

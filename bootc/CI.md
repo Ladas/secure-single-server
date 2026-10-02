@@ -9,8 +9,8 @@ no provider credentials. This tests protocol forwarding, not model quality or
 GPU execution. The OpenShell static and native schema checks include the local
 vLLM harness policy, and local config changes trigger the OpenShell workflow.
 
-Run the new tests on a Linux host with Python 3, Bash, util-linux and Docker
-(or Podman). The container engine must run on that same host; a remote Docker
+Run the new tests on a Linux host with Python 3, Bash, Ruby, util-linux and
+Docker (or Podman). The container engine must run on that same host; a remote
 or Podman VM cannot reach the Python mock server's host loopback. Ports 8000,
 8080 and 9901 must be free.
 
@@ -23,8 +23,12 @@ python3 tests/aws/plan.py
 python3 tests/aws/session.py
 python3 tests/rhel/providers.py
 python3 tests/rhel/vllm.py
+CONTAINER_ENGINE=docker tests/shared-gateway-image.sh
 CONTAINER_ENGINE=docker python3 bootc/tests/inference-image.py
 ```
+
+`tests/shared-gateway-image.sh` also pulls the pinned Praxis image required by
+the final inference-image check.
 
 ## Bootc image CI
 
@@ -62,10 +66,11 @@ Required GitHub configuration:
 
 ## Scope
 
-All new jobs run on the existing standard GitHub-hosted Ubuntu amd64 and arm64
-runners. No self-hosted runners, AWS resources, GPU, model downloads or cloud
-credentials are required. The existing optional OpenShell runtime fixture is
-unchanged and is not part of these hosted checks.
+The inference checks run on the existing standard GitHub-hosted Ubuntu amd64 and
+arm64 runners; bootc image builds run on amd64 only. No self-hosted runners,
+AWS resources, GPU, model downloads or cloud credentials are required. The
+existing optional OpenShell runtime fixture is unchanged and is not part of
+these hosted checks.
 
 These tests do not qualify real Qwen inference, GPU driver/CDI behavior, bootc
 boot/reboot, sandbox enforcement, or OS rollback. See the separate hardware

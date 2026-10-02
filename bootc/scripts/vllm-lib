@@ -69,7 +69,7 @@ Pull=never
 User=1001
 Group=1001
 UserNS=keep-id:uid=1001,gid=1001
-PublishPort=127.0.0.1:8000:8000
+PublishPort=0.0.0.0:8000:8000
 Volume=%h/cache:/cache:Z
 Environment=HOME=/cache HF_HOME=/cache/huggingface VLLM_CACHE_ROOT=/cache/vllm
 Environment=VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1

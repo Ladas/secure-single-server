@@ -37,7 +37,7 @@ class VllmTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 unit = result.stdout
                 self.assertIn('Exec=Qwen/Qwen3-8B --revision b968826d9c46dd6066d109eabc6255188de91218', unit)
-                self.assertIn('PublishPort=127.0.0.1:8000:8000', unit)
+                self.assertIn('PublishPort=0.0.0.0:8000:8000', unit)
                 arguments = shlex.split(next(line[5:] for line in unit.splitlines()
                                              if line.startswith('Exec=')))
                 provider = json.loads((ROOT / 'configs/vllm/harness/harness-provider.json.in').read_text())
