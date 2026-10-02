@@ -9,6 +9,35 @@ from contracts import check
 
 
 class ProviderTest(unittest.TestCase):
+    def test_strict_cloud_rejects_legacy_token_parameter(self):
+        self.fixture.strict_openai = True
+        for model in ('gpt-5.4-mini', 'gpt-6-luna'):
+            body = {'model': model, 'messages': [{'role': 'user', 'content': 'hello'}], 'max_tokens': 4}
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.request('/v1/chat/completions', body)
+            self.assertEqual(caught.exception.code, 400)
+            self.assertEqual(json.load(caught.exception)['error']['param'], 'max_tokens')
+            body['max_completion_tokens'] = body.pop('max_tokens')
+            with self.request('/v1/chat/completions', body) as response:
+                self.assertEqual(response.status, 200)
+        # Native Messages still requires max_tokens.
+        with self.request('/v1/messages', {'model': 'claude-sonnet-5', 'max_tokens': 4}, provider=1) as response:
+            self.assertEqual(response.status, 200)
+
+    def test_strict_cloud_rejects_foreign_plaintext_reasoning(self):
+        self.fixture.strict_openai = True
+        history = [{'role': 'user', 'content': 'hello'}, {'type': 'reasoning', 'summary': [],
+                    'content': [{'type': 'reasoning_text', 'text': 'synthetic local reasoning'}]}]
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.request('/v1/responses', {'model': 'gpt-5.4-mini', 'input': history})
+        error = json.load(caught.exception)['error']
+        self.assertEqual(error['param'], 'input[1].content')
+        self.assertEqual(error['code'], 'array_above_max_length')
+        history[1] = {'type': 'reasoning', 'summary': [], 'encrypted_content': 'synthetic-opaque'}
+        with self.request('/v1/responses', {'model': 'gpt-5.4-mini', 'input': history}) as response:
+            self.assertEqual(response.status, 200)
+        self.assertNotIn('synthetic local reasoning', json.dumps(self.fixture.records))
+
     def test_model_discovery_query_parameters_are_supported(self):
         request = urllib.request.Request(f"http://127.0.0.1:{self.fixture.ports[0]}/v1/models?limit=1000",
                                          headers={"Authorization": "Bearer synthetic-openai"})

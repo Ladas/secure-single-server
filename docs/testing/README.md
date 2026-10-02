@@ -2,8 +2,10 @@
 
 ## AWS RHEL workflow
 
-Follow these in order. Select a VM once, then use the same test commands for
-any all-in-one or remote-gateway CPU/GPU variant.
+For a fresh VM and manual use, follow the [official installation sequence](aws.md#6-install-services-and-test)
+after AWS deployment. It does not require running smoke tests first.
+
+For automated qualification, select a VM once and follow these in order:
 
 1. [Deploy VMs](aws.md) — separate plan/launch blocks, an ordinary user login
    for all-in-one and a copyable VM inventory.

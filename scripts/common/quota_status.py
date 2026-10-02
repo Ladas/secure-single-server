@@ -260,7 +260,8 @@ def format_report(rows, started):
             output.append(row["rule"] + ": " + row["balance_note"])
         if row["room_for_reservation"] is False:
             output.append(row["rule"] + ": remaining capacity is below the next request's reservation.")
-    output += ["", "List rules and capacity-setting commands: sudo scripts/common/quota-set --list"]
+    output += ["", "List rules and capacity-setting commands: sudo scripts/common/quota-set --list",
+               "List testing reset commands: sudo scripts/common/quota-reset --list"]
     return "\n".join(output)
 
 

@@ -20,34 +20,8 @@ The remaining commands run on RHEL as that user.
 
 ## 2. Install the approved harnesses
 
-The [account helper](../../../scripts/common/harness_user.py) installs
-`/usr/local/bin/praxis-harness`, a copy of the
-[Python launcher](../../../scripts/common/harness.py), and the tested version list.
-The launcher sets the Praxis URL, provider, model and client limits, then starts
-the chosen CLI with its normal interactive tool approvals. Run
-`praxis-harness --help` to see its options.
-
-Use `claude-code` as its launcher name; the installed executable is still
-`claude`. The older `praxis-harness claude` spelling remains an alias.
-
-<details>
-<summary>What the launcher changes, and using a configuration file instead</summary>
-
-`praxis-harness` starts your installed CLI with settings for this launch. It
-does not start another proxy or change the model installed on the server.
-Codex receives command-line settings, OpenCode receives JSON through
-`OPENCODE_CONFIG_CONTENT`, and Claude receives environment variables and flags.
-The launcher does not rewrite your configuration files or fetch a combined
-provider catalog. The CLI can still load its existing settings.
-
-See the expandable [per-harness configuration examples](../common/harness-configuration.md)
-for the exact routes, limits and file-based alternatives. With local Qwen,
-Claude uses simple mode: automatic `CLAUDE.md`, skill, plugin and hook discovery
-is disabled. Interactive tool approvals remain active.
-Local Qwen starts Claude Code in Manual mode: approve tool requests yourself.
-Auto mode requires a separate classifier that is not qualified with Qwen.
-
-</details>
+The [account helper](accounts.md) installs `praxis-harness-config` and the tested
+CLI version list. Provider credentials remain on the server.
 
 Install the CLIs into your own home, once per account:
 
@@ -74,97 +48,88 @@ cd ~/projects/praxis-example
 git init -q
 ```
 
-## 3. Choose an enabled provider
+## 3. Configure and run the native harnesses
 
-### Qwen through local vLLM
-
-When installed by the administrator, Qwen needs no cloud credentials. Start
-with OpenCode. Read the single installed model from the gateway:
+For an administrator-configured [unified catalog](../common/providers.md#unified-models-all-in-one),
+run once, and again after changing enabled providers or allowed models:
 
 ```console
-VLLM_MODEL=$(curl -fsS http://127.0.0.1:8080/vllm/v1/models |
-  python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])')
-printf 'Model: %s\n' "$VLLM_MODEL"
-praxis-harness opencode --provider vllm --model "$VLLM_MODEL"
+praxis-harness-config
 ```
 
-The launcher selects that model through Praxis's `/vllm/v1` route, with thinking
-enabled and reasoning separated from the final answer. The 8B preset serves a
-16,384-token context with a 4,096-token OpenCode/Claude output budget; 27B uses
-32,768 and 8,192 respectively, including thinking. Use the matching updated
-server and launcher. The larger 27B budgets still need a RHEL rerun; existing
-passes used 16k/4k. Both supplied model presets support these three clients. CPU responses
-can take several minutes; GPU is faster for interactive use. Context remains
-limited compared with hosted models, and model/tool reliability varies.
-
-Or choose another harness:
+This reads both local `/v1/models` catalogs and writes private user files, with
+backups of changed files. Both API catalogs need at least one enabled model;
+Qwen alone supplies both. No config-home environment override is needed.
+Start one CLI from your project:
 
 ```console
-praxis-harness codex --provider vllm --model "$VLLM_MODEL"
+codex --profile praxis
 ```
 
 ```console
-praxis-harness claude-code --provider vllm --model "$VLLM_MODEL"
-```
-
-### OpenAI
-
-The administrator must [enable OpenAI](../common/providers.md#add-openai)
-and provide a model ID available to that account:
-
-```console
-printf 'Approved OpenAI model ID: '
-IFS= read -r OPENAI_MODEL
-```
-
-Choose either client:
-
-```console
-praxis-harness codex --provider openai --model "$OPENAI_MODEL"
+claude-code
 ```
 
 ```console
-praxis-harness opencode --provider openai --model "$OPENAI_MODEL"
+opencode
 ```
 
-### Anthropic
+`claude-code` is a user-owned symlink to the installed `claude` executable.
 
-The administrator can [enable Anthropic independently](../common/providers.md#add-anthropic).
-Choose an approved model, then either client:
+| Harness | Menu | Generated configuration |
+| --- | --- | --- |
+| Codex | `/model`: Responses models | `~/.codex/praxis.config.toml`, `~/.codex/model-catalogs/praxis.json` |
+| Claude Code | `/model`: Messages models | `~/.claude/settings.json` |
+| OpenCode | `/models`: both APIs | `~/.config/opencode/opencode.json` |
 
-```console
-printf 'Approved Anthropic model ID: '
-IFS= read -r ANTHROPIC_MODEL
-```
+The menus are snapshots of the gateway's configured aliases, such as
+`vllm/qwen3.8-27b-int4` or `openai/<approved-model>`. They do not automatically
+import upstream catalogs. Refresh and restart the harness after admin changes.
+For Codex, `--profile praxis` loads the generated
+[named profile](https://learn.chatgpt.com/docs/config-file/config-advanced#profiles).
 
-```console
-praxis-harness claude-code --provider anthropic --model "$ANTHROPIC_MODEL"
-```
+OpenCode uses just two active provider entries: `praxis-openai` at
+`http://127.0.0.1:8080/v1` and `praxis-messages` at `http://127.0.0.1:8081/v1`.
+GPT and local Qwen use Responses under `praxis-openai`; other compatible models
+may use Chat. `/models` can switch between these entries within one session.
+An optional `--model` chooses the starting entry; it does not lock the API.
+Existing unrelated provider definitions are preserved but excluded by
+`enabled_providers`. A fresh account has only the two Praxis entries.
 
-```console
-praxis-harness opencode --provider anthropic --model "$ANTHROPIC_MODEL"
-```
+### Verify a model, then switch
 
-### Model menus
+Ask the selected model:
 
-OpenCode uses `/models`; Claude and Codex use `/model`. With these launchers,
-OpenCode lists the configured Praxis model and Claude maps its configured Qwen
-aliases. Codex's current menu omits Qwen: keep the model selected by
-`praxis-harness codex --provider vllm --model "$VLLM_MODEL"`. None of these
-commands displays an automatically aggregated inventory of all Praxis providers.
-Other built-in entries are not a list of administrator-approved models; use the
-supplied IDs.
+> Create add.py with add(a, b), write tests for positive, negative and zero
+> inputs, run python3 -m unittest -v, and report the actual result.
 
-Interactive clients keep their normal tool approvals. Cloud calls use the administrator's provider account.
-The launcher configures each native API; it does not enable API translation.
+Approve the tool calls and inspect the resulting files/tests. Repeat after
+selecting another model, then switch back. Menu visibility alone does not prove
+inference, tool use or history compatibility.
+
+The pinned vLLM rejects cloud encrypted reasoning when returning to Qwen
+**Responses**. The normal commands above do not include a history adapter.
+Use a fresh Qwen session, or use Qwen's Messages entry in OpenCode/Claude Code.
+Do not assume a long cloud conversation fits Qwen's smaller context.
+
+Limits come from the approved catalog. Codex/OpenCode use per-model context;
+Codex's compaction headroom does not enforce an output cap. Claude's context
+override covers unknown model IDs; recognized Claude models retain their own
+window. Long-history compaction and downsizing need qualification.
+Claude runs in simple/Manual mode for Qwen compatibility: approve tools yourself;
+automatic skill/plugin discovery and the auto-mode classifier are not qualified.
 
 On `429`, stop repeated retries and ask the administrator to
-[check the shared token quota and request throttle](../common/token-quotas.md#read-accounting-and-identify-a-429).
+[inspect the quota and request throttle](../common/token-quotas.md#read-accounting-and-identify-a-429).
 
-For an installed Switchyard profile, OpenCode can use its Chat listener by
-adding `--url http://127.0.0.1:8082` to the OpenAI command. The administrator
-controls judge/Weak/Strong routing; Codex Responses and Claude Messages cannot
-use that Chat-only listener.
+### Gateways without a unified catalog
+
+Use [the per-provider launcher or native-file examples](../common/harness-configuration.md)
+for legacy all-in-one or Switchyard installations. `praxis-harness` is defined
+in `scripts/common/harness.py` and installed as `/usr/local/bin/praxis-harness`.
+It supplies settings for one launch; it is unnecessary after generating the
+unified native files above. Provider-specific `/vllm` and `/providers/NAME`
+routes are replaced when unified mode is enabled.
 
 ## 4. Optional sandbox execution
 

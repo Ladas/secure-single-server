@@ -1,13 +1,18 @@
 """Shared Valkey limits must be one budget across API listeners."""
 import copy
+import json
 from datetime import datetime, timezone
 import sys
 import unittest
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / 'scripts/common'), str(ROOT / 'tests/common')]
 import provider_config
+import provider_manage
 import quota_config
 import quota_manage
 import quota_status
@@ -16,6 +21,38 @@ from test_quota_manage import template
 
 
 class SharedQuotaTest(unittest.TestCase):
+    def test_shared_quota_command_retains_the_remote_inference_endpoint(self):
+        endpoint = '10.0.1.10:8000'
+        state = dict(vllm=True, vllm_endpoint=endpoint, openai_secret='', anthropic_secret='')
+        import yaml
+        source = yaml.safe_load((ROOT / 'configs/all-in-one/shared-gateway-valkey.yaml').read_text())
+        installed = provider_config.render(source, vllm=True, openai=False,
+                                           anthropic=False, vllm_endpoint=endpoint)
+        read_text = Path.read_text
+        def read(path, *args, **kwargs):
+            if str(path).startswith('/etc/containers/systemd/users/'):
+                return '[Container]\n'
+            return read_text(path, *args, **kwargs)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, content in {'shared-gateway.profile': 'valkey', 'gateway.scenario': 'all-in-one',
+                    'providers.json': json.dumps(state), 'shared-gateway.yaml': json.dumps(installed)}.items():
+                (root / name).write_text(content)
+            with patch.object(provider_manage, 'CONFIG', root), patch.object(Path, 'read_text', read), \
+                    patch.object(provider_manage.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=1234, pw_gid=1234)), \
+                    patch.object(sys, 'argv', ['providers', 'enable', 'vllm', '--shared-quota', '--capacity', '10000000']), \
+                    patch.object(provider_manage, 'service'), patch.object(quota_share, 'prepare'), \
+                    patch.object(provider_manage, 'transaction') as transaction:
+                provider_manage.main()
+            changes = transaction.call_args.args[0]
+            applied = json.loads(changes[root / 'providers.json'])
+            self.assertEqual(applied['vllm_endpoint'], endpoint)
+            config = json.loads(changes[root / 'shared-gateway.yaml'])
+            clusters = [c for chain in config['filter_chains'] for f in chain['filters']
+                        if f['filter'] == 'load_balancer' for c in f['clusters'] if c['name'] == 'vllm']
+            self.assertTrue(clusters)
+            self.assertTrue(all(c['endpoints'] == [endpoint] for c in clusters))
+
     def config(self, scenario='all-in-one'):
         source = template(scenario)
         for chain in source['filter_chains']:

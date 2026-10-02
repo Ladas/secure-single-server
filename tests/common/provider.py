@@ -15,6 +15,22 @@ MODES = ("ok", "missing_usage", "http429", "http500", "timeout", "delayed", "can
 ARGUMENTS = '{"a":2,"b":3}'
 
 
+def openai_error(path, body):
+    """Two cloud contracts missed by permissive mocks; not a full API validator."""
+    if (path == '/v1/chat/completions' and 'max_tokens' in body
+            and str(body.get('model', '')).startswith(('gpt-5', 'gpt-6'))):
+        return {'message': "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens' instead.",
+                'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}
+    if path == '/v1/responses' and isinstance(body.get('input'), list):
+        for index, item in enumerate(body['input']):
+            if (isinstance(item, dict) and item.get('type') == 'reasoning'
+                    and isinstance(item.get('content'), list) and item['content']):
+                param = f'input[{index}].content'
+                return {'message': f"Invalid '{param}': array too long. Expected maximum length 0.",
+                        'type': 'invalid_request_error', 'param': param, 'code': 'array_above_max_length'}
+    return None
+
+
 def continuation(path, body):
     if path == "/v1/responses":
         items = body.get("input", [])
@@ -136,11 +152,12 @@ def events(path, result):
 
 class Provider:
     def __init__(self, ports=(18080, 18081, 19000), host="127.0.0.1", control_host="127.0.0.1",
-                 openai_authorization="Bearer synthetic-openai", model="fixture", local=False):
+                 openai_authorization="Bearer synthetic-openai", model="fixture", local=False, strict_openai=False):
         # None requires the local profile to remove Authorization completely.
         self.openai_authorization = openai_authorization
         self.model = model
         self.local = local
+        self.strict_openai = strict_openai
         self.records = []
         self.mode = "ok"
         self.delay = 1.0
@@ -190,6 +207,8 @@ class Provider:
                             "provider": "anthropic" if anthropic else "openai",
                             "credential_ok": credential_ok, "classification_clean": clean,
                             "stream": bool(body.get("stream")), "continuation": continuation(self.path, body)})
+                        if isinstance(body.get('include_reasoning'), bool):
+                            fixture.records[-1]['include_reasoning'] = body['include_reasoning']
                     return credential_ok and clean
 
                 def do_POST(self):
@@ -219,6 +238,9 @@ class Provider:
                         mode, delay = fixture.mode, fixture.delay
                     if not valid:
                         return self.reply(403, {"error": "credential or classification mismatch"})
+                    error = openai_error(self.path, body) if fixture.strict_openai else None
+                    if error:
+                        return self.reply(400, {"error": error})
                     if fixture.local and body.get("model") != fixture.model:
                         return self.reply(404, {"error": "unknown local model"})
                     if self.path == "/v1/messages/count_tokens" and anthropic:

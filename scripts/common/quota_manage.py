@@ -80,7 +80,8 @@ def format_listing(report):
     if commands:
         lines += ["", "Preview a change: replace the current capacity in the selected command:", *commands,
                   "To save the reviewed change, append --apply (restarts Praxis)."]
-    lines += ["", "Check usage: sudo scripts/common/quota-status"]
+    lines += ["", "Check usage: sudo scripts/common/quota-status",
+              "List testing reset commands: sudo scripts/common/quota-reset --list"]
     return "\n".join(lines)
 
 

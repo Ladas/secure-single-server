@@ -5,6 +5,18 @@ Use [all-in-one user setup](../all-in-one/users.md) or
 explains the installed `praxis-harness` launcher and file-based alternatives.
 It configures the selected CLI; Praxis is the server handling inference.
 
+## Unified native configuration
+
+For the two unified all-in-one listeners, follow [user setup](../all-in-one/users.md#3-configure-and-run-the-native-harnesses).
+Run `praxis-harness-config` as the ordinary user, then `codex --profile praxis`,
+`claude-code` or `opencode`. The refresh helper reads the gateway's configured
+catalogs; no alternate config home or per-launch provider URL is needed.
+Its source is `scripts/common/harness_config.py`, installed as
+`/usr/local/bin/praxis-harness-config` by the account helper.
+
+The reference below covers **per-provider routes without unified mode**, including
+remote clients. Those paths no longer exist after enabling unified models.
+
 ## Native files or the launcher
 
 For ongoing use, configure the CLI's files and launch the CLI directly. The

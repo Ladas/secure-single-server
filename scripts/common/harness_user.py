@@ -48,6 +48,7 @@ def create(user, key_file):
         raise ValueError(f"home already exists: {home}; no account was created")
     key = public_key(key_file)
     launcher = (ROOT / "scripts/common/harness.py").read_bytes()
+    configure = (ROOT / 'scripts/common/harness_config.py').read_bytes()
     versions = (ROOT / "configs/common/harness-versions.json").read_bytes()
     run("useradd", "--create-home", "--user-group", "--home-dir", str(home),
         "--shell", "/bin/bash", user)
@@ -60,6 +61,7 @@ def create(user, key_file):
     # its material directory, provider secrets or the OpenShell owner's state.
     for directory, name, content, mode in (
             (BIN_DIR, "praxis-harness", launcher, 0o755),
+            (BIN_DIR, 'praxis-harness-config', configure, 0o755),
             (DATA_DIR, "harness-versions.json", versions, 0o644)):
         directory.mkdir(parents=True, exist_ok=True)
         directory.chmod(0o755)

@@ -28,6 +28,7 @@ def main():
     if args.suite == "praxis":
         commands += [["bash", "tests/shared-gateway-image.sh"], ["bash", "tests/shared-gateway-valkey-image.sh"]]
     if args.suite in ("praxis", "gateways"):
+        commands += [[sys.executable, 'tests/rhel/unified-image.py']]
         commands += [[sys.executable, "tests/common/gateway.py", "--scenario", scenario, *backend]
                      for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
         commands += [[sys.executable, "tests/rhel/provider-image.py", "--scenario", scenario, *backend]

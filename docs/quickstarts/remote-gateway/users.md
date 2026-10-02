@@ -140,7 +140,7 @@ Model discovery and switching are separate checks from configuring a route.
 
 ### OpenAI
 
-The administrator [enables OpenAI](../common/providers.md#add-openai) and gives
+The administrator [enables OpenAI](../common/providers.md#openai) and gives
 you an approved model ID. Read it, then choose either client:
 
 ```console
@@ -158,7 +158,7 @@ IFS= read -r OPENAI_MODEL
 
 ### Anthropic
 
-The administrator [enables Anthropic](../common/providers.md#add-anthropic)
+The administrator [enables Anthropic](../common/providers.md#anthropic)
 independently of OpenAI. Read the approved model ID, then choose either client:
 
 ```console

@@ -3,6 +3,12 @@
 Run as the administrator, from the matching deployment checkout. These commands
 preserve other providers and listener authentication. Provider changes restart
 Praxis; finish active tasks first. Valkey quotas persist across restarts.
+For a new Qwen installation, first complete [vLLM setup](vllm.md). Then use the
+shared quota and unified catalog below; cloud providers are optional additions.
+
+**Contents:** [OpenAI](#openai) · [Anthropic](#anthropic) ·
+[Compatible provider](#another-compatible-provider) · [Shared vLLM quota](#share-the-local-vllm-quota-across-harnesses) ·
+[Unified models](#unified-models-all-in-one) · [Operations](#inspect-rotate-and-disable)
 
 ```console
 cd ~/secure-single-server-deploy
@@ -33,8 +39,9 @@ sudo scripts/common/quota-set --provider anthropic --capacity 2000000 --apply
 ## Another compatible provider
 
 Choose a unique lowercase name and replace the example URL. The upstream must
-speak the native API used by the harness: Responses for Codex, Chat Completions
-for OpenCode, or Messages for Claude Code. The helper does not translate APIs.
+speak the native API used by the harness: Responses for Codex, Messages for
+Claude Code, or the selected SDK's API for OpenCode. The unified OpenCode
+configuration uses Responses for GPT and local Qwen. There is no API translation.
 
 ```console
 sudo scripts/common/providers enable team \
@@ -76,7 +83,120 @@ the allowance is the supplied capacity, not the sum of the former capacities.
 Migration requires the pinned image and managed 24h/300s Valkey rules.
 In-memory quotas cannot share a budget across the two all-in-one listeners.
 
-## Client URLs and models
+## Unified models (all-in-one)
+
+This opt-in mode replaces per-provider paths with two loopback endpoints:
+
+| Client API | Base URL | Catalog |
+| --- | --- | --- |
+| Responses / Chat | `http://127.0.0.1:8080/v1` | `GET /v1/models` |
+| Messages | Claude: `http://127.0.0.1:8081`; OpenCode: append `/v1` | `GET /v1/models` |
+
+The model alias selects the provider. Praxis allows only configured aliases,
+rewrites each to its upstream model ID, and applies that provider's credentials
+and quota. Unknown aliases are rejected. Cloud budgets remain independent;
+the shared vLLM budget covers both listeners. There is no automatic failover.
+This mode currently supports all-in-one memory/Valkey gateways, not remote
+HTTPS/JWT gateways or Switchyard.
+
+### Create the catalog
+
+For Qwen, select the installed preset. Change the first line to `qwen3-8b`
+for 8B. Run once; an existing catalog is never overwritten:
+
+```console
+VLLM_MODEL=qwen3.8-27b-int4
+sudo python3 - "$VLLM_MODEL" <<'PY'
+import json, pathlib, sys
+model = sys.argv[1]
+context, output = {'qwen3-8b': (16384, 4096), 'qwen3.8-27b-int4': (32768, 8192)}[model]
+entry = dict(id='vllm/' + model, provider='vllm', model=model,
+             apis=['openai', 'anthropic'], context=context, output=output)
+with pathlib.Path('/etc/praxis/unified-models.json').open('x') as f:
+    json.dump([entry], f, indent=2)
+    f.write('\n')
+PY
+```
+
+### Choose cloud models and apply
+
+Enable the desired providers above. Choose exact IDs available to your account
+and confirm the required API: appearing in a model list does not prove Responses
+or tool support. To query an OpenAI-compatible upstream catalog without reading
+stored secrets, run in Bash and enter its HTTPS `/v1/models` URL and key:
+
+```console
+(
+  set +x
+  set -o pipefail
+  IFS= read -r -p 'Upstream HTTPS models URL: ' models_url
+  IFS= read -r -s -p 'API key: ' key; printf '\n'
+  printf 'Authorization: Bearer %s\n' "$key" |
+    curl --proto '=https' --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+      --header @- "$models_url" | python3 -m json.tool
+)
+```
+
+For an Anthropic-native catalog:
+
+```console
+(
+  set +x
+  set -o pipefail
+  IFS= read -r -p 'Upstream HTTPS models URL: ' models_url
+  IFS= read -r -s -p 'API key: ' key; printf '\n'
+  printf 'x-api-key: %s\nanthropic-version: 2023-06-01\n' "$key" |
+    curl --proto '=https' --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+      --header @- "$models_url" | python3 -m json.tool
+)
+```
+
+For direct OpenAI the URL is `https://api.openai.com/v1/models`; direct
+Anthropic uses `https://api.anthropic.com/v1/models`.
+
+Edit the non-secret JSON array. Add one object per approved model using this
+shape, replacing the model ID and choosing supported client budgets:
+
+```json
+{
+  "id": "openai/APPROVED_MODEL",
+  "provider": "openai",
+  "model": "APPROVED_MODEL",
+  "apis": ["openai"],
+  "context": 128000,
+  "output": 8192
+}
+```
+
+Use `provider: "anthropic"` with `apis: ["anthropic"]`, or the custom provider
+name (`team`) and its supported API(s). `id` is a unique menu alias; `model` is
+the exact upstream ID. Context includes input and output; set both within the
+**served** limits. These are client hints, not gateway-enforced generation caps.
+For a cloud-only gateway, create the array with approved cloud entries instead
+of the Qwen block. The native-config helper currently needs an enabled model
+on each API listener.
+
+Edit, validate and apply together; then inspect the published catalogs:
+
+```console
+sudoedit /etc/praxis/unified-models.json &&
+sudo scripts/common/providers unified --models /etc/praxis/unified-models.json --vllm-reasoning hide &&
+sudo scripts/common/providers models
+```
+
+`--vllm-reasoning hide` keeps Qwen thinking enabled but omits plaintext reasoning
+from its Responses output. This prevents that reasoning from breaking a later
+cloud request. It does **not** make encrypted cloud reasoning acceptable to vLLM
+on the return path. Messages and cloud output are unchanged.
+
+Only entries with enabled provider backends are published. Upstream catalogs
+never update this allowlist automatically. After each change, ordinary users
+run `praxis-harness-config` and restart their CLIs; see [user setup](../all-in-one/users.md).
+
+## Per-provider URLs (without unified mode)
+
+Use these on remote gateways and existing all-in-one installations that have
+not enabled unified models. They are replaced by the unified endpoints above.
 
 | API | All-in-one origin | Path |
 | --- | --- | --- |
@@ -128,7 +248,8 @@ see [vLLM installation](vllm.md).
 
 | Setting | Managed location |
 | --- | --- |
-| Enabled providers, custom URLs, secret references | `/etc/praxis/providers.json` |
+| Enabled providers, custom URLs, secret references, applied catalog | `/etc/praxis/providers.json` |
+| Administrator-edited non-secret model catalog | `/etc/praxis/unified-models.json` |
 | Rendered routes, filters and quotas | `/etc/praxis/shared-gateway.yaml` |
 | Capacity overrides | `/etc/praxis/quota-overrides.json` |
 | Upstream keys | Rootless Podman secrets owned by `praxis-svc` |
@@ -136,6 +257,6 @@ see [vLLM installation](vllm.md).
 
 Use the helpers for provider and capacity changes; hand edits to managed files
 are rejected as configuration drift. Upgrades retain custom providers and the
-shared-vLLM setting. Failed activation restores configuration from
+shared-vLLM setting and applied unified catalog. Failed activation restores configuration from
 `/etc/praxis/rollback/`. A failed quota migration never overwrites a shared ledger;
 inspect its reported recovery state before retrying.

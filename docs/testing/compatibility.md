@@ -18,7 +18,8 @@ the tool result, generated files and independently passing tests. **`/model`**
 (or OpenCode's **`/models`**) checks that the intended model is visible in the
 interactive selector. Inference after changing the menu selection is **Not run**
 everywhere; task tests launch the model explicitly. A model-list API response
-alone does not qualify a menu. Praxis has no combined catalog across providers.
+alone does not qualify a menu. Unified all-in-one mode now publishes configured
+catalogs; [feature testing](gateway-features.md) records refresh and switching checks.
 
 **Passed** = the named check succeeded. **Failed** = it ran and failed.
 **Unverified** = attempted, but evidence is inconclusive. **Not run** = no result
@@ -57,26 +58,30 @@ See the [current bug and fix candidate](vllm-debugging.md#responses-tool-ids-cha
 
 **Qwen3.8-27B INT4 / vLLM**
 
-The following harness results used 16,384 context / 4,096 output tokens.
-The GPU now runs the 32,768 / 8,192 preset: an 18,075-token input completed
-through Praxis with thinking enabled, and launcher limits were checked for
-all three CLIs. Full harness and compaction reruns at 32K remain pending.
+CPU results use 16,384 context / 4,096 output tokens.
+The GPU now runs the 32,768 / 8,192 preset. New native unified-config tasks
+passed for all three CLIs, including generated files and independent tests
+(Codex 40s, Claude Code 42s, OpenCode 56s). Short-history switching results and
+the required Responses adapter are in [feature testing](gateway-features.md#model-switching-and-reasoning).
+Interactive menu captures and long-history compaction remain pending.
 The CPU remains at 16,384 / 4,096.
 
 | Harness | Check | Real CPU | Real GPU |
 | --- | --- | --- | --- |
 | Codex | Tool query | Passed | Passed |
-| Codex | `/model` | Failed [1] | Failed [1] |
+| Codex | `/model` | Failed [1] | Not run [1] |
 | Claude Code | Tool query | Passed [2] | Passed [2] |
-| Claude Code | `/model` | Passed [3] | Passed [3] |
+| Claude Code | `/model` | Passed [3] | Not run [3] |
 | OpenCode | Tool query | Passed | Passed |
-| OpenCode | `/models` | Passed [3] | Passed [3] |
+| OpenCode | `/models` | Passed [3] | Not run [3] |
 
-1. The Codex menu still shows its built-in catalog, without Qwen. Explicit
-   `--model qwen3.8-27b-int4` works.
+1. CPU retains the older launcher result: Qwen absent from the menu, explicit
+   model selection works. The GPU generated catalog passes `model/list`; a fresh
+   interactive picker check has not been captured.
 2. The launcher sets Claude effort to `medium`. Its default `high` is rejected
    by this model's template; thinking remains enabled.
-3. These are configured model entries, not automatic provider discovery.
+3. CPU retains its configured-entry result. GPU menus were regenerated from the
+   unified catalog; fresh interactive captures remain pending.
    The captured Claude menu displayed a `[1m]` alias despite a 16,384-token
    server. The updated launcher disables 1M variants; fresh menu captures and
    inference after selecting a menu entry are still required.
@@ -286,7 +291,9 @@ above are not confirmed explanations for the nonstreaming failure.
 ## Tested stack
 
 The AWS all-in-one results use RHEL 9.8 x86_64, Podman 5.8.2, enforcing SELinux
-and memory quotas. API forwarding is native; translation remains untested.
+with the original per-provider memory-quota task results retained below. The
+latest unified GPU checks use shared Valkey quotas. API forwarding is native;
+translation remains untested.
 
 - Praxis: `quay.io/opendatahub/praxis-experimental@sha256:227d421e963c477038a884dc51ec880c5d0afa30098ae31028ecf85e963e40d5`,
   source `019aa849a219e5c881d69e4a40a1fc190bd6c404`.
@@ -345,8 +352,9 @@ prefill batch is limited to 2048 tokens.
 | OpenCode tool query | 4.8 minutes | 1.1 minutes |
 
 The updated preset serves 32,768 context tokens, with 8,192 OpenCode/Claude
-output tokens and a 24,576-token Codex auto-compaction threshold. CPU/GPU task,
-memory, menu and long-session compaction results at those settings are **Not run**.
+output tokens and a 24,576-token Codex auto-compaction threshold. Short GPU
+native tasks passed as noted above. Updated CPU tasks, peak memory, fresh menu
+captures and long-session compaction at these settings remain **Not run**.
 Thinking remains enabled; concurrency remains one. The recorded startup cache
 capacities (50,115 GPU / 79,872 CPU tokens) do not establish long-context
 performance or peak memory usage. The separate OpenShell

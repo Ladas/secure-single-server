@@ -437,7 +437,7 @@ users run clients on their own machines; skip this step for gateway VMs.
 
 ```console
 tar --no-xattrs -czf - scripts/common/harness-user scripts/common/harness_user.py \
-  scripts/common/harness.py configs/common/harness-versions.json | \
+  scripts/common/harness.py scripts/common/harness_config.py configs/common/harness-versions.json | \
   ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
     'install -d -m 0700 ~/secure-single-server-deploy && tar -xzf - -C ~/secure-single-server-deploy' &&
 scp -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" \
@@ -465,7 +465,20 @@ before running the test runner; keep `RHEL_HOST` as the administrator login.
 
 ## 6. Install services and test
 
-Choose the next guide:
+For **manual installation on a fresh VM**, follow the official guides in order:
+
+1. Administrator: [install Qwen and Praxis](../quickstarts/common/vllm.md), choosing
+   the intended inference topology and a Valkey gateway for persistent quotas.
+2. Administrator: [configure providers and the unified model catalog](../quickstarts/common/providers.md).
+   Cloud credentials are optional; begin with Qwen alone.
+3. Ordinary user: [generate native configurations and launch harnesses](../quickstarts/all-in-one/users.md).
+   The account above is already created. Remote clients instead use
+   [HTTPS/JWT client setup](../quickstarts/remote-gateway/users.md); unified catalogs
+   currently support the all-in-one gateway only.
+4. Test [model selection, switching and quotas](gateway-features.md).
+   The Responses history adapter is an explicit experiment in that guide.
+
+For **automated installation and regression tests**, choose:
 
 - **CPU/GPU vLLM variants:** [mock smoke tests](rhel-smoke.md), then
   [real Qwen and manual testing](rhel-real.md). OpenShell is optional on all-in-one.

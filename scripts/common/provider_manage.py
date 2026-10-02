@@ -37,7 +37,9 @@ def updated_config(template, installed, previous, selected, *, legacy=False, ove
         return quota_config.apply(render(template, vllm=state["vllm"], openai=bool(state["openai_secret"]),
                       anthropic=bool(state["anthropic_secret"]),
                       vllm_endpoint=state.get("vllm_endpoint", ""),
-                      shared_vllm=state.get("shared_vllm_quota", False), custom=state.get("custom_providers")), overrides or {})
+                      shared_vllm=state.get("shared_vllm_quota", False), custom=state.get("custom_providers"),
+                      models=state.get('models'),
+                      hide_vllm_reasoning=state.get('hide_vllm_reasoning', False)), overrides or {})
 
     expected = quota_config.apply(template, overrides or {}) if legacy else configured(previous)
     if installed != expected and not legacy:
@@ -136,8 +138,11 @@ def main():
 
     signal.signal(signal.SIGTERM, interrupted)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("show", "enable", "disable"))
+    parser.add_argument("action", choices=("show", "enable", "disable", "unified", "models"))
     parser.add_argument("provider", nargs="?", help="vllm, openai, anthropic, or a custom provider name")
+    parser.add_argument('--models', type=Path, help='JSON model catalog for unified (replaces native provider paths)')
+    parser.add_argument('--vllm-reasoning', choices=('show', 'hide'),
+                        help='unified only: show/hide vLLM Responses reasoning output; model thinking stays enabled')
     parser.add_argument('--openai-url', help='custom provider OpenAI-compatible HTTPS origin or /v1 URL')
     parser.add_argument('--anthropic-url', help='custom provider native Messages HTTPS origin')
     parser.add_argument("--shared-quota", action="store_true", help="enable vLLM with one Valkey allowance across both APIs")
@@ -147,8 +152,14 @@ def main():
                         help="enable the separate-server route with RFC1918_IP:PORT; omit for deprecated co-located mode",
                         action=SingleValueAction)
     args = parser.parse_args()
-    if args.action != "show" and not args.provider:
+    if args.action in ('enable', 'disable') and not args.provider:
         parser.error("enable/disable requires a provider")
+    if args.action in ('unified', 'models', 'show') and args.provider:
+        parser.error('this action takes no provider argument')
+    if bool(args.models) != (args.action == 'unified'):
+        parser.error('unified requires --models FILE; other actions do not accept --models')
+    if args.vllm_reasoning and args.action != 'unified':
+        parser.error('--vllm-reasoning applies only to unified')
     if args.shared_quota and (args.action != 'enable' or args.provider != 'vllm'):
         parser.error('--shared-quota applies to enable vllm')
     if args.capacity is not None and not args.shared_quota:
@@ -192,8 +203,8 @@ def main():
     if state_file.exists():
         stored = json.loads(state_file.read_text())
         legacy_state = set(state) - {"vllm_endpoint"}
-        if set(stored) - {"shared_vllm_quota", "custom_providers"} not in (set(state), legacy_state) or any(
-                stored[p] != state[p] for p in ("openai_secret", "anthropic_secret")):
+        optional = {"shared_vllm_quota", "custom_providers", "models", "hide_vllm_reasoning"}
+        if set(stored) - optional not in (set(state), legacy_state) or any(stored[p] != state[p] for p in ("openai_secret", "anthropic_secret")):
             raise ValueError("provider state differs from the installed secret references")
         stored.setdefault("vllm_endpoint", "")
         for slug, settings in stored.get('custom_providers', {}).items():
@@ -206,6 +217,13 @@ def main():
     if args.action == "show":
         print(json.dumps(state, indent=2))
         return
+    if args.action == 'models':
+        import yaml
+        from unified_config import active
+        config = yaml.safe_load((CONFIG / 'shared-gateway.yaml').read_text())
+        print(json.dumps({api: active(state.get('models', []), config, api)
+                          for api in ('openai', 'anthropic')}, indent=2))
+        return
     previous = json.loads(json.dumps(state))
     sharing = args.shared_quota and not state.get('shared_vllm_quota', False)
     if sharing and not previous['vllm']:
@@ -214,9 +232,17 @@ def main():
         state['shared_vllm_quota'] = True
 
     version = None
-    if args.provider == "vllm":
+    if args.action == 'unified':
+        from unified_config import validate
+        state['models'] = validate(json.loads(args.models.read_text()))
+        if args.vllm_reasoning:
+            state['hide_vllm_reasoning'] = args.vllm_reasoning == 'hide'
+    elif args.provider == "vllm":
         state["vllm"] = args.action == "enable"
-        state["vllm_endpoint"] = args.vllm_endpoint or "" if args.action == "enable" else ""
+        # Changing the quota must not silently redirect a separate inference host
+        # back to the co-located container. Explicit route changes still work.
+        if not args.shared_quota or args.vllm_endpoint is not None:
+            state["vllm_endpoint"] = args.vllm_endpoint or "" if args.action == "enable" else ""
     else:
         if args.action == "enable":
             if not args.secret:

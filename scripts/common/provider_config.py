@@ -50,7 +50,10 @@ def endpoint(url):
             'tls': {'sni': parsed.hostname}}
 
 
-def render(original, *, vllm, openai, anthropic, shared_vllm=False, custom=None, vllm_endpoint=""):
+def render(original, *, vllm, openai, anthropic, shared_vllm=False, custom=None, models=None,
+           hide_vllm_reasoning=False, vllm_endpoint=""):
+    if type(hide_vllm_reasoning) is not bool or (hide_vllm_reasoning and models is None):
+        raise ValueError('hide_vllm_reasoning requires a boolean and unified models')
     custom = custom or {}
     for name, settings in custom.items():
         custom_name(name)
@@ -165,6 +168,9 @@ def render(original, *, vllm, openai, anthropic, shared_vllm=False, custom=None,
             # The remote gateway has both APIs in one chain: admit only once.
             for quota in found[1:]:
                 chain['filters'].remove(quota)
+    if models is not None:
+        from unified_config import render as unify
+        config = unify(config, models, hide_vllm_reasoning=hide_vllm_reasoning)
     return config
 
 
@@ -184,7 +190,8 @@ def main():
     previous = json.loads(args.existing_state.read_text()) if args.existing_state and args.existing_state.exists() else {}
     config = render(yaml.safe_load(path.read_text()), vllm=args.vllm,
                     openai=bool(args.openai_secret), anthropic=bool(args.anthropic_secret), shared_vllm=previous.get("shared_vllm_quota", False),
-                    custom=previous.get("custom_providers"), vllm_endpoint=args.vllm_endpoint)
+                    vllm_endpoint=args.vllm_endpoint, custom=previous.get("custom_providers"), models=previous.get('models'),
+                    hide_vllm_reasoning=previous.get('hide_vllm_reasoning', False))
     path.write_text(json.dumps(config, indent=2) + "\n")
     unit = args.directory / "praxis.container"
     lines = unit.read_text().splitlines()
@@ -200,6 +207,10 @@ def main():
         state['custom_providers'] = previous['custom_providers']
     if previous.get('shared_vllm_quota'):
         state['shared_vllm_quota'] = True
+    if previous.get('models'):
+        state['models'] = previous['models']
+    if 'hide_vllm_reasoning' in previous:
+        state['hide_vllm_reasoning'] = previous['hide_vllm_reasoning']
     (args.directory / 'providers.json').write_text(json.dumps(state, indent=2) + '\n')
 
 

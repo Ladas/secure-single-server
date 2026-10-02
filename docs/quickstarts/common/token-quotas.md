@@ -83,6 +83,28 @@ An unchanged capacity does not restart services. Saved capacities survive
 provider changes and same-profile upgrades; other providers' allowances,
 credentials, images and quota windows stay unchanged.
 
+## Reset consumed usage for testing
+
+On a managed Valkey gateway, list eligible rules, then preview one provider:
+
+```console
+sudo scripts/common/quota-reset --list
+sudo scripts/common/quota-reset --provider vllm
+```
+
+Stop active tasks before applying. This briefly stops Praxis, clears only the
+selected ledgers and outstanding reservations, then restarts it. Capacities,
+other providers' usage and the vLLM service are retained.
+
+```console
+sudo scripts/common/quota-reset --provider vllm --apply
+sudo scripts/common/quota-status
+```
+
+Use `--rule NAME` instead of `--provider` to select exact rules; repeat `--rule`
+for several. The helper requires the qualified image and managed global Valkey
+sliding-window rules. It never flushes the database. Resets cannot be undone.
+
 ## Rules, persistence and display limits
 
 | Rule | Shared allowance |
@@ -157,6 +179,7 @@ workstation checkout with its administrator login and SSH key:
 scp -p -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" \
   scripts/common/quota-status scripts/common/quota_status.py \
   scripts/common/quota-set scripts/common/quota_manage.py scripts/common/quota_config.py \
+  scripts/common/quota-reset scripts/common/quota_reset.py scripts/common/unified_config.py \
   scripts/common/provider_manage.py scripts/common/provider_config.py scripts/common/quota_share.py \
   scripts/common/lib.sh scripts/common/install \
   "$RHEL_HOST:~/secure-single-server-deploy/scripts/common/"
