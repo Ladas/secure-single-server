@@ -2,6 +2,8 @@
 
 Follow the [shared setup](common.md), selecting `harness=openclaw` and the dev
 profile. The default sandbox name is `openclaw-dev`; `connect.sh` opens a shell.
+For the complete manual or bootc path, start with the
+[OpenShell single-server guide](../../../docs/quickstarts/openshell-single-server/README.md).
 `--backend` is not supported; it previously printed a value without configuring
 anything. Praxis integration is also unsupported: `create.sh --config` fails
 before creating a sandbox.

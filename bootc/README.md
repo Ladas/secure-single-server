@@ -6,6 +6,9 @@ the OS as an image. OpenShell supplies the sandbox; Praxis supplies model access
 and shared quotas. Their combined inference path remains
 [experimental](../docs/quickstarts/openshell-praxis/users.md).
 
+For the curated OpenCode/OpenClaw deployment path, start with the
+[OpenShell single-server guide](../docs/quickstarts/openshell-single-server/README.md).
+
 Build one x86_64 internal base, standalone Praxis and vLLM images, and these
 deployable OS images:
 
@@ -38,9 +41,14 @@ the durable-quota or retained-session requirements.
 ## Published images
 
 The bootc workflow publishes deployable images to `quay.io/redhat-et` with the
-release-facing `v0.1` tag and an immutable `sha-<commit>` audit tag. The
-internal `base` image is not published. Pin a `sha-<commit>` tag when a
-deployment must remain exactly reproducible.
+release-facing `v0.1` tag and a `sha-<commit>` audit tag. Registry tags are
+mutable; only the resolved digest is immutable. Pin the digest, or record the
+digest to which a tag resolves, when a deployment must remain exactly
+reproducible. The internal `base` image is not published.
+
+The exact OpenCode and OpenClaw `v0.1` digests used for the October 2 AWS
+quickstart qualification are recorded in
+[the validation report](VALIDATION.md#published-quickstart-verification-october-2).
 
 ```text
 quay.io/redhat-et/secure-single-server-praxis:v0.1

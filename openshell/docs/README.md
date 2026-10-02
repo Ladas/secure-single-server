@@ -14,6 +14,7 @@ RHEL 9 x86_64 host with rootless Podman. Bootc builds one OS image per harness.
 - [Codex recipe](quickstarts/codex.md)
 - [OpenCode recipe](quickstarts/opencode.md)
 - [OpenClaw recipe](quickstarts/openclaw.md)
+- [Single-server manual and bootc guide](../../docs/quickstarts/openshell-single-server/README.md)
 - [Praxis integration and status](../../docs/quickstarts/openshell-praxis/README.md)
 - [Bootable host deployment](../../bootc/README.md)
 - [Threat model](threat-model.md)

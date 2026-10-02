@@ -13,5 +13,7 @@ Start with the [architecture value walkthrough](../../docs/quickstarts/architect
 then use the [OpenCode recipe](../../docs/quickstarts/opencode.md) for setup,
 commands and current limitations. Shared policy semantics and trust boundaries
 are documented in the [OpenShell guide](../../docs/README.md).
+For a direct manual or bootc deployment path, use the
+[OpenShell single-server guide](../../../docs/quickstarts/openshell-single-server/README.md).
 
 The preinstalled harness image is digest-pinned in `openshell/configs/images.env`.

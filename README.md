@@ -1,40 +1,71 @@
-# Secure single-server AI agent environment
+# Secure single-server AI harness with OpenShell
 
-AI coding agents become useful when they can read a workspace, run tools, and
-call a model. Those are also the powers that make them risky and expensive to
-operate: tools can touch unrelated data, model requests can bypass the approved
-path, provider keys can spread across harness homes, and one long task can
-consume a shared model.
+AI coding harnesses such as **OpenCode** and **OpenClaw** become useful when
+they can read a workspace, run tools, and call a model. Those are also the
+powers that make them risky to operate on a shared server: tools can touch
+unrelated data, commands can open unintended network connections, and an
+interactive harness can inherit far more host access than its task needs.
 
-This repository shows how to run those agents on one administrator-managed RHEL
-server without giving them that unrestricted power. The harness keeps the
-developer experience. OpenShell constrains tools and network access. Praxis owns
-model routing and shared usage. A separate vLLM server can supply an approved
-private model. bootc
-makes the host reproducible and rollback-capable.
+This repository packages those harnesses with **OpenShell** on one
+administrator-managed RHEL server or bare-metal host. The harness keeps the
+developer experience. OpenShell is the security boundary: it applies declared
+filesystem and network policies, runs tools through rootless Podman under a
+locked service account, and gives each sandbox CPU and memory ceilings. The
+server can remain available remotely without giving the harness an unrestricted
+host login.
 
-Start with the [architecture value walkthrough](docs/quickstarts/architecture-walkthrough/README.md).
-It follows the validated **OpenCode → Praxis → vLLM** path, shows the commands
-that prove each boundary, and states what is not yet qualified.
+Start with the
+[OpenShell single-server guide](docs/quickstarts/openshell-single-server/README.md).
+It explains the value, applies the policy manually or through the project's
+existing bootc image, and provides repeatable harness tests.
 
-The environment brings together **harnesses, OpenShell, Praxis, and separate
-private or cloud inference**. bootc packages the host setup into an updatable OS
-image. The preferred example runs OpenCode through Praxis against Qwen3-8B in
-vLLM on a separate CPU or single-NVIDIA-L4 server.
+For the complete layered architecture, including model routing and private
+inference, continue to the
+[architecture value walkthrough](docs/quickstarts/architecture-walkthrough/README.md).
+
+## Why OpenShell earns the security role
+
+OpenShell turns agent execution into an explicit policy decision:
+
+- **Filesystem blast radius:** declared system paths are read-only while
+  sandbox and workspace paths can be writable.
+- **Network blast radius:** endpoints are allowlisted per harness or tool
+  binary; unapproved destinations are denied.
+- **Least-privilege runtime:** the gateway and sandbox use a locked account,
+  rootless Podman, and default per-sandbox limits of two CPUs and 4 GiB RAM.
+- **Always-on operation:** lingering services keep the sandbox host available
+  after SSH disconnect, while management remains loopback-only.
+- **Auditable decisions:** logs and qualification scripts distinguish an actual
+  policy denial from an unrelated timeout or DNS failure.
+- **Repeatable deployment:** digest-pinned control-plane and harness image
+  references are packaged into one bootc host deployment with rollback.
+
+OpenShell is not a claim that generated code is safe. It is a containment and
+policy layer for the harness and tools executing that code. The current
+deployment is a trusted single-operator design, not multi-tenant authorization;
+see the [trust model](openshell/docs/threat-model.md).
+
+## Start for your role
+
+| Role | Start here | Outcome |
+| --- | --- | --- |
+| Sys admin | [OpenShell single-server guide](docs/quickstarts/openshell-single-server/README.md) | Deploy manually or apply the existing bootc image, verify policy, and test a harness. |
+| Solution architect | [Threat model](openshell/docs/threat-model.md) and [policy contract](openshell/docs/policy-walkthrough.md) | Understand the controls, enforcement evidence, and limits before approving a topology. |
+| Potential customer | [Bootc quickstart](docs/quickstarts/openshell-single-server/README.md#bootc-quickstart) | Evaluate OpenCode or OpenClaw on a disposable RHEL host using the published image. |
+| OpenShell + Praxis operator | [Integration guide](docs/quickstarts/openshell-praxis/README.md) | Use the existing model-routing and quota workflow without losing this repository's detail. |
 
 ## How the pieces fit
 
 | Component | Responsibility |
 | --- | --- |
 | **Harnesses** | Provide the coding-agent experience: prompts, model interactions, and tool calls. Recipes cover several harnesses; supported integrations differ. |
-| **OpenShell** | Runs the harness and tools inside a sandbox with declarative filesystem and network policies. |
-| **Praxis** | Routes model requests and applies shared request and token limits. Cloud profiles keep provider credentials at the gateway. |
-| **Inference backend** | Supplies the model: optional vLLM for Qwen3-8B on a separate private server, or a cloud provider through a separate Praxis profile. |
-| **bootc** | Packages service setup and the selected harness configuration into a reviewed RHEL OS image, with image-based updates and OS rollback. |
+| **OpenShell** | Runs the harness and tools inside a sandbox with declarative filesystem, network, runtime, and service-account boundaries. |
+| **Praxis** | Optional model-routing layer; see the [integration guide](docs/quickstarts/openshell-praxis/README.md). |
+| **Inference backend** | Optional private vLLM or cloud provider selected through the existing model-routing documentation. |
+| **bootc** | Packages the reviewed OpenShell setup and selected harness into an updatable RHEL OS image with rollback. |
 
-Two paths meet at the harness: tools execute within OpenShell's policies, while
-model requests travel through Praxis. The diagram shows the preferred separate
-vLLM path and the separate cloud-profile option:
+Tools execute within OpenShell's policies. Model routing, when selected, is a
+separate path documented in the architecture walkthrough:
 
 ```mermaid
 flowchart LR
@@ -44,18 +75,15 @@ flowchart LR
             T["Agent tools and workspace"]
             H -->|Tool execution| T
         end
-        P["Praxis container<br/>Shared request and token limits<br/>127.0.0.1:8080"]
-        H -->|Policy-permitted model requests| P
+        P["Optional model-routing layer<br/>Documented separately"]
+        H -.->|Only if selected| P
     end
-    V["Separate vLLM server<br/>Qwen3-8B: CPU or NVIDIA L4<br/>Private AWS address:8000"]
-    P -->|Private vLLM profile| V
-    P -. Separate cloud profile .-> Provider["Cloud model provider"]
+    V["Private or cloud inference<br/>Documented separately"]
+    P -.-> V
 ```
 
-The vLLM profile permits sandbox inference traffic only to Praxis. Direct
-vLLM and cloud-provider access are denied, and there is no cloud fallback.
-OpenCode is the recorded harness for this path; Codex and OpenClaw adapters are
-not enabled.
+That optional integration preserves the important boundary: the harness still
+executes tools inside OpenShell rather than with an unrestricted host login.
 
 Pinned workload containers are pulled on first boot and cached across reboots.
 Credentials, model caches, and workspace data stay outside the OS image.
@@ -66,6 +94,8 @@ or sandbox workspaces.
 
 | Workflow | Where the harness and tools run | Guide |
 | --- | --- | --- |
+| Manual OpenShell single server | OpenShell and the selected harness on a RHEL VM or bare-metal host | [Manual deployment](docs/quickstarts/openshell-single-server/README.md#manual-rhel-deployment) |
+| Fast OpenShell single server | Existing bootc image applied to a RHEL single server or bare-metal host | [Bootc quickstart](docs/quickstarts/openshell-single-server/README.md#bootc-quickstart) |
 | RHEL with Qwen and optional cloud providers | Ordinary user accounts on all-in-one, or remote clients; CPU/GPU selected independently | [Install Qwen inference](docs/quickstarts/common/vllm.md), then [add providers](docs/quickstarts/common/providers.md) |
 | Sandboxed agents with separate inference | OpenShell on a bootc-managed server; Praxis routes to a private CPU or NVIDIA L4 vLLM server | [Qwen3-8B example](bootc/VLLM.md) |
 | Sandboxed harness exploration | OpenShell on the server, with harness-specific policies and provider setup | [OpenShell recipes](openshell/docs/README.md) |
@@ -93,6 +123,13 @@ The preferred topology now places vLLM on a separate server and keeps only
 OpenShell, Praxis, and the harness on the single server. The AWS helper discovers
 that server's private address and grants access by security group; its fresh
 real-inference qualification remains separate work.
+
+The manual and published bootc OpenShell-only single-server paths were verified
+on AWS on 2026-10-02. Both published Quay variants passed controlled policy
+testing, runtime-limit inspection, SELinux, lingering, and loopback-only
+listener checks from their exact recorded digests. See the
+[single-server validation note](docs/quickstarts/openshell-single-server/README.md#aws-verification);
+model routing is not active during that OpenShell qualification.
 
 The mutable AWS workflow also passed native mocked Qwen/OpenAI/Anthropic
 tests. With vLLM 0.30, all-in-one real Qwen tasks passed for Codex, Claude and

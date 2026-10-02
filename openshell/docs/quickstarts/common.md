@@ -4,6 +4,8 @@ Use a disposable, trusted single-operator RHEL 9 x86_64 host. This is not a
 qualified provider/tool-task quickstart. See [validation](../../../bootc/VALIDATION.md)
 for the combinations exercised. Select a harness recipe for its limitations:
 [Codex](codex.md), [OpenCode](opencode.md), or [OpenClaw](openclaw.md).
+For the curated manual-and-bootc deployment path, start with the
+[OpenShell single-server guide](../../../docs/quickstarts/openshell-single-server/README.md).
 
 On your workstation, clone this repository and transfer/checkout the same revision
 on the RHEL VM. On the VM, install the prerequisites in the
