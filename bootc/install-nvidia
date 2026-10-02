@@ -5,10 +5,18 @@ curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64
   -o /etc/yum.repos.d/cuda-rhel9.repo
 curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
   -o /etc/yum.repos.d/nvidia-container-toolkit.repo
+epel_release=/tmp/epel-release-9-11.el9.noarch.rpm
+curl -fsSL --retry 5 --retry-all-errors \
+  https://download.fedoraproject.org/pub/epel/9/Everything/x86_64/Packages/e/epel-release-9-11.el9.noarch.rpm \
+  -o "${epel_release}"
+printf '%s  %s\n' \
+  b434245bffd8b40ea486157e72363d08b36e38145c8f917c5c00adfca3f2101b \
+  "${epel_release}" | sha256sum -c -
+dnf install -y "${epel_release}"
+rm -f "${epel_release}"
 # Build against the kernel packaged in the image, not uname -r on the builder.
 mapfile -t kernels < <(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n')
 [[ "${#kernels[@]}" == 1 ]] || { echo 'expected one kernel in GPU OS image' >&2; exit 1; }
-dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
 dnf module enable -y nvidia-driver:580-open
 dnf install -y "kernel-devel-${kernels[0]}" kernel-headers gcc make elfutils-libelf-devel \
   dkms nvidia-driver-cuda kmod-nvidia-open-dkms nvidia-container-toolkit

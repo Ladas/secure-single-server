@@ -139,6 +139,17 @@ else:
                 self.assertIn(f'localhost/vllm-test:vllm-{profile}', builds[0])
                 self.assertFalse(any(call[:2] == ['image', 'inspect'] for call in calls))
 
+    def test_gpu_installers_pin_epel_release(self):
+        expected_url = 'https://download.fedoraproject.org/pub/epel/9/Everything/x86_64/Packages/e/epel-release-9-11.el9.noarch.rpm'
+        expected_digest = 'b434245bffd8b40ea486157e72363d08b36e38145c8f917c5c00adfca3f2101b'
+        for relative in ('bootc/install-nvidia', 'scripts/vllm/prepare-gpu'):
+            with self.subTest(installer=relative):
+                source = (ROOT / relative).read_text()
+                self.assertIn(expected_url, source)
+                self.assertIn(expected_digest, source)
+                self.assertIn('sha256sum -c -', source)
+                self.assertNotIn('epel-release-latest-9', source)
+
     def test_rejects_ambiguous_vllm_target(self):
         result = self.run_build('vllm', 'localhost/vllm-test')
         self.assertNotEqual(result.returncode, 0)
