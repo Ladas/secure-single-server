@@ -11,9 +11,12 @@ backend="$(inference_backend)"
 [[ "${backend}" == vllm || "${backend}" == remote-vllm ]] ||
   die 'select inference vllm or remote-vllm first'
 if [[ "${backend}" == remote-vllm ]]; then
-  denied_vllm_url="http://$(inference_vllm_endpoint)/v1/models"
+  vllm_endpoint="$(inference_vllm_endpoint)"
+  denied_vllm_url="http://${vllm_endpoint}/v1/models"
+  denied_vllm_audit_port="${vllm_endpoint##*:}"
 else
   denied_vllm_url='http://host.openshell.internal:8000/v1/models'
+  denied_vllm_audit_port=8000
 fi
 "${ROOT}/bootc/scripts/inference-check"
 logs="$(mktemp -d)"
@@ -42,14 +45,14 @@ JS
 # Supervisor audit delivery to the gateway is asynchronous.
 for ((attempt=0; attempt<15; attempt++)); do
   as_openshell openshell logs "${name}" --since 2m >"${logs}/denials.log"
-  if grep -Eq 'DENIED .*:8000 .*transparent_tcp_(mapping|policy)_denied' "${logs}/denials.log" &&
+  if grep -Eq "DENIED .*:${denied_vllm_audit_port} .*transparent_tcp_(mapping|policy)_denied" "${logs}/denials.log" &&
      grep -Eq 'DENIED .*api.openai.com:443 .*transparent_tcp_policy_denied' "${logs}/denials.log"; then
     break
   fi
   sleep 2
 done
 grep -E 'ALLOWED|DENIED' "${logs}/denials.log"
-grep -Eq 'DENIED .*:8000 .*transparent_tcp_(mapping|policy)_denied' "${logs}/denials.log"
+grep -Eq "DENIED .*:${denied_vllm_audit_port} .*transparent_tcp_(mapping|policy)_denied" "${logs}/denials.log"
 grep -Eq 'DENIED .*api.openai.com:443 .*transparent_tcp_policy_denied' "${logs}/denials.log"
 # A unique file independently proves execution even when the CLI drops short stdout.
 proof="/sandbox/sss-vllm-smoke-${RANDOM}-${RANDOM}"

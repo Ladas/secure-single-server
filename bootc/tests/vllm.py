@@ -12,11 +12,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class VllmTests(unittest.TestCase):
-    def render(self, mode):
+    def render(self, mode, profile='any'):
+        root = self.preflight_root(profile)
         return subprocess.run(
             ['bash', '-c', 'source "$1/scripts/common/lib.sh"; ROOT="$1"; '
              'source "$ROOT/bootc/scripts/vllm-lib"; vllm_render "$2"',
-            'test', str(ROOT), mode], text=True, capture_output=True)
+            'test', str(root), mode], text=True, capture_output=True)
 
     def preflight_root(self, profile):
         temporary = tempfile.TemporaryDirectory()
@@ -30,14 +31,15 @@ class VllmTests(unittest.TestCase):
         (root / 'bootc/vllm-profile').write_text(profile + '\n')
         return root
 
-    def test_both_profiles_use_same_pinned_model_and_private_endpoint(self):
+    def test_shared_profiles_use_same_pinned_model_and_loopback_endpoint(self):
         for mode in ('cpu', 'gpu'):
             with self.subTest(mode=mode):
                 result = self.render(mode)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 unit = result.stdout
                 self.assertIn('Exec=Qwen/Qwen3-8B --revision b968826d9c46dd6066d109eabc6255188de91218', unit)
-                self.assertIn('PublishPort=0.0.0.0:8000:8000', unit)
+                self.assertIn('PublishPort=127.0.0.1:8000:8000', unit)
+                self.assertNotIn('PublishPort=0.0.0.0:8000:8000', unit)
                 arguments = shlex.split(next(line[5:] for line in unit.splitlines()
                                              if line.startswith('Exec=')))
                 provider = json.loads((ROOT / 'configs/vllm/harness/harness-provider.json.in').read_text())
@@ -51,6 +53,14 @@ class VllmTests(unittest.TestCase):
                 self.assertNotIn('Network=host', unit)
                 self.assertNotIn('ipc=host', unit)
                 self.assertNotIn('[Install]', unit)  # Boot reconciler must pull before start.
+
+    def test_dedicated_vllm_profiles_publish_remote_endpoint(self):
+        for mode in ('cpu', 'gpu'):
+            with self.subTest(mode=mode):
+                result = self.render(mode, profile=mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('PublishPort=0.0.0.0:8000:8000', result.stdout)
+                self.assertNotIn('PublishPort=127.0.0.1:8000:8000', result.stdout)
 
     def test_cpu_does_not_request_gpu_devices_or_disable_selinux(self):
         unit = self.render('cpu').stdout
