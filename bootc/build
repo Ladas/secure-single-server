@@ -8,67 +8,200 @@ source "${ROOT}/openshell/configs/images.env"
 
 if [[ "${1:-}" == --help || "$#" -lt 1 || "$#" -gt 2 ]]; then
   cat <<'EOF'
-Usage: bootc/build base|codex|opencode|openclaw|all [IMAGE_PREFIX]
+Usage: bootc/build base|praxis|vllm-cpu|vllm-gpu|codex|opencode|openclaw|all [IMAGE_PREFIX]
 Run on an x86_64 Linux Podman builder, normally with sudo.
 RHEL_BOOTC_IMAGE must be a reviewed registry.redhat.io/rhel9/rhel-bootc@sha256:... reference.
 IMAGE_PREFIX defaults to localhost/secure-single-server.
 On an AWS PAYG RHEL builder set AWS_RHUI_REGION (for example us-east-1).
-Set NVIDIA_GPU=1 to include the NVIDIA 580 open driver and Container Toolkit.
-Build base before an individual harness; all builds base plus all three harnesses.
+Set RHSM_ORG_ID and RHSM_ACTIVATION_KEY on a non-RHUI builder to register the
+ephemeral build with a Red Hat activation key. Secrets are mounted only for the
+RUN that installs packages and are never copied into an image layer.
+Praxis and the vLLM profiles build directly from RHEL bootc. Build base before
+a harness. The all target builds base, praxis, both vLLM profiles, and all
+three harnesses.
 EOF
   [[ "${1:-}" == --help ]] && exit 0
   exit 2
 fi
-[[ "${NVIDIA_GPU:-0}" == 0 || "${NVIDIA_GPU:-0}" == 1 ]] || die 'NVIDIA_GPU must be 0 or 1'
 target="$1"
-case "${target}" in base|codex|opencode|openclaw|all) ;; *) die "unknown target: ${target}" ;; esac
+case "${target}" in
+  base|praxis|vllm-cpu|vllm-gpu|codex|opencode|openclaw|all) ;;
+  *) die "unknown target: ${target}" ;;
+esac
+direct_bootc=0
+case "${target}" in
+  base|praxis|vllm-cpu|vllm-gpu|all) direct_bootc=1 ;;
+esac
 prefix="${2:-localhost/secure-single-server}"
 [[ "${prefix}" =~ ^[a-z0-9][a-z0-9./:_-]*$ ]] || die 'invalid image prefix'
 [[ "$(podman info --format '{{.Host.OS}}/{{.Host.Arch}}')" == linux/amd64 ]] ||
   die 'an x86_64 Linux Podman builder is required'
 
-# Send a narrowly selected context, never local credentials, Git history, or evidence.
-context="$(mktemp -d)"
+rhsm=0
+if (( direct_bootc )); then
+  if [[ -n "${RHSM_ORG_ID:-}" || -n "${RHSM_ACTIVATION_KEY:-}" ]]; then
+    [[ -n "${RHSM_ORG_ID:-}" && -n "${RHSM_ACTIVATION_KEY:-}" ]] ||
+      die 'RHSM_ORG_ID and RHSM_ACTIVATION_KEY must be set together'
+    rhsm=1
+  fi
+fi
+
+work="$(mktemp -d)"
+secret_dir="${work}/secrets"
+base_context="${work}/base"
+praxis_context="${work}/praxis"
+vllm_context_root="${work}/vllm"
+harness_context_root="${work}/harnesses"
 rhui_repo=""
-trap 'rm -rf "${context}"; if [[ -n "${rhui_repo}" ]]; then rm -f "${rhui_repo}"; fi' EXIT
-tar -C "${ROOT}" --exclude='*.secret' --exclude='*.local' --exclude='.env' \
-  --exclude='auth.json' --exclude='*.pem' --exclude='*.key' \
-  --exclude='__pycache__' --exclude='._*' \
-  -cf - scripts/common configs openshell/configs openshell/scripts \
-  openshell/harnesses bootc | tar -C "${context}" -xf -
+cleanup() {
+  rm -rf "${work}"
+  if [[ -n "${rhui_repo}" ]]; then rm -f "${rhui_repo}"; fi
+}
+trap cleanup EXIT
+
+secret_args=(
+)
+if (( direct_bootc )); then
+  install -d -m 0700 "${secret_dir}"
+  printf '%s\n' "${RHSM_ORG_ID:-unused}" >"${secret_dir}/rhsm_org"
+  printf '%s\n' "${RHSM_ACTIVATION_KEY:-unused}" >"${secret_dir}/rhsm_activation_key"
+  chmod 0600 "${secret_dir}/rhsm_org" "${secret_dir}/rhsm_activation_key"
+  secret_args=(
+    --secret "id=rhsm_org,src=${secret_dir}/rhsm_org"
+    --secret "id=rhsm_activation_key,src=${secret_dir}/rhsm_activation_key"
+  )
+fi
+
+make_base_context() {
+  install -d "${base_context}/bootc"
+  tar -C "${ROOT}" --exclude='*.secret' --exclude='*.local' --exclude='.env' \
+    --exclude='auth.json' --exclude='*.pem' --exclude='*.key' \
+    --exclude='__pycache__' --exclude='._*' \
+    -cf - scripts/common configs openshell/configs openshell/scripts \
+    bootc/Containerfile \
+    bootc/scripts/admin bootc/scripts/common bootc/scripts/inference-check \
+    bootc/scripts/reconcile bootc/scripts/vllm bootc/scripts/vllm-common \
+    bootc/scripts/vllm-lib \
+    bootc/systemd |
+    tar -C "${base_context}" -xf -
+  printf 'any\n' >"${base_context}/bootc/vllm-profile"
+}
+
+make_praxis_context() {
+  install -d "${praxis_context}/bootc/scripts" "${praxis_context}/bootc/systemd" \
+    "${praxis_context}/scripts/common" "${praxis_context}/configs/all-in-one" \
+    "${praxis_context}/configs/common/quadlet" "${praxis_context}/configs/vllm"
+  tar -C "${ROOT}" -cf - bootc/Containerfile.praxis bootc/scripts/praxis \
+    scripts/common/lib.sh scripts/common/install scripts/common/secret-set \
+    configs/all-in-one/shared-gateway.yaml \
+    configs/common/quadlet/praxis.container.in configs/common/quadlet/praxis.network \
+    configs/vllm/praxis-remote.yaml configs/vllm/praxis.container.in \
+    bootc/systemd/secure-single-server-praxis.service bootc/systemd/delegate.conf |
+    tar -C "${praxis_context}" -xf -
+}
+
+make_vllm_context() {
+  local profile="$1"
+  local vllm_context="${vllm_context_root}/${profile}"
+  local files=(
+    "bootc/Containerfile.vllm.${profile}"
+    bootc/scripts/vllm-common bootc/scripts/vllm bootc/scripts/vllm-lib
+    scripts/common/lib.sh scripts/common/install configs/vllm/images.env
+    bootc/systemd/secure-single-server-vllm.service bootc/systemd/delegate.conf
+  )
+  [[ "${profile}" != gpu ]] || files+=(bootc/install-nvidia)
+  install -d "${vllm_context}/bootc/scripts" "${vllm_context}/bootc/systemd" \
+    "${vllm_context}/scripts/common" "${vllm_context}/configs/vllm"
+  tar -C "${ROOT}" -cf - "${files[@]}" | tar -C "${vllm_context}" -xf -
+  printf '%s\n' "${profile}" >"${vllm_context}/bootc/vllm-profile"
+}
+
+make_harness_context() {
+  local harness="$1"
+  local context="${harness_context_root}/${harness}"
+  install -d "${context}/bootc/harnesses/${harness}" \
+    "${context}/openshell/harnesses/${harness}"
+  tar -C "${ROOT}" --exclude='*.secret' --exclude='*.local' --exclude='.env' \
+    --exclude='auth.json' --exclude='*.pem' --exclude='*.key' \
+    --exclude='__pycache__' --exclude='._*' \
+    -cf - bootc/Containerfile.harness \
+    "bootc/harnesses/${harness}" "openshell/harnesses/${harness}" |
+    tar -C "${context}" -xf -
+}
+
+repo_args=()
+if (( direct_bootc )) && [[ -n "${AWS_RHUI_REGION:-}" ]]; then
+  [[ "${AWS_RHUI_REGION}" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]] || die 'invalid AWS RHUI region'
+  [[ -f /etc/yum.repos.d/redhat-rhui.repo && -d /etc/pki/rhui ]] || die 'AWS RHEL RHUI files not found'
+  rhui_repo="$(mktemp)"
+  sed "s/REGION/${AWS_RHUI_REGION}/g" /etc/yum.repos.d/redhat-rhui.repo >"${rhui_repo}"
+  # Ephemeral build mounts: never COPY entitlement keys into image layers.
+  [[ -f /usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py ]] || die 'AWS RHUI DNF plugin not found'
+  # Host networking lets the unmodified RHUI plugin use IMDSv2 with hop limit 1.
+  repo_args=(--security-opt label=disable --network=host \
+    --volume "${rhui_repo}:/etc/yum.repos.d/bootc-rhui.repo:ro" \
+    --volume /etc/pki/rhui:/etc/pki/rhui:ro \
+    --volume /usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py:/usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py:ro \
+    --volume /etc/dnf/plugins/amazon-id.conf:/etc/dnf/plugins/amazon-id.conf:ro)
+fi
+
 if [[ "${target}" == base || "${target}" == all ]]; then
   : "${RHEL_BOOTC_IMAGE:?set RHEL_BOOTC_IMAGE to the reviewed RHEL 9 bootc digest}"
   validate_digest_image "${RHEL_BOOTC_IMAGE}"
   [[ "${RHEL_BOOTC_IMAGE}" == registry.redhat.io/rhel9/rhel-bootc@sha256:* ]] ||
     die 'expected the Red Hat RHEL 9 bootc repository'
-  repo_args=()
-  if [[ -n "${AWS_RHUI_REGION:-}" ]]; then
-    [[ "${AWS_RHUI_REGION}" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]] || die 'invalid AWS RHUI region'
-    [[ -f /etc/yum.repos.d/redhat-rhui.repo && -d /etc/pki/rhui ]] || die 'AWS RHEL RHUI files not found'
-    rhui_repo="$(mktemp)"
-    sed "s/REGION/${AWS_RHUI_REGION}/g" /etc/yum.repos.d/redhat-rhui.repo >"${rhui_repo}"
-    # Ephemeral build mounts: never COPY entitlement keys into image layers.
-    [[ -f /usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py ]] || die 'AWS RHUI DNF plugin not found'
-    # Host networking lets the unmodified RHUI plugin use IMDSv2 with hop limit 1.
-    repo_args=(--security-opt label=disable --network=host \
-      --volume "${rhui_repo}:/etc/yum.repos.d/bootc-rhui.repo:ro" \
-      --volume /etc/pki/rhui:/etc/pki/rhui:ro \
-      --volume /usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py:/usr/lib/python3.9/site-packages/dnf-plugins/amazon-id.py:ro \
-      --volume /etc/dnf/plugins/amazon-id.conf:/etc/dnf/plugins/amazon-id.conf:ro)
-  fi
-  podman build "${repo_args[@]}" --arch amd64 --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
-    --build-arg "NVIDIA_GPU=${NVIDIA_GPU:-0}" \
+  make_base_context
+  podman build "${repo_args[@]}" "${secret_args[@]}" --arch amd64 \
+    --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
+    --build-arg "RHSM=${rhsm}" \
     --build-arg "OPENSHELL_CLI_IMAGE=${ODH_CLI_IMAGE}" \
-    -f "${context}/bootc/Containerfile" -t "${prefix}:base" "${context}"
+    -f "${base_context}/bootc/Containerfile" -t "${prefix}:base" "${base_context}"
 fi
-if [[ "${target}" != base ]]; then
+
+if [[ "${target}" == praxis || "${target}" == all ]]; then
+  : "${RHEL_BOOTC_IMAGE:?set RHEL_BOOTC_IMAGE to the reviewed RHEL 9 bootc digest}"
+  validate_digest_image "${RHEL_BOOTC_IMAGE}"
+  [[ "${RHEL_BOOTC_IMAGE}" == registry.redhat.io/rhel9/rhel-bootc@sha256:* ]] ||
+    die 'expected the Red Hat RHEL 9 bootc repository'
+  make_praxis_context
+  podman build "${repo_args[@]}" "${secret_args[@]}" --arch amd64 \
+    --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
+    --build-arg "RHSM=${rhsm}" \
+    -f "${praxis_context}/bootc/Containerfile.praxis" \
+    -t "${prefix}:praxis" "${praxis_context}"
+fi
+
+if [[ "${target}" == vllm-cpu || "${target}" == vllm-gpu || "${target}" == all ]]; then
+  : "${RHEL_BOOTC_IMAGE:?set RHEL_BOOTC_IMAGE to the reviewed RHEL 9 bootc digest}"
+  validate_digest_image "${RHEL_BOOTC_IMAGE}"
+  [[ "${RHEL_BOOTC_IMAGE}" == registry.redhat.io/rhel9/rhel-bootc@sha256:* ]] ||
+    die 'expected the Red Hat RHEL 9 bootc repository'
+  vllm_profiles=("${target#vllm-}")
+  [[ "${target}" != all ]] || vllm_profiles=(cpu gpu)
+  for profile in "${vllm_profiles[@]}"; do
+    make_vllm_context "${profile}"
+    vllm_context="${vllm_context_root}/${profile}"
+    podman build "${repo_args[@]}" "${secret_args[@]}" --arch amd64 \
+      --build-arg "RHEL_BOOTC_IMAGE=${RHEL_BOOTC_IMAGE}" \
+      --build-arg "RHSM=${rhsm}" \
+      -f "${vllm_context}/bootc/Containerfile.vllm.${profile}" \
+      -t "${prefix}:vllm-${profile}" "${vllm_context}"
+  done
+fi
+
+if [[ "${target}" != base && "${target}" != praxis && "${target}" != vllm-cpu && "${target}" != vllm-gpu ]]; then
   # Resolve the actual parent ID so a moved local tag cannot change the parent.
   parent="$(podman image inspect "${prefix}:base" --format '{{.Id}}')"
-  harnesses=("${target}")
-  [[ "${target}" != all ]] || harnesses=(codex opencode openclaw)
-  for harness in "${harnesses[@]}"; do
-    podman build --pull=never --arch amd64 --build-arg "BASE_IMAGE=${parent}" \
-      --build-arg "HARNESS=${harness}" -f "${context}/bootc/Containerfile.harness" \
-      -t "${prefix}:${harness}" "${context}"
-  done
+  if [[ "${target}" == codex || "${target}" == opencode || "${target}" == openclaw || "${target}" == all ]]; then
+    harnesses=("${target}")
+    [[ "${target}" != all ]] || harnesses=(codex opencode openclaw)
+    for harness in "${harnesses[@]}"; do
+      make_harness_context "${harness}"
+      context="${harness_context_root}/${harness}"
+      podman build --pull=never --arch amd64 --build-arg "BASE_IMAGE=${parent}" \
+        --build-arg "HARNESS=${harness}" \
+        -f "${context}/bootc/Containerfile.harness" \
+        -t "${prefix}:${harness}" "${context}"
+    done
+  fi
 fi

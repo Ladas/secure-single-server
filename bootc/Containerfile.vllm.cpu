@@ -1,12 +1,8 @@
 ARG RHEL_BOOTC_IMAGE
-ARG OPENSHELL_CLI_IMAGE
 ARG RHSM=0
-FROM ${OPENSHELL_CLI_IMAGE} AS cli
 FROM ${RHEL_BOOTC_IMAGE}
 ARG RHSM
 
-# Workload containers are pulled into persistent rootless storage after boot.
-# Only the native CLI is copied into the OS image.
 RUN --mount=type=secret,id=rhsm_org,target=/run/secrets/rhsm_org \
     --mount=type=secret,id=rhsm_activation_key,target=/run/secrets/rhsm_activation_key \
     set -eu; \
@@ -24,24 +20,28 @@ RUN --mount=type=secret,id=rhsm_org,target=/run/secrets/rhsm_org \
       subscription-manager register --org "${org}" --activationkey "${activation_key}"; \
       registered=1; \
     fi; \
-    dnf install -y podman skopeo policycoreutils-python-utils shadow-utils \
-      util-linux openssl openssh-clients jq python3 curl cloud-init; \
+    dnf install -y podman policycoreutils-python-utils shadow-utils util-linux \
+      curl cloud-init; \
     rhsm_cleanup; \
     trap - EXIT; \
     dnf clean all; \
     rm -rf /var/cache/dnf /var/lib/dnf /var/lib/rhsm /run/cloud-init /run/rhsm; \
     find /var/log -type f -delete
-COPY --from=cli /usr/local/bin/openshell /usr/bin/openshell
-COPY scripts/common /usr/share/secure-single-server/scripts/common
-COPY configs /usr/share/secure-single-server/configs
-COPY openshell/configs /usr/share/secure-single-server/openshell/configs
-COPY openshell/scripts /usr/share/secure-single-server/openshell/scripts
-COPY bootc/scripts /usr/share/secure-single-server/bootc/scripts
+
+COPY scripts/common/lib.sh /usr/share/secure-single-server/scripts/common/lib.sh
+COPY scripts/common/install /usr/share/secure-single-server/scripts/common/install
+COPY bootc/scripts/vllm-common /usr/share/secure-single-server/bootc/scripts/vllm-common
+COPY bootc/scripts/vllm /usr/share/secure-single-server/bootc/scripts/vllm
+COPY bootc/scripts/vllm-lib /usr/share/secure-single-server/bootc/scripts/vllm-lib
 COPY bootc/vllm-profile /usr/share/secure-single-server/bootc/vllm-profile
-COPY bootc/systemd/secure-single-server*.service /usr/lib/systemd/system/
+COPY configs/vllm/images.env /usr/share/secure-single-server/configs/vllm/images.env
+COPY bootc/systemd/secure-single-server-vllm.service /usr/lib/systemd/system/
 COPY bootc/systemd/delegate.conf /usr/lib/systemd/system/user@.service.d/50-secure-single-server.conf
-RUN chmod 0755 /usr/share/secure-single-server/bootc/scripts/* \
-    && ln -s /usr/share/secure-single-server/bootc/scripts/admin /usr/bin/sss-bootc \
-    && systemctl enable secure-single-server.service secure-single-server-vllm.service \
+RUN chmod 0755 /usr/share/secure-single-server/bootc/scripts/vllm-common \
+      /usr/share/secure-single-server/bootc/scripts/vllm \
+      /usr/share/secure-single-server/bootc/scripts/vllm-lib \
+    && ln -s /usr/share/secure-single-server/bootc/scripts/vllm /usr/bin/sss-vllm \
+    && systemctl enable secure-single-server-vllm.service \
     && bootc container lint
+
 LABEL containers.bootc=1
