@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT=/usr/share/secure-single-server
+# shellcheck source=scripts/common/lib.sh
+source "${ROOT}/scripts/common/lib.sh"
+
+pull_missing() {
+  local runner="$1" image="$2"
+  validate_digest_image "${image}"
+  if ! "${runner}" podman image exists "${image}"; then
+    "${runner}" podman pull "${image}"
+  fi
+  local platform
+  platform="$("${runner}" podman image inspect "${image}" --format '{{.Os}}/{{.Architecture}}')"
+  [[ "${platform}" == linux/amd64 ]] || die "unexpected image platform: ${platform}"
+}

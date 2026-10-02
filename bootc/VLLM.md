@@ -17,16 +17,19 @@ local adapters are not enabled.
 
 ## Host requirements
 
+- Published OS images: `quay.io/redhat-et/secure-single-server-vllm-cpu:v0.1`
+  and `quay.io/redhat-et/secure-single-server-vllm-gpu:v0.1`.
 - Separate CPU vLLM server: x86_64 with AVX-512, at least 32 GB RAM, and 64
   GiB recommended. This is a starting resource budget, not a throughput
   guarantee. The CPU profile uses BF16, a 4 GiB KV cache, and no explicit CPU
-  affinity/NUMA binding.
+  affinity/NUMA binding. Boot `vllm-cpu`; it omits NVIDIA drivers and the
+  Container Toolkit.
 - GPU: exactly one NVIDIA L4, a compatible NVIDIA host driver, and
   `nvidia-ctk` installed in the bootc OS image. The reconciler regenerates CDI
-  at boot. Build with `NVIDIA_GPU=1` to include the NVIDIA 580 open driver and
-  Container Toolkit. The build compiles the module for the kernel inside the
-  image and fails if that kernel cannot be supported. Rebuild after kernel
-  updates. Secure Boot with a custom signing key is not configured.
+  at boot. `vllm-gpu` includes the NVIDIA 580 open driver and Container
+  Toolkit. The build compiles the module for the kernel inside the image and
+  fails if that kernel cannot be supported. Rebuild after kernel updates.
+  Secure Boot with a custom signing key is not configured.
 - Persistent disk on the vLLM server: allow space for roughly 16 GB of model
   weights, workload images, and caches. Budget at least 100 GiB for CPU or
   200 GiB for GPU demonstrations and check free space first.
@@ -56,10 +59,11 @@ VLLM_ENDPOINT="$(printf '%s' "${VLLM_INFO:-}" | jq -er '.VllmEndpoint')" \
 printf 'Private vLLM endpoint: %s\n' "${VLLM_ENDPOINT:-unknown}"
 ```
 
-On the dedicated server, use the mutable RHEL vLLM installer with
-`--remote PRIVATE_IP` so port 8000 binds only to its private AWS address. On
-the booted single server, configure Praxis without changing the OpenShell
-harness policy:
+On the dedicated server, boot `vllm-cpu` on a CPU instance or `vllm-gpu` on
+the L4 instance. Alternatively, use the mutable RHEL vLLM installer with
+`--remote PRIVATE_IP` so port 8000 binds only to its private AWS address. On the
+booted single server, configure Praxis without changing the OpenShell harness
+policy:
 
 ```console
 sudo sss-bootc inference remote-vllm "$VLLM_ENDPOINT"
@@ -72,25 +76,74 @@ Praxis continues listening only on `127.0.0.1:8080`; the sandbox still reaches
 If the remote server stops, Praxis returns an upstream error rather than
 falling back to a cloud provider.
 
-## Deprecated co-located mode
+## Build and boot a dedicated vLLM image
 
 Build and boot the updated OS using the [bootc instructions](README.md).
-For a GPU image, use a distinct image prefix on the RHEL builder:
+The dedicated `vllm-cpu` and `vllm-gpu` targets build directly from RHEL bootc
+and exclude Praxis and OpenShell. The CPU target omits NVIDIA components; the
+GPU target includes the NVIDIA 580 open driver and Container Toolkit:
 
 ```console
-sudo env NVIDIA_GPU=1 RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" AWS_RHUI_REGION=us-east-1 \
-  bootc/build all localhost/secure-single-server-gpu
+sudo env RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" AWS_RHUI_REGION=us-east-1 \
+  bootc/build vllm-cpu localhost/secure-single-server
+
+sudo env RHEL_BOOTC_IMAGE="$RHEL_BOOTC_IMAGE" AWS_RHUI_REGION=us-east-1 \
+  bootc/build vllm-gpu localhost/secure-single-server
 ```
 
-The CPU build defaults to `NVIDIA_GPU=0`. GPU drivers are OS components;
-vLLM and model weights remain separate workload containers and persistent data.
-On the booted host, select one profile:
+### Install or switch a dedicated AWS host
+
+For a disposable existing RHEL host that does not yet run bootc, copy the image
+to that host and replace its root. The command is intentionally destructive:
+use it only on the dedicated vLLM instance, not on a builder or single-server
+VM. Cloud-init in the image retains the `cloud-user` account and its public key
+from the source RHEL instance.
 
 ```console
-sudo sss-bootc vllm cpu
-# Or, on the prepared single-L4 host:
-sudo sss-bootc vllm gpu
-sudo sss-bootc vllm status
+sudo podman load -i /var/tmp/vllm-cpu.tar
+sudo podman run --rm --privileged \
+  -v /dev:/dev \
+  -v /var/lib/containers:/var/lib/containers \
+  -v /:/target \
+  --pid=host \
+  --security-opt label=type:unconfined_t \
+  localhost/secure-single-server:vllm-cpu \
+  bootc install to-existing-root --acknowledge-destructive
+sudo systemctl reboot
+```
+
+On a host that is already bootc-managed, load the newer OCI archive and stage
+it in local container storage instead:
+
+```console
+sudo podman load -i /var/tmp/vllm-cpu.tar
+sudo bootc switch --transport containers-storage \
+  localhost/secure-single-server:vllm-cpu
+sudo systemctl reboot
+```
+
+When moving an OCI archive from the builder, save it in the OCI archive format
+and verify its checksum on both hosts before loading it:
+
+```console
+sudo podman save --format oci-archive \
+  -o /var/tmp/vllm-cpu.tar localhost/secure-single-server:vllm-cpu
+sha256sum /var/tmp/vllm-cpu.tar
+```
+
+Conversion changes the host's SSH host keys. Compare the new fingerprint
+through a trusted AWS or console channel before accepting it and reconnecting
+as `cloud-user@BOOTC_HOST`. Do not bypass host-key verification in production.
+
+GPU drivers are OS components; vLLM and model weights remain separate workload
+containers and persistent data. On the booted host, select the mode matching
+the image. Mismatched selections are rejected before starting a container:
+
+```console
+sudo sss-vllm select cpu
+# On the vllm-gpu image booted on the prepared single-L4 host:
+sudo sss-vllm select gpu
+sudo sss-vllm status
 sudo journalctl -u secure-single-server-vllm.service -b
 sudo journalctl _SYSTEMD_USER_UNIT=vllm.service -f
 ```
@@ -101,20 +154,21 @@ prove inference readiness. Retry the health request while loading, inspecting
 logs if startup fails:
 
 ```console
-curl --fail http://127.0.0.1:8000/health
-curl --fail http://127.0.0.1:8000/v1/models
-curl --fail --max-time 600 http://127.0.0.1:8000/v1/chat/completions \
+curl --fail --max-time 30 "http://${VLLM_ENDPOINT:-127.0.0.1:8000}/health"
+curl --fail --max-time 30 "http://${VLLM_ENDPOINT:-127.0.0.1:8000}/v1/models"
+curl --fail --max-time 600 "http://${VLLM_ENDPOINT:-127.0.0.1:8000}/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -d '{"model":"Qwen/Qwen3-8B","messages":[{"role":"user","content":"Reply with a short greeting."}],"max_tokens":64,"temperature":0.7,"chat_template_kwargs":{"enable_thinking":false}}'
 ```
 
 Confirm a nonempty assistant response. CPU latency can be substantial. The
-API is unauthenticated and published only on host loopback; local host users
-can call it. Do not publish it externally. Use the Praxis route below for harness
-configuration; sandbox bypass denial remains a required qualification test.
+API is unauthenticated and listens on all host interfaces; restrict TCP 8000
+to the single-server security group and do not expose it to the Internet.
+Use the Praxis route below for harness configuration; sandbox bypass denial
+remains a required qualification test.
 
 ```console
-sudo sss-bootc vllm disabled
+sudo sss-vllm select disabled
 ```
 
 Disabling stops the service and removes its generated Quadlet while retaining

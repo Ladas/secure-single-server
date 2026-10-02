@@ -41,6 +41,7 @@ gateway_install_config owner "$TEST_TMP/home" "$TEST_TMP" 'example/harness@sha25
             config = (self.td / 'home/.config/openshell/gateway.toml').read_text()
             unit = (self.td / 'units/openshell-gateway.container').read_text()
             self.assertIn('default_image     = "example/harness@sha256:abc"', config)
+            self.assertIn('sandbox_runtime_image = "quay.io/opendatahub/odh-openshell-sandbox@sha256:', config)
             for key, filename in (("guest_tls_ca", "ca.crt"),
                                   ("guest_tls_cert", "client/tls.crt"),
                                   ("guest_tls_key", "client/tls.key")):

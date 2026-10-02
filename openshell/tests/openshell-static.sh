@@ -59,6 +59,8 @@ awk '
 grep -q 'disable_tls' "${gt}" && fail "gateway must not disable TLS"
 grep -q 'grpc_endpoint' "${gt}" && fail "gateway must let the Podman driver derive the https endpoint"
 grep -q 'supervisor_image *= *"@@ODH_SUPERVISOR_IMAGE@@"' "${gt}" || fail "supervisor image placeholder missing"
+grep -q 'sandbox_runtime_image *= *"@@ODH_SANDBOX_IMAGE@@"' "${gt}" \
+  || fail "sandbox runtime image placeholder missing"
 grep -q 'default_image *= *"@@ODH_OPENCODE_IMAGE@@"' "${gt}" || fail "default_image must be an aipcc workload image (@@ODH_OPENCODE_IMAGE@@)"
 
 # 4b. Harness creation applies bounded per-sandbox CPU and memory limits.

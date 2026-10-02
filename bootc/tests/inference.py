@@ -111,6 +111,39 @@ admin "$@"
         self.assertIn("raise RuntimeError(f'{name}: expected model", source)
         self.assertIn("raise RuntimeError(f'{name}: empty completion", source)
 
+    def test_test_inference_audit_port_follows_remote_endpoint(self):
+        import tempfile
+        source = (ROOT / 'bootc/test-inference').read_text()
+        source = source.split('# A unique file independently proves execution', 1)[0]
+        source = source.replace(
+            'source /usr/share/secure-single-server/bootc/scripts/common',
+            '''ROOT=/fixture
+require_root() { :; }
+die() { printf '%s\\n' "$*" >&2; exit 1; }
+inference_backend() { echo remote-vllm; }
+inference_vllm_endpoint() { echo 10.0.1.10:9000; }
+as_openshell() {
+  if [[ "$1" == bash ]]; then
+    cat >/dev/null
+  elif [[ "$1" == openshell && "$2" == logs ]]; then
+    printf '%s\\n' \
+      'DENIED node 10.0.1.10:9000 transparent_tcp_policy_denied' \
+      'DENIED node api.openai.com:443 transparent_tcp_policy_denied'
+  else
+    return 2
+  fi
+}''')
+        source = source.replace('"${ROOT}/bootc/scripts/inference-check"', ':')
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / 'test-inference'
+            script.write_text(source + "\nprintf 'early checks passed\\n'\n")
+            script.chmod(0o755)
+            result = subprocess.run(['bash', str(script), 'sandbox-1'],
+                                    capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('early checks passed', result.stdout)
+        self.assertIn('10.0.1.10:9000', result.stdout)
+
     def test_local_quadlet_cannot_require_cloud_secrets_or_publish_public_ports(self):
         unit = (ROOT / 'configs/vllm/praxis.container.in').read_text()
         self.assertIn('Network=host', unit)

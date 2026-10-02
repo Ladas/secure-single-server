@@ -2,6 +2,7 @@
 """Exercise the real dispatcher under pull contention without systemd or root."""
 import fcntl
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@unittest.skipUnless(shutil.which('flock'), 'util-linux flock is required')
 class LockTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -20,6 +22,7 @@ class LockTests(unittest.TestCase):
         fcntl.flock(self.lock, fcntl.LOCK_EX)
         source = (ROOT / 'bootc/scripts/vllm').read_text()
         source = source.replace('source /usr/share/secure-single-server/bootc/scripts/common', ':')
+        source = source.replace('source /usr/share/secure-single-server/bootc/scripts/vllm-common', ':')
         source = source.replace('source "${ROOT}/bootc/scripts/vllm-lib"', ':')
         source = source.replace('/run/', str(self.work) + '/')
         source = source.replace('/etc/secure-single-server', str(self.work / 'state'))

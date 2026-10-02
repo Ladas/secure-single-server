@@ -76,7 +76,7 @@ run_config() {
     --env ANTHROPIC_API_KEY=local-config-test \
     --env SWITCHYARD_JUDGE_API_KEY=local-config-test \
     --env TOKEN_RATE_LIMIT_VALKEY_URL=redis://praxis:local-config-test@127.0.0.1:9/0 \
-    --mount "type=bind,source=${config},target=/etc/praxis/shared-gateway.yaml,readonly" \
+    --volume "${config}:/etc/praxis/shared-gateway.yaml:ro,Z" \
     "${IMAGE}" -c /etc/praxis/shared-gateway.yaml >/dev/null
 
   local state health attempt
