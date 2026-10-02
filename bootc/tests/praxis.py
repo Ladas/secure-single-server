@@ -144,6 +144,8 @@ as_service() {
         self.assertIn('api.openai.com', config.read_text())
         self.assertIn('praxis-openai-api-key-v1', unit.read_text())
         self.assertIn('praxis-anthropic-api-key-v1', unit.read_text())
+        self.assertNotIn('[Install]', unit.read_text())
+        self.assertNotIn('WantedBy=default.target', unit.read_text())
 
     def test_remote_reconcile_renders_private_endpoint(self):
         self.prepare_reconcile()
@@ -155,6 +157,8 @@ as_service() {
         unit = self.work / 'containers/users/1000/praxis.container'
         self.assertIn('10.0.0.10:8000', config.read_text())
         self.assertNotIn('Secret=', unit.read_text())
+        self.assertNotIn('[Install]', unit.read_text())
+        self.assertNotIn('WantedBy=default.target', unit.read_text())
 
     def test_reconcile_pulls_missing_praxis_image(self):
         self.prepare_reconcile()
