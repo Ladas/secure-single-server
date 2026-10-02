@@ -117,6 +117,10 @@ class Gateway:
             self.close()
             raise
 
+    def fixture_command(self):
+        return ["--mount", f"type=bind,source={ROOT}/tests/common/provider.py,target=/provider.py,readonly",
+                MOCK_IMAGE, "python3", "/provider.py", "--control-host", "0.0.0.0"]
+
     def start(self):
         for image in (IMAGE, MOCK_IMAGE, *([VALKEY_IMAGE] if self.profile == "valkey" else [])):
             available = subprocess.run([ENGINE, "image", "inspect", image], capture_output=True,
@@ -135,8 +139,7 @@ class Gateway:
                      "--user", "1001:1001", "-e", "PYTHONDONTWRITEBYTECODE=1"]
         for port in [*ports, 19000]:
             mock_args += ["-p", f"127.0.0.1::{port}"]
-        mock_args += ["--mount", f"type=bind,source={ROOT}/tests/common/provider.py,target=/provider.py,readonly",
-                      MOCK_IMAGE, "python3", "/provider.py", "--control-host", "0.0.0.0"]
+        mock_args += self.fixture_command()
         run(*mock_args)
         self.control_port = self.port(19000)
         for _ in range(50):

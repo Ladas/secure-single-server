@@ -287,6 +287,18 @@ def run_captured(command, *, timeout, **kwargs):
                 os.killpg(process.pid, signal.SIGKILL)
                 stdout, stderr = process.communicate()
             raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr) from None
+        except BaseException:
+            # Cancellation must also stop child tools before returning control.
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate()
+            raise
         return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 

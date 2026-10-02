@@ -28,6 +28,10 @@ inference belong to the feature-matrix follow-up.
 
 ## Remote-gateway client
 
+For reproducible automated tasks, use [external-client acceptance](external-clients.md).
+It runs the CLIs on the client with verified TLS/caller JWTs and independent
+generated-code checks. The interactive instructions below remain separate.
+
 On the workstation, select the gateway with `aws_test_verify remote-gateway-cpu`
 or `aws_test_verify remote-gateway-gpu`. Run from the deployment checkout.
 You need Python 3, Git, Node.js 22+ and npm.

@@ -18,6 +18,7 @@ For all-in-one users, use the login created during AWS setup
 → [install and use harnesses](../quickstarts/all-in-one/users.md)
 → [run the acceptance task](harnesses.md#acceptance-task).
 Remote clients use [the HTTPS/JWT harness guide](harnesses.md#remote-gateway-client).
+For automated tasks from a separate machine, use [external-client acceptance](external-clients.md).
 [OpenShell testing](openshell-manual.md) is optional after the all-in-one baseline.
 
 References, as needed:

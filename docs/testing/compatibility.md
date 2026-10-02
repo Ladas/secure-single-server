@@ -122,6 +122,12 @@ HTTPS/JWT to Praxis. CPU/GPU identifies the gateway's vLLM backend. No current
 RHEL variant has completed this external-client qualification. This includes
 both Qwen3-8B and the new Qwen3.8-27B INT4 preset. The RHEL runner's
 on-gateway CLI checks and separate public API probes do not qualify these rows.
+The [external-client runner](external-clients.md) is available for fresh
+qualification. Its local regression tests do not change any RHEL result below.
+Local Podman testing with the real Praxis gateway and synthetic models passes
+HTTPS/JWT authentication and seven harness/provider combinations. Claude → OpenAI
+and Codex → Anthropic remain explicit blocked matrix entries pending API
+translation integration. RHEL testing is pending.
 
 **Qwen3-8B / vLLM**
 
