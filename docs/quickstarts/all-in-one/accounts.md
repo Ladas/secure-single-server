@@ -29,7 +29,7 @@ exit
 ```
 
 The helper creates a private home, authorizes the public key, restores SELinux
-labels and installs the shared client launcher and version pins. It grants no
+labels and installs `praxis-harness`, `praxis-harness-config` and version pins. It grants no
 sudo or service-group membership and refuses existing accounts or home paths.
 Use a distinct account name and public key for each person. The original
 administrator login remains available for service operations.

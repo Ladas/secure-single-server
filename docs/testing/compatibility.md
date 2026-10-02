@@ -12,18 +12,20 @@ an ordinary OS user outside OpenShell; OpenClaw is included only in OpenShell.
 | Remote-gateway: all columns | [External client setup](harnesses.md#remote-gateway-client), then the same manual task and selector checks; not run |
 | OpenShell: Mock / Real CPU / Real GPU / cloud | [Sandbox tool task](openshell-manual.md#2-qualify-actual-sandboxed-harnesses) and [selectors](harnesses.md#model-selector-checks); only real Qwen OpenCode has native task results |
 | OpenShell: infrastructure | [Installation, API and policy probes](openshell-manual.md#1-run-installation-inference-and-policy-probes); these do not qualify native harness rows |
-| Gateway features | [Accounting contracts and RHEL checklist](gateway-features.md); container results and remaining host/harness checks are summarized [below](#gateway-feature-qualification) |
 
 **Tool query** requires streamed inference, tool execution, continuation after
 the tool result, generated files and independently passing tests. **`/model`**
 (or OpenCode's **`/models`**) checks that the intended model is visible in the
 interactive selector. Inference after changing the menu selection is **Not run**
 everywhere; task tests launch the model explicitly. A model-list API response
-alone does not qualify a menu. Praxis has no combined catalog across providers.
+alone does not qualify a menu. Unified all-in-one mode now publishes configured
+catalogs; [feature testing](gateway-features.md) records refresh and switching checks.
 
 **Passed** = the named check succeeded. **Failed** = it ran and failed.
 **Unverified** = attempted, but evidence is inconclusive. **Not run** = no result
 on this stack. **Blocked [n]** = a prerequisite is missing; reasons follow the table.
+
+Feature support and feature-test results live in [gateway feature testing](gateway-features.md).
 
 ## All-in-one
 
@@ -45,7 +47,7 @@ the current image; model-selector checks are separate.
 | OpenCode | `/models` | Not run | Passed [2] | Passed [2] |
 
 1. Codex shows its built-in OpenAI catalog; Qwen is absent. Explicit
-   `--model qwen3-8b` works. A custom catalog integration is still needed.
+   `--model qwen3-8b` works. The new generated catalog needs a RHEL rerun; see [feature testing](gateway-features.md#codex).
 2. Claude shows configured Qwen aliases; OpenCode shows configured
    `praxis/qwen3-8b`. These are configured entries, not automatic discovery.
 
@@ -56,24 +58,30 @@ See the [current bug and fix candidate](vllm-debugging.md#responses-tool-ids-cha
 
 **Qwen3.8-27B INT4 / vLLM**
 
-The following recorded results used 16,384 context / 4,096 output tokens.
-The updated 32,768 / 8,192 preset has not yet been rerun on RHEL; these passes
-remain evidence for the earlier settings only.
+CPU results use 16,384 context / 4,096 output tokens.
+The GPU now runs the 32,768 / 8,192 preset. New native unified-config tasks
+passed for all three CLIs, including generated files and independent tests
+(Codex 40s, Claude Code 42s, OpenCode 56s). Short-history switching results and
+the required Responses adapter are in [feature testing](gateway-features.md#model-switching-and-reasoning).
+Interactive menu captures and long-history compaction remain pending.
+The CPU remains at 16,384 / 4,096.
 
 | Harness | Check | Real CPU | Real GPU |
 | --- | --- | --- | --- |
 | Codex | Tool query | Passed | Passed |
-| Codex | `/model` | Failed [1] | Failed [1] |
+| Codex | `/model` | Failed [1] | Not run [1] |
 | Claude Code | Tool query | Passed [2] | Passed [2] |
-| Claude Code | `/model` | Passed [3] | Passed [3] |
+| Claude Code | `/model` | Passed [3] | Not run [3] |
 | OpenCode | Tool query | Passed | Passed |
-| OpenCode | `/models` | Passed [3] | Passed [3] |
+| OpenCode | `/models` | Passed [3] | Not run [3] |
 
-1. The Codex menu still shows its built-in catalog, without Qwen. Explicit
-   `--model qwen3.8-27b-int4` works.
+1. CPU retains the older launcher result: Qwen absent from the menu, explicit
+   model selection works. The GPU generated catalog passes `model/list`; a fresh
+   interactive picker check has not been captured.
 2. The launcher sets Claude effort to `medium`. Its default `high` is rejected
    by this model's template; thinking remains enabled.
-3. These are configured model entries, not automatic provider discovery.
+3. CPU retains its configured-entry result. GPU menus were regenerated from the
+   unified catalog; fresh interactive captures remain pending.
    The captured Claude menu displayed a `[1m]` alias despite a 16,384-token
    server. The updated launcher disables 1M variants; fresh menu captures and
    inference after selecting a menu entry are still required.
@@ -286,32 +294,12 @@ by the earlier results.
 The transport failure and missing adapters need focused follow-up. The issues
 above are not confirmed explanations for the nonstreaming failure.
 
-## Gateway feature qualification
-
-These checks qualify shared gateway behavior separately from tool tasks and
-model menus. Follow [gateway feature testing](gateway-features.md) for commands,
-small-limit settings and acceptance criteria. Container results cover both
-roles with memory and Valkey; they do not establish RHEL or native CLI behavior.
-
-| Feature | Container contracts | All-in-one RHEL | Remote-gateway RHEL |
-| --- | --- | --- | --- |
-| Quota settlement/exhaustion, shared allowances (Q1/Q3) | Passed: native cloud API fixtures; vLLM isolation remains untested | Not run | Not run |
-| Harness error, retry and recovery (Q2) | Not run | Not run | Not run |
-| Concurrent admission, reservation expiry, long inference (Q4/Q5) | Not run | Not run: CPU/GPU | Not run: CPU/GPU |
-| Interrupted streams and missing usage (Q6) | Passed: fixture truncation/missing usage only; active client disconnect pending | Not run | Not run |
-| Rolling-window recovery (Q7) | Not run | Not run | Not run |
-| Memory reset / Valkey persistence, outage and recovery (Q8) | Passed: container restarts/outage | Not run | Not run |
-| Non-inference routes do not drain allowance (Q9) | Not run | Not run | Not run |
-| Authentication/error attribution (Q10) | Passed: remote JWT rejection, upstream errors and provider counters | Not run as a quota test | Not run as a quota test |
-
-RHEL service/reboot checks and successful inference alone do not qualify quota
-enforcement or counter persistence. No OpenShell harness has been qualified
-under quota errors; use the same cases once its adapter is available.
-
 ## Tested stack
 
 The AWS all-in-one results use RHEL 9.8 x86_64, Podman 5.8.2, enforcing SELinux
-and memory quotas. API forwarding is native; translation remains untested.
+with the original per-provider memory-quota task results retained below. The
+latest unified GPU checks use shared Valkey quotas. API forwarding is native;
+translation remains untested.
 
 - Praxis: `quay.io/opendatahub/praxis-experimental@sha256:227d421e963c477038a884dc51ec880c5d0afa30098ae31028ecf85e963e40d5`,
   source `019aa849a219e5c881d69e4a40a1fc190bd6c404`.
@@ -370,11 +358,12 @@ prefill batch is limited to 2048 tokens.
 | OpenCode tool query | 4.8 minutes | 1.1 minutes |
 
 The updated preset serves 32,768 context tokens, with 8,192 OpenCode/Claude
-output tokens and a 24,576-token Codex auto-compaction threshold. CPU/GPU task,
-memory, menu and long-session compaction results at those settings are **Not run**.
+output tokens and a 24,576-token Codex auto-compaction threshold. Short GPU
+native tasks passed as noted above. Updated CPU tasks, peak memory, fresh menu
+captures and long-session compaction at these settings remain **Not run**.
 Thinking remains enabled; concurrency remains one. The recorded startup cache
-capacities (50,115 GPU / 79,872 CPU tokens) motivate a 32k trial, not a claim
-that long-context performance or memory is qualified. The separate OpenShell
+capacities (50,115 GPU / 79,872 CPU tokens) do not establish long-context
+performance or peak memory usage. The separate OpenShell
 adapter retains its conservative 16k/4k settings and has no 27B runtime pass.
 
 Model-loading memory excludes additional runtime/cache costs and is not an

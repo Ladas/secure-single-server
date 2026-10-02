@@ -48,7 +48,8 @@ Downloads and CPU startup take several minutes. No cloud key is required.
 Qwen thinking is enabled. The [matrix](compatibility.md) records the current
 tested stack and results for each setup and harness.
 The 27B preset now serves 32,768 context tokens with an 8,192-token
-OpenCode/Claude output budget; earlier recorded passes used 16k/4k. Reapply
+OpenCode/Claude output budget. Short GPU tool/switching tests passed at these
+limits; CPU and near-limit compaction still need qualification. Reapply
 setup before testing these limits on an existing test VM. `real-test` refreshes
 the shared launcher but does not upgrade the inference service. For a host with
 real provider keys, follow [the managed update instructions](../quickstarts/common/vllm.md#update-an-existing-installations-budgets).
@@ -75,41 +76,20 @@ before comparing the backends.
 
 ## 3. Add OpenAI to existing Praxis
 
-To add either optional cloud provider after real setup, first connect as the
-administrator:
+After real setup, use [provider administration](../quickstarts/common/providers.md)
+from an administrator SSH session. OpenAI, Anthropic and compatible providers
+are optional. On all-in-one, enable the shared vLLM quota and unified catalog
+there before refreshing user configurations.
 
 ```console
-ssh -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST"
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST"
 ```
 
-For OpenAI, run on the VM (skip this block if adding only Anthropic):
+Do not rerun mock/real setup after adding real credentials; use the official
+installers for maintenance. Provider changes preserve other credentials and
+Valkey usage.
 
-```console
-cd ~/secure-single-server-deploy
-sudo scripts/common/providers enable openai
-```
-
-Enter the key at the hidden prompt. The helper stores it using the stdin-only
-Podman secret workflow; users never receive it. Qwen remains available.
-
-## 4. Add Anthropic independently
-
-Optional; works with or without OpenAI. Use the administrator SSH connection
-above, even if you skipped the OpenAI enable command:
-
-```console
-cd ~/secure-single-server-deploy
-sudo scripts/common/providers enable anthropic
-sudo scripts/common/providers show
-sudo scripts/common/verify --host
-```
-
-Repeat `enable` to rotate a key. To disable a route while retaining its secret,
-use `sudo scripts/common/providers disable openai` or `disable anthropic`.
-Changes preserve other providers and TLS/JWT settings. A service restart resets
-memory quotas; Valkey counters persist.
-
-## 5. Start manual testing
+## 4. Start manual testing
 
 Exit any administrator SSH session first. Choose the guide for your scenario:
 

@@ -96,13 +96,16 @@ def main():
     parser.add_argument("--ssh-key", required=True, type=Path)
     parser.add_argument("--scenario", required=True, choices=("all-in-one", "remote-gateway"))
     parser.add_argument("--profile", choices=("memory", "valkey"), default="memory")
-    parser.add_argument("--phase", choices=("install", "mock", "test", "check", "lifecycle", "real-lifecycle", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "all"), default="all")
+    parser.add_argument("--phase", choices=("install", "mock", "test", "check", "lifecycle", "real-lifecycle", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "features", "features-restore", "all"), default="all")
+    parser.add_argument("--feature-provider", choices=("vllm", "cloud"), default="vllm", help="features: which synthetic provider routes to qualify")
     parser.add_argument("--inference", choices=("cpu", "gpu"))
     parser.add_argument("--vllm-image", help="real-setup: candidate NAME@sha256:DIGEST for the selected CPU/GPU mode")
     parser.add_argument("--model", choices=("qwen3-8b", "qwen3.8-27b-int4"),
                         help="real-setup: vLLM preset (default: qwen3-8b); tests use the installed model")
-    parser.add_argument("--harness", choices=("codex", "opencode", "claude"), help="real-test/real-lifecycle: API checks plus one native harness")
+    parser.add_argument("--harness", choices=("codex", "opencode", "claude-code", "claude"), help="real-test/real-lifecycle: API checks plus one native harness; claude is an alias")
     args = parser.parse_args()
+    if args.harness == "claude-code":
+        args.harness = "claude"
     if args.model is not None and args.phase != "real-setup":
         parser.error("--model applies only to real-setup; real-test reads the installed model")
     if args.phase == "real-setup" and not args.inference:
@@ -112,8 +115,8 @@ def main():
             parser.error("--vllm-image applies only to real-setup")
         if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", args.vllm_image):
             parser.error("--vllm-image requires an immutable NAME@sha256:DIGEST")
-    if args.harness and args.phase not in ("real-test", "real-lifecycle"):
-        parser.error("--harness applies only to real-test or real-lifecycle")
+    if args.harness and args.phase not in ("real-test", "real-lifecycle", "features"):
+        parser.error("--harness applies only to real-test, real-lifecycle or features")
     if args.phase == "openshell" and args.scenario != "all-in-one":
         parser.error("reuse the all-in-one VM for OpenShell")
     if not re.fullmatch(r"[a-z_][a-z0-9_-]*@[A-Za-z0-9][A-Za-z0-9.-]*", args.host):
@@ -161,6 +164,8 @@ def main():
         command += ["--model", args.model]
     if args.harness:
         command += ["--harness", args.harness]
+    if args.phase == "features":
+        command += ["--feature-provider", args.feature_provider]
     started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     log = state / f"{started}-{args.scenario}-{args.profile}-{args.phase}.log"
     log.with_suffix(".bundle.json").write_text(json.dumps(manifest, indent=2) + "\n")

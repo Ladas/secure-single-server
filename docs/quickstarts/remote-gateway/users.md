@@ -131,7 +131,7 @@ Model discovery and switching are separate checks from configuring a route.
 ```
 
 ```console
-"${HARNESS[@]}" claude --provider vllm --model "$VLLM_MODEL" "${GATEWAY[@]}"
+"${HARNESS[@]}" claude-code --provider vllm --model "$VLLM_MODEL" "${GATEWAY[@]}"
 ```
 
 ```console
@@ -140,7 +140,7 @@ Model discovery and switching are separate checks from configuring a route.
 
 ### OpenAI
 
-The administrator [enables OpenAI](../common/providers.md#add-openai) and gives
+The administrator [enables OpenAI](../common/providers.md#openai) and gives
 you an approved model ID. Read it, then choose either client:
 
 ```console
@@ -158,7 +158,7 @@ IFS= read -r OPENAI_MODEL
 
 ### Anthropic
 
-The administrator [enables Anthropic](../common/providers.md#add-anthropic)
+The administrator [enables Anthropic](../common/providers.md#anthropic)
 independently of OpenAI. Read the approved model ID, then choose either client:
 
 ```console
@@ -167,7 +167,7 @@ IFS= read -r ANTHROPIC_MODEL
 ```
 
 ```console
-"${HARNESS[@]}" claude --provider anthropic --model "$ANTHROPIC_MODEL" "${GATEWAY[@]}"
+"${HARNESS[@]}" claude-code --provider anthropic --model "$ANTHROPIC_MODEL" "${GATEWAY[@]}"
 ```
 
 ```console
@@ -184,9 +184,11 @@ The gateway survives your logout. The harness follows your client machine's
 normal lifecycle: resume a saved session using its own resume command, or
 use `tmux` on a remote client host if the process must survive SSH disconnects.
 
-On `401`, obtain a replacement JWT and repeat connection setup. On `429`, the
-shared quota or request-rate protection may be exhausted. When finished,
-close the harness and remove only the temporary caller file created above:
+On `401`, obtain a replacement JWT and repeat connection setup. On `429`, stop
+repeated retries and ask the administrator to
+[check the shared quota and request throttle](../common/token-quotas.md#read-accounting-and-identify-a-429).
+When finished, close the harness and remove only the temporary caller file
+created above:
 
 ```console
 rm -- "$CALLER_JWT"

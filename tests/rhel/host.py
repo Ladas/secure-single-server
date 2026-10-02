@@ -344,13 +344,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", required=True, choices=("all-in-one", "remote-gateway"))
     parser.add_argument("--profile", required=True, choices=("memory", "valkey"))
-    parser.add_argument("--phase", required=True, choices=("install", "mock", "test", "check", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "all"))
+    parser.add_argument("--phase", required=True, choices=("install", "mock", "test", "check", "openshell", "switch-profile", "providers", "gpu-drivers", "real-setup", "real-test", "mock-again", "features", "features-restore", "all"))
+    parser.add_argument("--feature-provider", choices=("vllm", "cloud"), default="vllm")
     parser.add_argument("--inference", choices=("cpu", "gpu"))
     parser.add_argument("--vllm-image")
     parser.add_argument("--model", choices=("qwen3-8b", "qwen3.8-27b-int4"))
-    parser.add_argument("--harness", choices=("codex", "opencode", "claude"))
+    parser.add_argument("--harness", choices=("codex", "opencode", "claude-code", "claude"))
     parser.add_argument("--hostname", required=True)
     args = parser.parse_args()
+    if args.harness == "claude-code":
+        args.harness = "claude"
     if args.model is not None and args.phase != "real-setup":
         parser.error("--model applies only to real-setup")
     if args.vllm_image is not None and (args.phase != "real-setup" or not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", args.vllm_image)):
@@ -358,6 +361,10 @@ def main():
     if os.geteuid() != 0:
         parser.error("run as root on the disposable test VM")
     os.chdir(ROOT)
+    if args.phase in ("features", "features-restore"):
+        import features
+        features.main(args)
+        return
     if args.phase == "mock-again":
         return_to_mocks(args)
         args.phase = "all"

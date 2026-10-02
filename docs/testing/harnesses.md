@@ -21,8 +21,8 @@ When testing a file-based alternative, record the config source and verify the
 same endpoint, model, context/output limits, thinking and authentication before
 running the task below. Record its result separately: launcher passes do not
 qualify a manually maintained file. A generated configuration is not evidence
-that the CLI discovered models from Praxis. Catalog/discovery and post-selection
-inference belong to the feature-matrix follow-up.
+that the CLI discovered models from Praxis. Record catalog/discovery and
+post-selection inference with the [feature matrix](gateway-features.md).
 
 </details>
 

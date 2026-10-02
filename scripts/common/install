@@ -255,7 +255,10 @@ elif [[ "${profile}" == switchyard ]]; then
 else
   require_command python3
   python3 -c 'import yaml' || die "install python3-pyyaml first"
-  [[ "${vllm}" == 1 || -n "${openai_secret}${anthropic_secret}" ]] || die "enable at least one provider"
+  if [[ "${vllm}" != 1 && -z "${openai_secret}${anthropic_secret}" ]]; then
+    python3 -c 'import json,sys; sys.exit(not bool(json.load(open(sys.argv[1])).get("custom_providers")))' \
+      "${CONFIG_DIR}/providers.json" || die "enable at least one provider"
+  fi
 fi
 [[ -z "${openai_secret}" ]] || require_secret "${openai_secret}"
 [[ -z "${anthropic_secret}" ]] || require_secret "${anthropic_secret}"
@@ -380,10 +383,15 @@ if [[ "${scenario}" == remote-gateway ]]; then
 fi
 
 if (( providers == 1 )); then
-  provider_args=(--directory "${tmp_dir}" --openai-secret "${openai_secret}" --anthropic-secret "${anthropic_secret}")
+  provider_args=(--directory "${tmp_dir}" --existing-state "${CONFIG_DIR}/providers.json" --openai-secret "${openai_secret}" --anthropic-secret "${anthropic_secret}")
   (( vllm == 0 )) || provider_args+=(--vllm)
   [[ -z "${vllm_endpoint}" ]] || provider_args+=(--vllm-endpoint "${vllm_endpoint}")
   python3 "${SCRIPT_DIR}/provider_config.py" "${provider_args[@]}"
+fi
+
+if [[ -f "${CONFIG_DIR}/quota-overrides.json" ]]; then
+  python3 "${SCRIPT_DIR}/quota_config.py" --config "${tmp_dir}/shared-gateway.yaml" \
+    --overrides "${CONFIG_DIR}/quota-overrides.json"
 fi
 
 cp "${REPO_DIR}/configs/common/quadlet/praxis.network" "${tmp_dir}/praxis.network"
@@ -459,6 +467,9 @@ managed_paths=(
 )
 if (( providers == 1 )); then
   managed_paths+=("${CONFIG_DIR}/providers.json")
+fi
+if [[ -f "${CONFIG_DIR}/quota-overrides.json" ]]; then
+  managed_paths+=("${CONFIG_DIR}/quota-overrides.json")
 fi
 if [[ "${scenario}" == remote-gateway ]]; then
   managed_paths+=("${remote_paths[@]}")

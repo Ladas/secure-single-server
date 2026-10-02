@@ -24,13 +24,18 @@ def main():
                      [sys.executable, "-m", "unittest", "discover", "-s", "tests/common", "-p", "test_*.py"]]
         commands += [[sys.executable, path] for path in ("tests/remote-gateway/credentials.py",
             "tests/remote-gateway/security.py", "tests/aws/plan.py", "tests/aws/session.py",
-            "tests/rhel/smoke.py", "tests/rhel/unit.py", "tests/rhel/users.py", "tests/rhel/providers.py", "tests/rhel/vllm.py", "tests/rhel/clients.py")]
+            "tests/rhel/smoke.py", "tests/rhel/unit.py", "tests/rhel/users.py", "tests/rhel/providers.py", "tests/rhel/vllm.py", "tests/rhel/clients.py", "tests/rhel/features-test.py")]
     if args.suite == "praxis":
         commands += [["bash", "tests/shared-gateway-image.sh"], ["bash", "tests/shared-gateway-valkey-image.sh"]]
     if args.suite in ("praxis", "gateways"):
+        commands += [[sys.executable, 'tests/rhel/unified-image.py']]
         commands += [[sys.executable, "tests/common/gateway.py", "--scenario", scenario, *backend]
                      for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
         commands += [[sys.executable, "tests/rhel/provider-image.py", "--scenario", scenario, *backend]
+                     for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
+        commands += [[sys.executable, "tests/rhel/provider-image.py", "--scenario", scenario, "--valkey", "--extended"]
+                     for scenario in ("all-in-one", "remote")]
+        commands += [[sys.executable, "tests/rhel/features-image.py", "--scenario", scenario, *backend]
                      for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
     if args.suite == "openshell":
         commands += [[sys.executable, "openshell/tests/regressions.py"],

@@ -1,128 +1,304 @@
-# Gateway feature testing
+# Harness feature testing
 
-Use this checklist for token quotas, persistence and harness recovery. Keep
-per-harness tool/menu results in the [compatibility matrix](compatibility.md);
-its [feature summary](compatibility.md#gateway-feature-qualification) links here.
-Normal manual inference can begin before this qualification is complete.
+Track feature support and testing here. Keep provider/backend tool-task results
+in [compatibility.md](compatibility.md).
 
-## Run the existing accounting tests
+| Feature | Codex | Claude Code | OpenCode | OpenClaw / OpenShell |
+| --- | --- | --- | --- | --- |
+| Model selection | Unified configured catalog | Unified configured picker | Both unified catalogs | Blocked: missing Praxis adapter |
+| Catalog refresh | `praxis-harness-config` | Same; native discovery disabled | Same | Not qualified |
+| Short-history model switching | Passed with Responses adapter [details below](#model-switching-and-reasoning) | Messages round trips passed | Responses/Messages round trips passed with adapter | Not qualified |
+| Thinking and context limits | Per-model context; compaction pending | Unknown-model context override; known Claude windows differ | Per-model context/output; compaction pending | Not qualified |
+| Tool approvals | Native controls | Manual for Qwen; auto classifier blocked | Native controls | Depends on sandbox/adapter |
+| Inspect/change token quota | Praxis administrator commands | Same | Same | Same gateway controls; adapter pending |
+| CLI quota error and recovery | Mock test available; RHEL pending | Mock test available; RHEL pending | Mock test available; RHEL pending | Blocked |
+| Shared vLLM allowance | Shared Valkey budget across Responses, Chat and Messages; API-tested | Same | Same | Adapter pending |
+| Quota persistence | Via Praxis/Valkey | Via Praxis/Valkey | Via Praxis/Valkey | Adapter pending |
 
-From the repository root with Podman running:
+“Configured” describes available configuration, not a new interactive test pass.
+
+**Contents:** [Codex](#codex) · [Claude Code](#claude-code) ·
+[OpenCode](#opencode) · [OpenClaw / OpenShell](#openclaw--openshell) ·
+[Shared gateway checks](#shared-gateway-checks)
+
+For the **unified all-in-one** workflow, complete [provider setup](../quickstarts/common/providers.md)
+and [ordinary-user configuration](../quickstarts/all-in-one/users.md), then run
+the native commands below in a project directory. Refresh catalogs before testing.
+For each selected model, run the [file/test task](harnesses.md#acceptance-task)
+and verify the actual tool result; a menu entry is insufficient.
+
+Remote gateways retain [separate client setup](harnesses.md#remote-gateway-client)
+and per-provider launcher routes. Unified catalogs and the adapter below are not
+qualified for remote gateways or OpenShell.
+
+The quota commands below run on the **workstation**, after selecting a
+[disposable mock VM](rhel-smoke.md). They use Valkey; use `--profile memory`
+only on a VM prepared with that profile. The feature phase refuses real-provider
+installations, including the manual Qwen CPU/GPU hosts.
+
+## Codex
+
+### Model selection and limits
+
+```console
+codex --profile praxis
+```
+
+Type `/model`, select a configured alias, and run the file/test task. Repeat
+with another provider and back in the same session, then after resume.
+Use the [Responses adapter](#responses-history-experiment) for cloud → Qwen
+returns; the normal listener still rejects encrypted reasoning. Verify
+compaction separately; short-history passes do not qualify it.
+
+### Quota error and recovery
+
+```console
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --profile valkey --phase features \
+  --feature-provider vllm --harness codex
+```
+
+This checks initial quota denial. Still test denial between tool calls, retry
+behavior and a successful task after recovery, with no duplicated tool execution.
+
+## Claude Code
+
+### Model selection, discovery and limits
+
+```console
+claude-code
+```
+
+Type `/model`, select Qwen or an enabled Messages alias, and run the file/test
+task. Switch to each other model and back; repeat after resume. This configured
+picker includes Qwen; native discovery is disabled because it filters out
+non-Claude IDs. The Messages round trips below passed without the adapter.
+
+Simple mode and basic tools do not qualify full plugin, skill or subagent
+behavior. Keep Manual tool approval mode: the auto classifier is blocked with
+Qwen. Verify a shell command asks for approval and runs after approval.
+Compaction and switching a large Claude history into Qwen's 32K window remain
+unqualified.
+
+### Quota error and recovery
+
+```console
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --profile valkey --phase features \
+  --feature-provider vllm --harness claude-code
+```
+
+Still test denial during a tool continuation, cancellation and successful
+recovery without repeating an already completed tool.
+
+## OpenCode
+
+### Model selection and limits
+
+```console
+opencode
+```
+
+Type `/models`, choose `praxis-openai/<alias>` or `praxis-messages/<alias>`,
+and run the file/test task. Both can be selected in one conversation; an
+initial `--model` does not lock the API. Switch in both directions and resume.
+On the normal gateway, use Qwen Messages for cloud → Qwen returns; qualify
+Qwen Responses with the [adapter](#responses-history-experiment).
+
+### Quota error and recovery
+
+```console
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --profile valkey --phase features \
+  --feature-provider vllm --harness opencode
+```
+
+Still test retry timing, cancellation and successful recovery without duplicated
+tools. For the sandboxed variant, repeat the model and task checks using the
+[OpenShell OpenCode recipe](openshell-manual.md#2-qualify-actual-sandboxed-harnesses).
+
+## OpenClaw / OpenShell
+
+Test OpenClaw only through OpenShell. Its Praxis adapter is missing, so model
+selection and quota behavior are **blocked**. Once available, run the same
+selector → tool task → quota denial → recovery checks inside the sandbox.
+
+Keep each sandbox harness separate: OpenCode's recipe is available; the Codex
+Praxis adapter and Claude image/recipe remain missing. Ordinary-user sandbox
+access is blocked by [#12](https://github.com/redhat-et/secure-single-server/issues/12).
+[OpenShell probes](openshell-manual.md) test infrastructure; they do not qualify
+a harness or its retry behavior.
+
+## Shared gateway checks
+
+### Model switching and reasoning
+
+Recorded on the all-in-one GPU: Qwen3.8-27B INT4 / vLLM 0.30.0 (32K context,
+8K output budget), Praxis core 0.7.0 / AI 0.4.1, Codex 0.157.1,
+Claude Code 2.1.283 and OpenCode 1.18.32. CPU, remote and OpenShell switching
+are not qualified. These are resumed native CLI tasks, not interactive menu captures.
+
+| Round trip in one conversation | Codex | Claude Code | OpenCode |
+| --- | --- | --- | --- |
+| Local Qwen Responses ↔ each configured direct/custom GPT Mini, Luna and Sol | Passed with adapter [1, 2] | Different API | Passed with adapter [1–3] |
+| Direct OpenAI ↔ custom-provider GPT, including forward/reverse Mini → Luna → Sol chain | Passed | Different API | Passed |
+| Messages: every pair of Qwen, hosted Flash, Sonnet and Opus, both ways | Different API | Passed | Passed |
+| Qwen Responses ↔ each of those Messages entries | Different API | Different API | Passed with adapter [1–3] |
+| Direct/custom GPT Mini Responses ↔ each Messages entry | Different API | Different API | Passed |
+| GPT Luna/Sol Responses ↔ each Messages entry | Different API | Different API | Not run |
+| Long history, actual compaction and switching into a smaller context | Not run [4] | Not run | Not run [4] |
+
+Each turn recalled a conversation-only marker and executed unit tests. The
+adapter runs covered 36 turns / 32 switches. Preserve private result JSON and
+CLI logs with your test record; do not commit conversations or credentials.
+
+1. **Installed Praxis filter:** unified mode with `--vllm-reasoning hide` adds
+   `include_reasoning: false` only to local vLLM Responses requests. Qwen still
+   thinks; its plaintext reasoning is not returned for later cloud replay.
+2. **Experimental adapter:** when targeting the local Qwen alias, omit whole
+   encrypted reasoning input items that vLLM cannot decode. Plain messages,
+   tool calls/results and saved session files remain unchanged. Cloud requests
+   pass through unchanged. This is not encrypted-reasoning interoperability.
+3. **Experimental adapter:** add missing `type: "message"` to assistant
+   `output_text` messages. This fixes the OpenCode → vLLM input-schema rejection.
+4. **Still blocked:** opaque compaction and provider-local references are
+   rejected, not discarded. Short sessions do not qualify long-history quality,
+   automatic compaction or fitting a cloud transcript into Qwen's context.
+
+The default `:8080` listener has only fix [1]. Returning through Responses
+still fails there; [2–3] require the adapter. A hosted Flash model tested through
+the custom provider returned upstream `404 model_not_found` on Responses;
+its Messages route passed. Confirm native API access before adding an alias.
+
+### Responses history experiment
+
+Keep the adapter out of production startup. From the workstation checkout,
+copy only the public test script to the selected administrator login:
+
+```console
+scp -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" \
+  tests/rhel/responses_compat.py "$RHEL_HOST:~/responses_compat.py" &&
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+  'sudo install -D -m 0644 ~/responses_compat.py /usr/local/share/praxis/experiments/responses_compat.py'
+```
+
+As the **ordinary user on the all-in-one VM**, start the temporary service.
+Use the exact configured local alias (8B: `vllm/qwen3-8b`):
+
+```console
+systemctl --user is-active --quiet praxis-responses-compat ||
+  systemd-run --user --unit=praxis-responses-compat --collect \
+  /usr/bin/python3 /usr/local/share/praxis/experiments/responses_compat.py \
+  --port 18180 --upstream-port 8080 --model vllm/qwen3.8-27b-int4
+curl --fail --silent --show-error --connect-timeout 3 --max-time 5 \
+  http://127.0.0.1:18180/v1/models | python3 -m json.tool
+```
+
+**Stop if the catalog check fails.** Every model in the overridden harness,
+including cloud models, depends on the adapter running. Inspect it with
+`systemctl --user status praxis-responses-compat --no-pager`.
+The path is harness → adapter `18180` → Praxis `8080` → upstream; this is
+neither a new Praxis listener nor a new filter chain. Messages stays on `8081`.
+
+From a project directory, choose a harness:
+
+```console
+codex --profile praxis \
+  -c 'model_providers.praxis.base_url="http://127.0.0.1:18180/v1"'
+```
+
+Append `resume` to choose an existing Codex session. For OpenCode:
+
+```console
+OPENCODE_CONFIG_CONTENT='{"provider":{"praxis-openai":{"options":{"baseURL":"http://127.0.0.1:18180/v1"}}}}' \
+  opencode --model praxis-openai/vllm/qwen3.8-27b-int4
+```
+
+Run the task in both switch directions. Restart without the override to return
+to normal routing, then stop the temporary adapter:
+
+```console
+systemctl --user stop praxis-responses-compat
+```
+
+<details>
+<summary>Automated round-trip check</summary>
+
+From the workstation, copy the test bundle to the administrator account:
+
+```console
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+  'install -d -m 0700 ~/secure-single-server-deploy/tests' &&
+scp -pr -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" \
+  tests/common tests/rhel "$RHEL_HOST:~/secure-single-server-deploy/tests/"
+```
+
+Then in an administrator SSH session, use enabled aliases. Repeat
+`--cloud-model` and `--messages-model` to cover additional choices:
+
+```console
+cd ~/secure-single-server-deploy
+printf 'Enabled cloud Responses alias: '
+IFS= read -r CLOUD_MODEL
+sudo python3 tests/rhel/responses-switching.py --user praxis-user \
+  --local-model vllm/qwen3.8-27b-int4 --cloud-model "$CLOUD_MODEL"
+```
+
+Stop the interactive adapter first so port 18180 is free. This runner starts
+and stops its own adapter, runs CLIs as the ordinary user, and stores private
+results under that user's `~/rhel-smoke/responses-compat-*/`. It makes real
+provider calls and returns nonzero for failed recall or tool execution.
+
+</details>
+
+### Quota administration and API checks
+
+As the **administrator on the gateway**:
+
+```console
+cd ~/secure-single-server-deploy
+sudo scripts/common/quota-status
+sudo scripts/common/quota-set --list
+```
+
+Status links to the list; the list prints commands for setting each quota.
+Use the [quota administration guide](../quickstarts/common/token-quotas.md)
+for list → preview → apply. Valkey retains usage across Praxis restarts;
+the status command reads its current ledger separately from process counters.
+
+For repeatable API contracts without changing a VM, run on the workstation:
 
 ```console
 python3 tests/mocked-provider.py --suite gateways --engine podman
 ```
 
-Use `--engine docker` for Docker. This runs both roles with memory and Valkey,
-using the pinned Praxis image and synthetic providers. It changes no installed
-VM services. Prerequisites and evidence are in the
-[mocked-provider guide](mocked-provider.md).
+Use `--engine docker` if needed. This covers both roles with memory and Valkey:
+settlement/denial, separate API quotas and the opt-in shared vLLM Valkey budget,
+window recovery, non-inference routes, authentication and backend failures.
+The extended provider checks cover migration without losing charges, cross-API
+denial/recovery, and additional compatible providers with independent quotas.
+Use `--feature-provider cloud` in the per-harness mock commands to test the
+synthetic OpenAI/Anthropic routes.
 
-For one focused quota regression:
+The RHEL feature phase restores configuration and isolates its Valkey counters.
+If interrupted before restoration, use the same selected mock VM/profile:
 
 ```console
-CONTAINER_ENGINE=podman python3 tests/common/gateway.py \
-  --scenario remote --valkey --case quotas
+python3 tests/rhel/run.py --host "$RHEL_HOST" --ssh-key "$SSH_KEY" \
+  --scenario "$RHEL_SCENARIO" --profile valkey --phase features-restore
 ```
 
-This lower-level runner calls the remote-gateway scenario `remote`. Use
-`--scenario all-in-one` for the local role, omit `--valkey` for memory, or use
-`--case failures` for interrupted/error responses. JSON results go under
-`evidence/mocked-provider/`.
+**RHEL API checks passed on both all-in-one CPU/GPU hosts:** real Qwen Chat
+and Messages were admitted, then denied at a small quota. Denial survived
+Praxis and Valkey restarts; raising capacity restored inference. Normal
+capacities and namespaces were restored. This does not qualify CLI retry behavior.
+The status helper also read both hosts' persisted quota balances without restarting services.
+The GPU now uses one shared vLLM budget: migration preserved existing charges,
+and real Chat/Messages requests added their reported usage to that same ledger.
+Native-file Codex catalogs passed `model/list`; OpenCode passed `opencode models`.
+Real cloud switching is recorded above; interactive selector captures remain separate.
 
-**Already covered:** Chat/Responses/Messages JSON and complete SSE settlement;
-quota exhaustion with no upstream request; first-match rules; shared
-Chat/Responses allowance and independent Anthropic allowance; shared allowance
-across remote JWT subjects; memory reset; Valkey restart, outage and recovery.
-Missing usage, upstream 429/500, delayed/truncated SSE and timeout before headers
-also have regressions. These are container contracts, not native harness or
-RHEL persistence results. Streaming contents are checked after completion;
-prompt delivery of stream events is not established.
-
-## Small limits for a disposable mock test
-
-The [administration guide](../quickstarts/common/token-quotas.md) defines the
-production settings. For a fast, deterministic API test, the proposed lab
-settings are:
-
-| Setting | Lab value | Purpose |
-| --- | --- | --- |
-| `capacity` | `20` | Small allowance, with no paid token consumption |
-| `reserved_tokens` | `10` | Two outstanding reservations fill the allowance |
-| `window` | `60s` | Observe recovery without a daily wait |
-| `reservation_timeout` | `30s` | Exercise expiry with a controlled delayed mock |
-| Mock terminal usage | 2 input + 3 output | Five tokens charged per completed request |
-
-With sequential requests completing before expiry, **three requests must pass
-and the fourth must return 429**: the remaining five tokens cannot admit a
-reservation of ten. Missing usage instead leaves the reservation charged;
-two such requests exhaust admission. Do not use these settings for real Qwen.
-Keep ordinary settlement tests below 30 seconds; test expiry separately.
-Use a longer window if a native mock task cannot finish within 60 seconds.
-
-There is **no RHEL quota-test flag yet**. The container suite already overrides
-capacity/reservation; the short-window RHEL profile and automatic restoration
-remain unimplemented.
-Until implemented, use a disposable mock VM and the supported administrator
-workflow: edit the selected source gateway YAML in a separate reviewed bundle,
-transfer it, and apply a same-profile managed upgrade with the existing provider,
-TLS/JWT and secret arguments. See [all-in-one operations](../quickstarts/all-in-one/in-memory.md#operate-the-service)
-or [remote operations](../quickstarts/remote-gateway/install.md#operations).
-Restore the original bundle through the same workflow and verify it afterward.
-Do not edit live files behind the install manifest or reset unrelated Valkey keys.
-
-## Remaining acceptance
-
-Every row below is **Not run on RHEL** as a feature qualification. Run mock
-cases for both gateway roles and both quota backends. Run harness cases with
-Codex, Claude Code and OpenCode on their supported native API routes; add
-OpenShell rows as adapters become available. Real long-request checks need
-separate CPU/GPU evidence.
-
-| ID | Test | Required observation |
-| --- | --- | --- |
-| Q1 | Exhaustion and settlement | Repeat the 3-pass/4th-denied test for JSON/SSE on every enabled API; gateway denial leaves the provider request count unchanged |
-| Q2 | Harness quota errors | Exhaust before the first prompt, then between a tool call and continuation; record CLI error, retry count/delay, cancellation and recovery after the window. No false success or duplicated tool execution |
-| Q3 | Shared and independent allowances | Two OS users / two JWT subjects share the same rule. Chat and Responses share; Anthropic is independent. Rendered local-vLLM quotas remain separate from cloud quotas |
-| Q4 | Concurrent admission and expiry | Hold two reserved requests open; reject a third. Exercise completion before and after reservation expiry, and reported usage above the estimate; detect early readmission or double settlement |
-| Q5 | Real CPU/GPU request lifetime | Measure individual request duration and usage, including thinking, against the configured reservation timeout; test a request longer than the timeout and then a competing admission |
-| Q6 | Streaming interruption | Observe events before completion; disconnect during an active stream. Compare complete, partial and missing terminal usage with the amount charged and subsequent admission |
-| Q7 | Window recovery | Recover without restart after usage ages out; test a rolling-window boundary. Record actual recovery time, not a presumed calendar reset |
-| Q8 | RHEL restart and Valkey failure | Exhaust, restart Praxis, then reboot the host: memory resets; Valkey retains the allowance. Stop Valkey: fail closed without forwarding; restore it: remaining allowance survives |
-| Q9 | Discovery and non-inference routes | Check model listing and token counting separately from inference. Verify whether they consume reservations; menu use must not silently drain inference allowance |
-| Q10 | Authentication and upstream errors | Invalid/expired JWTs must not forward or spend quota. Distinguish gateway 429, request-rate 429 and upstream 429/500 using provider records and gateway evidence |
-
-For Q2, start with mocks and ordinary users. Repeat real-provider error behavior
-only after deterministic cases pass. Record `Retry-After` if present; do not
-assume it exists or every CLI handles it. Test the same prompt after recovery
-without resetting counters or changing credentials.
-
-For Q4/Q5, the mutable gateway templates use a **300s reservation timeout**;
-the separate bootc vLLM config uses 1800s. A CPU tool task taking 6–11 minutes
-does not prove a timeout bug: it contains multiple requests. Measure each
-request. Reservations are estimates, not maximum output or dollar budgets.
-Do not simply increase the timeout and call expiry semantics qualified.
-
-For Q6, current interrupted Anthropic fixtures settle the partial input usage
-already reported; OpenAI fixtures without usage keep the reservation. Neither
-proves accurate accounting for an interrupted real provider.
-
-For Q9, the baseline all-in-one configuration applies its quota filter to model
-listing too. Optional-provider rendering adds method/path conditions. Qualify
-the actual installed configuration rather than generalizing from one profile.
-For quota-focused cases, pace requests below the request-rate limit so an
-unrelated 429 cannot look like correct token accounting.
-
-## Record and restore
-
-Save scenario, host/client location, user type, image/configuration hashes,
-provider/API, memory/Valkey, quota values, request durations, returned status,
-reported usage, provider request counts and CLI retries. Keep tokens and raw
-credentials out of evidence. A service health check alone does not prove
-counter persistence; compare admissions before and after the restart.
-
-After experiments, restore the reviewed normal configuration, remove owned
-fixtures and verify a normal tool task. Return CPU/GPU hosts to real Qwen with
-no mocks before manual use. Store detailed private results with the other
-RHEL evidence and update only the matching feature-summary cells. Usage export
-is tracked by [#21](https://github.com/redhat-et/secure-single-server/issues/21).
+Remaining qualification: concurrent reservations, expiry during real CPU/GPU
+requests, active-stream cancellation, exact window boundaries, host reboot,
+and harness retry/compaction behavior. Record role, CPU/GPU, provider/model,
+backend, CLI/image versions and the observed result here; keep raw evidence private.

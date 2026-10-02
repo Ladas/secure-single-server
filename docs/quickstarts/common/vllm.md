@@ -37,9 +37,9 @@ configured context/output limits. Claude uses `medium` effort for Qwen3.8
 because that model rejects `high`, and the launcher disables misleading 1M
 context variants for local Qwen. CPU tasks can take minutes.
 
-The recorded 27B RHEL passes used the earlier 16,384 / 4,096 budgets. The larger
-budgets require a fresh CPU/GPU run, including long-session compaction and tool
-continuation. See the [result ledger](../../testing/compatibility.md#cpugpu-limits-and-measured-performance).
+Short native tool tasks and model-switching checks passed on the 27B GPU preset
+at 32,768 / 8,192. CPU qualification still uses the earlier 16,384 / 4,096 limits;
+near-limit sessions and compaction remain unqualified on both.
 These are deployment limits, not the model's native maximum. For full-context
 hardware estimates and Flash variants, see [instance sizing](../../testing/aws.md#model-and-context-sizing).
 
@@ -92,21 +92,42 @@ on the vLLM host:
 sudo dnf install -y podman python3 python3-pyyaml openssl policycoreutils-python-utils jq curl
 ```
 
-On a dedicated vLLM host, run only the preparation command below and do not
-install the gateway. On the gateway host, continue with the selected gateway
-installation.
-
-Skip gateway creation if Praxis is already installed. For a new **all-in-one**
-gateway with memory quotas:
+Prepare the locked service account on each host:
 
 ```console
 sudo scripts/all-in-one/install --prepare
-sudo scripts/all-in-one/install --profile memory --vllm-endpoint "$VLLM_ENDPOINT"
 ```
 
-For persistent all-in-one quotas, use the [Valkey profile](../all-in-one/valkey.md)
-with `--vllm` instead of `--openai-secret` / `--anthropic-secret`. The three
-Valkey arguments remain required.
+On a **dedicated inference host**, skip the rest of step 2 and install vLLM in
+step 3. On the **gateway host**, skip gateway creation if Praxis is installed.
+Otherwise choose one route, in the gateway's administrator terminal:
+
+**Separate inference host (preferred):** enter its private IPv4 address and
+port, for example `10.0.1.10:8000`. Permit port 8000 only from the gateway.
+
+```console
+printf 'Private vLLM endpoint (IPv4:8000): '
+IFS= read -r VLLM_ENDPOINT
+VLLM_ROUTE=(--vllm-endpoint "$VLLM_ENDPOINT")
+```
+
+**Co-located inference (existing single-VM workflow, deprecated):**
+
+```console
+VLLM_ROUTE=(--vllm)
+```
+
+For a new **all-in-one gateway**, install Valkey-backed Praxis with that route:
+
+```console
+sudo scripts/common/secret-set valkey v1 --generate &&
+sudo scripts/all-in-one/install --profile valkey "${VLLM_ROUTE[@]}" \
+  --valkey-image docker.io/valkey/valkey@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2 \
+  --valkey-url-secret praxis-valkey-url-v1 --valkey-acl-secret praxis-valkey-acl-v1
+```
+
+This needs no cloud key. For disposable memory quotas, replace the block above
+with `sudo scripts/all-in-one/install --profile memory "${VLLM_ROUTE[@]}"`.
 
 For **remote-gateway**, follow [gateway installation](../remote-gateway/install.md)
 and select its Qwen option. It prepares TLS/JWT and the private gateway
@@ -133,22 +154,37 @@ Or select quantized Qwen3.8-27B:
 VLLM_MODEL=qwen3.8-27b-int4
 ```
 
-Then install on the matching hardware:
+On the **inference host**, select how vLLM binds:
+
+**Separate host:** enter its assigned private IPv4 address (without a port).
+
+```console
+printf 'This inference host private IPv4 address: '
+IFS= read -r VLLM_PRIVATE_IP
+VLLM_BIND=(--remote "$VLLM_PRIVATE_IP")
+```
+
+**Co-located host:** keep vLLM only on the private container network.
+
+```console
+VLLM_BIND=()
+```
+
+Run only the command matching the inference hardware:
 
 ```console
 # GPU:
-sudo scripts/vllm/install --model "$VLLM_MODEL" --remote "$VLLM_PRIVATE_IP" gpu
+sudo scripts/vllm/install --model "$VLLM_MODEL" "${VLLM_BIND[@]}" gpu
 ```
 
 ```console
 # CPU:
-sudo scripts/vllm/install --model "$VLLM_MODEL" --remote "$VLLM_PRIVATE_IP" cpu
+sudo scripts/vllm/install --model "$VLLM_MODEL" "${VLLM_BIND[@]}" cpu
 ```
 
-On AWS, obtain `VLLM_PRIVATE_IP` and `VLLM_ENDPOINT` from
-[the private endpoint helper](../../testing/aws.md#separate-vllm-server). The
-helper requires the dedicated instance to carry the launcher's ownership and
-`vllm-server` tags, and it rejects public port-8000 ingress.
+Use the verified private address from your infrastructure inventory. Workstation
+shell variables are not transferred into an SSH session; set them on the host
+as shown above.
 
 To switch back, repeat with `VLLM_MODEL=qwen3-8b`. The old weights remain cached.
 The model is selected during application installation; AWS VM configuration
@@ -160,8 +196,8 @@ uses `SecurityLabelDisable` for CDI access; host SELinux remains enforcing.
 Use the pinned image for your selected backend. An administrator can override
 it with `--image NAME@sha256:DIGEST` after reviewing that release.
 
-If Praxis was installed without Qwen, enable its routes using the matching
-checkout:
+Back on the **gateway host**, verify it. If it was installed without Qwen,
+enable the route first using the matching checkout and private endpoint:
 
 ```console
 sudo scripts/common/providers enable vllm --vllm-endpoint "$VLLM_ENDPOINT"
@@ -172,7 +208,8 @@ Omit `--vllm-endpoint` only for the deprecated co-located mode. The provider
 change is transactional and retains the existing gateway identity, secrets and
 quota state.
 
-Optionally [add OpenAI and Anthropic](providers.md) without replacing Qwen.
+Next, [share the vLLM quota and configure unified models](providers.md#share-the-local-vllm-quota-across-harnesses).
+Add OpenAI, Anthropic or compatible providers there when ready.
 For all-in-one, [create ordinary user logins](../all-in-one/accounts.md) and
 follow [user setup](../all-in-one/users.md). Remote clients follow
 [HTTPS/JWT user setup](../remote-gateway/users.md).
@@ -185,14 +222,13 @@ before refreshing the shared launcher on an all-in-one host:
 
 ```console
 sudo install -m 0755 scripts/common/harness.py /usr/local/bin/praxis-harness
+sudo install -m 0755 scripts/common/harness_config.py /usr/local/bin/praxis-harness-config
 ```
 
-Restart interactive harness sessions so they load the new limits. Remote
-clients must update their launcher copy too. Updating a client alone does not
-increase the server's context. The RHEL `real-test` phase also refreshes the
-shared launcher, but it does not reinstall vLLM; rerun `real-setup` first on a
-matching test installation without real cloud credentials. Preserve manual
-projects and earlier result files.
+Update the [unified model catalog](providers.md#choose-cloud-models-and-apply)
+to match the new preset and apply it. Ordinary users run `praxis-harness-config`
+and restart their CLIs. Without unified mode, update the launcher on remote
+clients too. Updating client limits alone does not increase server context.
 
 ## Inspect the backend
 
@@ -202,7 +238,8 @@ sudo bash -c 'source scripts/common/lib.sh; as_service podman logs --tail 80 pra
 sudo bash -c 'source scripts/common/lib.sh; as_service podman port praxis-vllm'
 ```
 
-The port command should print nothing. If the GPU driver is unavailable after a
+The port command prints only the private address in separate-server mode and
+nothing in co-located mode. If the GPU driver is unavailable after a
 kernel update, rerun `prepare-gpu`, reboot and repeat the install command with the intended `--model`.
 
 ## Remove vLLM

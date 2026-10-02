@@ -1,15 +1,101 @@
 #!/usr/bin/env python3
 """Manual and automated harnesses must select identical provider/API paths."""
 import json
+import os
 from pathlib import Path
 import sys
+import subprocess
+import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts/common"))
+import harness
 from harness import configuration
 
 
 class ClientsTest(unittest.TestCase):
+    def test_custom_route_prefix_selects_the_native_api_without_exposing_upstream_keys(self):
+        for name, api in (('codex', 'openai'), ('opencode', 'openai'), ('claude-code', 'anthropic')):
+            command, env = configuration(name, api, 'model-id', 'https://gateway.test:8443', 'caller',
+                                         route_prefix='/providers/team')
+            self.assertIn('/providers/team', json.dumps([command, env]))
+            self.assertNotIn('openai.example', json.dumps([command, env]))
+        with self.assertRaises(ValueError):
+            configuration('codex', 'vllm', 'model', 'http://localhost:8080', 'caller', route_prefix='/providers/team')
+
+    def test_claude_code_public_name_preserves_messages_routing_and_executable(self):
+        with patch.object(sys, "argv", ["praxis-harness", "claude-code", "--model", "qwen3.8-27b-int4"]), \
+             patch.object(os, "execvpe") as execute:
+            harness.main()
+        executable, command, environment = execute.call_args.args
+        self.assertEqual(executable, "claude")
+        self.assertEqual(environment["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8081/vllm")
+        self.assertEqual(command[command.index("--permission-mode") + 1], "default")
+        self.assertEqual(configuration("claude-code", "vllm", "qwen3-8b", "http://localhost:8081", "caller"),
+                         configuration("claude", "vllm", "qwen3-8b", "http://localhost:8081", "caller"))
+
+    def test_local_claude_uses_manual_approval_not_the_cloud_auto_classifier(self):
+        for name in ("claude-code", "claude"):
+            for prompt in (None, "task"):
+                command, _ = configuration(name, "vllm", "qwen3.8-27b-int4", "http://localhost:8081", "caller", prompt=prompt)
+                self.assertEqual(command[command.index("--permission-mode") + 1], "default")
+                self.assertNotIn("--dangerously-skip-permissions", command)
+        command, _ = configuration("claude-code", "anthropic", "claude-model", "http://localhost:8081", "caller")
+        self.assertNotIn("--permission-mode", command)
+
+    def test_claude_gateway_launch_clears_inherited_cloud_provider_selectors(self):
+        with patch.dict(os.environ, {"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1"}), \
+             patch.object(sys, "argv", ["praxis-harness", "claude", "--model", "qwen3-8b"]), \
+             patch.object(os, "execvpe") as execute:
+            harness.main()
+        environment = execute.call_args.args[2]
+        self.assertFalse(any(key.startswith("CLAUDE_CODE_USE_") for key in environment))
+        self.assertEqual(environment["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8081/vllm")
+
+    def test_print_config_redacts_remote_caller_in_nested_opencode_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token = Path(directory) / "caller.jwt"
+            token.write_text("private.caller.signature")
+            result = subprocess.run([sys.executable, str(Path(harness.__file__)), "opencode",
+                "--model", "qwen3.8-27b-int4", "--url", "https://gateway.test:8443",
+                "--token-file", str(token), "--print-config"], capture_output=True, text=True,
+                env={**os.environ, "HOME": directory}, check=True)
+            self.assertNotIn(token.read_text(), result.stdout + result.stderr)
+            selected = json.loads(result.stdout)
+            config = json.loads(selected["environment"]["OPENCODE_CONFIG_CONTENT"])
+            self.assertEqual(config["provider"]["praxis"]["options"]["apiKey"], "[caller]")
+
+    def test_qwen_menu_configuration_uses_exact_served_id_and_limits(self):
+        for model, context in (("qwen3-8b", 16384), ("qwen3.8-27b-int4", 32768)):
+            with self.subTest(model=model), tempfile.TemporaryDirectory() as directory:
+                path = harness.write_codex_catalog(model, Path(directory))
+                entry, = json.loads(path.read_text())["models"]
+                self.assertEqual(entry["slug"], model)
+                self.assertEqual(entry["visibility"], "list")
+                self.assertEqual(entry["context_window"], context)
+                self.assertEqual(entry["max_context_window"], context)
+                self.assertEqual(entry["input_modalities"], ["text"])
+                self.assertEqual(entry["default_reasoning_level"], "medium")
+                self.assertEqual([r["effort"] for r in entry["supported_reasoning_levels"]], ["medium"])
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                command, _ = configuration("codex", "vllm", model, "http://localhost:8080", "caller",
+                                           catalog_path=path)
+                self.assertIn("model_catalog_json=" + json.dumps(str(path)), command)
+                self.assertIn('model_reasoning_effort="medium"', command)
+            _, env = configuration("claude", "vllm", model, "http://localhost:8081", "caller")
+            self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], model)
+            self.assertEqual(env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"], "0")
+
+    def test_gateway_discovery_is_an_explicit_claude_capability(self):
+        _, env = configuration("claude", "anthropic", "claude-model", "http://localhost:8081", "caller",
+                               gateway_discovery=True)
+        self.assertEqual(env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"], "1")
+        for name in ("codex", "opencode"):
+            with self.assertRaisesRegex(ValueError, "Claude"):
+                configuration(name, "vllm", "qwen3-8b", "http://localhost:8080", "caller",
+                              gateway_discovery=True)
+
     def test_qwen38_claude_uses_an_accepted_effort_without_disabling_thinking(self):
         for prompt in (None, "task"):
             command, env = configuration("claude", "vllm", "qwen3.8-27b-int4",

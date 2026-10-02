@@ -1,6 +1,6 @@
 # Current vLLM issues
 
-This page tracks bugs with **vLLM 0.30.0**, Qwen3-8B thinking enabled and the
+This page tracks bugs with **vLLM 0.30.0**, Qwen3-8B / Qwen3.8-27B thinking enabled and the
 published **Praxis PR #40 image**. It does not qualify API translation.
 Results, exact pins and performance belong in the
 [compatibility matrix](compatibility.md).
@@ -45,3 +45,15 @@ production configurations keep the runtime check. Mock fixtures explicitly
 allow their private endpoints. This is a deployment configuration fix, not a
 vLLM defect. Use the managed installer to apply it; do not edit installed files
 outside the manifest.
+
+## Responses history across providers
+
+With vLLM 0.30.0, Qwen plaintext reasoning can break later hosted Responses
+requests; returning to Qwen can fail on encrypted reasoning or OpenCode's
+assistant message shape. Unified mode can hide Qwen's returned reasoning
+without disabling thinking. A temporary loopback adapter addresses the two
+return-path failures. It is not installed in normal Praxis routing.
+
+See [feature testing](gateway-features.md#model-switching-and-reasoning) for
+current results, numbered fix descriptions and copyable experiment commands.
+Opaque compaction remains blocked; long-history downshifts are unqualified.

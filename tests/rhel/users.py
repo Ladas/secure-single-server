@@ -61,6 +61,7 @@ class UserTest(unittest.TestCase):
         (bundle / "scripts/common").mkdir(parents=True)
         (bundle / "configs/common").mkdir(parents=True)
         (bundle / "scripts/common/harness.py").write_bytes((ROOT / "scripts/common/harness.py").read_bytes())
+        (bundle / 'scripts/common/harness_config.py').write_bytes((ROOT / 'scripts/common/harness_config.py').read_bytes())
         versions = '{"opencode-ai": "1.18.32"}\n'
         (bundle / "configs/common/harness-versions.json").write_text(versions)
         home = self.root / "tester"

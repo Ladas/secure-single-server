@@ -2,8 +2,10 @@
 
 ## AWS RHEL workflow
 
-Follow these in order. Select a VM once, then use the same test commands for
-any all-in-one or remote-gateway CPU/GPU variant.
+For a fresh VM and manual use, follow the [official installation sequence](aws.md#6-install-services-and-test)
+after AWS deployment. It does not require running smoke tests first.
+
+For automated qualification, select a VM once and follow these in order:
 
 1. [Deploy VMs](aws.md) — separate plan/launch blocks, an ordinary user login
    for all-in-one and a copyable VM inventory.
@@ -24,7 +26,7 @@ For automated tasks from a separate machine, use [external-client acceptance](ex
 References, as needed:
 
 - [Compatibility matrix](compatibility.md): direct and OpenShell results by scenario/backend.
-- [Gateway feature testing](gateway-features.md): token limits, harness recovery and persistence.
+- [Gateway feature testing](gateway-features.md): model selection, limits, quotas and recovery by harness.
 - [AWS operations](aws-operations.md): access choices, custom hardware, recovery and cleanup.
 - [vLLM administration](../quickstarts/common/vllm.md): installation without the smoke runner and maintenance.
 - [vLLM debugging](vllm-debugging.md): known failures, upstream leads and fix qualification.

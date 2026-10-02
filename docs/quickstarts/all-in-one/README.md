@@ -49,7 +49,7 @@ reboots. Users cannot sign in as this account.
 | User identity | One OS account per user; no shared `ssm-user` account |
 | Praxis access | Any admitted server user may call the loopback inference ports |
 | Caller JWT | Not required by the default profiles |
-| Limits | Shared globally by every caller of each protocol chain |
+| Limits | Shared by all users; provider budgets are independent, with an optional shared vLLM budget across APIs |
 | Service owner | Dedicated non-login `praxis-svc` account |
 | Provider credentials | Podman secrets available only inside the Praxis container |
 | Configuration | Root-owned and unavailable for modification by users |
@@ -65,11 +65,13 @@ need subject-keyed state before that identity can receive an individual limit.
 
 ## Administrator setup
 
-For local Qwen with optional cloud providers, follow
-[vLLM installation](../common/vllm.md). Existing installations can add
-[OpenAI and Anthropic independently](../common/providers.md).
-Then [create ordinary user logins](accounts.md); give users the
-[setup and usage guide](users.md).
+For Qwen with optional cloud providers, follow these steps:
+
+1. [Install vLLM and Praxis](../common/vllm.md); use Valkey for persistent quotas.
+2. [Configure providers and unified models](../common/providers.md). Start with
+   Qwen alone; add cloud providers independently when ready.
+3. [Create ordinary user logins](accounts.md), unless already created during VM setup.
+4. As each user, [generate native configurations and launch the harnesses](users.md).
 
 For a cloud-only gateway, use the profiles below.
 
@@ -163,6 +165,9 @@ harness sessions. The direct-host workflows here use normal harness resume
 after reconnecting or `tmux`.
 
 ### Request-rate protection and token quotas
+
+To investigate `429` responses, [inspect installed limits and accounting](../common/token-quotas.md#check-installed-limits)
+as the administrator.
 
 Each protocol chain has independent limiter instances:
 

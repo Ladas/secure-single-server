@@ -28,6 +28,21 @@ class ProvidersTest(unittest.TestCase):
         self.assertIn('exec 9>"$(gateway_lock_path "${SERVICE_USER}")"', source)
         self.assertNotIn("/run/lock/praxis-gateway.lock", source)
 
+    def test_messages_listener_lists_models_without_duplicate_remote_routes(self):
+        for scenario in ("all-in-one", "remote-gateway"):
+            for openai in (False, True):
+                config = providers.render(source(scenario), vllm=True, openai=openai, anthropic=True)
+                for chain in config["filter_chains"]:
+                    routes = next(f["routes"] for f in chain["filters"] if f["filter"] == "router")
+                    local = [r for r in routes if r.get("path") == "/vllm/v1/models"]
+                    self.assertEqual(local, [{"path": "/vllm/v1/models", "cluster": "vllm"}])
+                    clouds = [r for r in routes if r.get("path") == "/v1/models"]
+                    expected = "openai" if (scenario == "remote-gateway" and openai) or chain["name"] == "openai" else "anthropic"
+                    if chain["name"] == "openai" and not openai:
+                        self.assertEqual(clouds, [])
+                    else:
+                        self.assertEqual(clouds, [{"path": "/v1/models", "cluster": expected}])
+
     def test_prompted_credentials_use_existing_secret_helper_stdin_only(self):
         execute = Mock()
         manager.create_cloud_secret("openai", "new-version", reader=lambda prompt: "synthetic-private-key", execute=execute)
@@ -44,6 +59,18 @@ class ProvidersTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "matching checkout"):
             manager.updated_config(template, installed, state, {**state, "openai_secret": "new-key"})
         self.assertEqual(installed["admin"]["address"], "127.0.0.1:9999")
+
+    def test_upgrade_accepts_only_the_known_missing_messages_catalog_route(self):
+        template = source('all-in-one')
+        state = {'vllm': True, 'openai_secret': '', 'anthropic_secret': ''}
+        installed = providers.render(template, vllm=True, openai=False, anthropic=False)
+        routes = next(f['routes'] for f in installed['filter_chains'][1]['filters'] if f['filter'] == 'router')
+        routes[:] = [r for r in routes if r.get('path') != '/vllm/v1/models']
+        result = manager.updated_config(template, installed, state, {**state, 'openai_secret': 'new'})
+        self.assertIn('/vllm/v1/models', json.dumps(result['filter_chains'][1]))
+        installed['listeners'][1]['address'] = '0.0.0.0:9999'
+        with self.assertRaisesRegex(ValueError, 'matching checkout'):
+            manager.updated_config(template, installed, state, {**state, 'openai_secret': 'new'})
 
     def test_unchanged_provider_state_does_not_require_restart(self):
         template = source("all-in-one")
