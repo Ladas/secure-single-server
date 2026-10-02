@@ -73,6 +73,8 @@ praxis_reconcile() (
       PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}" \
       OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}"
   fi
+  sed '/^\[Install\]/,$d' "${tmp}/praxis.container" >"${tmp}/praxis-reconciled.container"
+  mv "${tmp}/praxis-reconciled.container" "${tmp}/praxis.container"
 
   unit="/etc/containers/systemd/users/$(service_uid)"
   install -o root -g "$(service_gid)" -m 0640 "${tmp}/praxis.yaml" /etc/praxis/shared-gateway.yaml
