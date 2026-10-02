@@ -28,6 +28,89 @@ class InferenceTests(unittest.TestCase):
         headers = next(f for f in filters if f['filter'] == 'headers')
         self.assertIn('Authorization', headers['request_remove'])
 
+    def test_remote_route_uses_one_private_upstream_and_keeps_praxis_loopback(self):
+        rendered = (ROOT / 'configs/vllm/praxis-remote.yaml').read_text().replace(
+            '@@VLLM_HOST@@', '10.0.1.10').replace('@@VLLM_PORT@@', '8000')
+        config = yaml.safe_load(rendered)
+        self.assertEqual(config['listeners'], [{'name': 'openai', 'address': '127.0.0.1:8080',
+                                                'filter_chains': ['openai']}])
+        self.assertEqual(config['admin']['address'], '127.0.0.1:9901')
+        filters = config['filter_chains'][0]['filters']
+        self.assertNotIn('credential_injection', [item['filter'] for item in filters])
+        upstream = next(item for item in filters if item['filter'] == 'load_balancer')
+        self.assertEqual(upstream['clusters'], [{'name': 'openai', 'endpoints': ['10.0.1.10:8000'],
+                                                 'http': {'authority': '10.0.1.10:8000'}}])
+
+    def test_admin_reports_remote_endpoint_and_requires_its_argument(self):
+        source = (ROOT / 'bootc/scripts/admin').read_text()
+        block = source[source.index('\n  inference)\n'):source.index('\n  status)\n')]
+        block = block.replace('exec 9>/run/secure-single-server.lock', 'exec 9>/dev/null')
+        script = """
+set -euo pipefail
+ROOT=/fixture
+require_root() { :; }
+validate_vllm_endpoint() { printf 'VALIDATE %s\\n' "$1"; }
+inference_backend() { echo remote-vllm; }
+inference_vllm_endpoint() { echo 10.0.1.10:8000; }
+install() { printf 'INSTALL %s\\n' "$*"; }
+ mktemp() { printf '/dev/null\\n'; }
+chmod() { printf 'CHMOD %s\\n' "$*"; }
+mv() { printf 'WRITE %s\\n' "$2"; }
+flock() { :; }
+systemctl() { printf 'SYSTEMCTL %s\\n' "$*"; }
+die() { printf 'usage-error\\n' >&2; exit 1; }
+admin() {
+case "${1:-help}" in
+""" + block + """  *) die 'unexpected command' ;;
+esac
+}
+admin "$@"
+"""
+        result = subprocess.run(['bash', '-c', script, 'admin', 'inference', 'remote-vllm',
+                                 '10.0.1.10:8000'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('VALIDATE 10.0.1.10:8000', result.stdout)
+        self.assertIn('WRITE /etc/secure-single-server/vllm-endpoint', result.stdout)
+        self.assertIn('WRITE /etc/secure-single-server/inference-backend', result.stdout)
+
+        invalid_selection = script.replace(
+            'validate_vllm_endpoint() { printf \'VALIDATE %s\\n\' "$1"; }',
+            'validate_vllm_endpoint() { die "invalid endpoint"; }')
+        result = subprocess.run(['bash', '-c', invalid_selection, 'admin', 'inference',
+                                 'remote-vllm', '8.8.8.8:8000'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('WRITE /etc/secure-single-server/vllm-endpoint', result.stdout)
+
+        result = subprocess.run(['bash', '-c', script, 'admin', 'inference', 'status'],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Praxis upstream: remote-vllm', result.stdout)
+        self.assertIn('Remote vLLM endpoint: 10.0.1.10:8000', result.stdout)
+
+        invalid_status = script.replace(
+            'inference_vllm_endpoint() { echo 10.0.1.10:8000; }',
+            'inference_vllm_endpoint() { die "invalid endpoint"; }')
+        result = subprocess.run(['bash', '-c', invalid_status, 'admin', 'inference', 'status'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('Remote vLLM endpoint:', result.stdout)
+
+        self.assertIn('backend="$(inference_backend)"', source)
+        self.assertNotIn('if [[ "${action}" == create && "$(inference_backend)"', source)
+
+        result = subprocess.run(['bash', '-c', script, 'admin', 'inference'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('usage-error', result.stderr)
+
+    def test_inference_checks_survive_python_optimization(self):
+        source = (ROOT / 'bootc/scripts/inference-check').read_text()
+        self.assertNotIn('assert model ', source)
+        self.assertNotIn('assert completion', source)
+        self.assertIn("raise RuntimeError(f'{name}: expected model", source)
+        self.assertIn("raise RuntimeError(f'{name}: empty completion", source)
+
     def test_local_quadlet_cannot_require_cloud_secrets_or_publish_public_ports(self):
         unit = (ROOT / 'configs/vllm/praxis.container.in').read_text()
         self.assertIn('Network=host', unit)
@@ -71,11 +154,11 @@ class InferenceTests(unittest.TestCase):
             self.assertEqual(config['provider']['praxis']['models']['Qwen/Qwen3-8B']['limit'],
                              {'context': 16384, 'output': 2048})
 
-    def test_reconciler_local_mode_does_not_consult_cloud_secrets(self):
+    def test_reconciler_vllm_modes_do_not_consult_cloud_secrets(self):
         source = (ROOT / 'bootc/scripts/reconcile').read_text()
         block = source[source.index('backend="$(inference_backend)"'):
                        source.index('regex="$(selinux_path_regex')]
-        for backend in ('vllm', 'cloud'):
+        for backend in ('vllm', 'remote-vllm', 'cloud'):
             script = """
 set -euo pipefail
 ROOT=/fixture; tmp=/fixture-tmp; DEFAULT_PRAXIS_IMAGE=pinned
@@ -90,11 +173,19 @@ as_service() { echo "SERVICE $*"; }
 note() { echo "$*"; }
 die() { exit 1; }
 """.replace("BACKEND_VALUE", backend)
+            script = script.replace(f"inference_backend() {{ echo {backend}; }}",
+                                    f"inference_backend() {{ echo {backend}; }}\n"
+                                    "inference_vllm_endpoint() { echo 10.0.1.10:8000; }")
             result = subprocess.run(['bash', '-c', script + block], text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             if backend == 'vllm':
                 self.assertNotIn('SECRET_CHECK', result.stdout)
                 self.assertIn('/configs/vllm/praxis.yaml', result.stdout)
+                self.assertIn('/configs/vllm/praxis.container.in', result.stdout)
+            elif backend == 'remote-vllm':
+                self.assertNotIn('SECRET_CHECK', result.stdout)
+                self.assertIn('/configs/vllm/praxis-remote.yaml', result.stdout)
+                self.assertIn('VLLM_HOST 10.0.1.10 VLLM_PORT 8000', result.stdout)
                 self.assertIn('/configs/vllm/praxis.container.in', result.stdout)
             else:
                 self.assertIn('SECRET_CHECK', result.stdout)
@@ -109,7 +200,8 @@ die() { exit 1; }
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / 'backend'
             source = source.replace('/etc/secure-single-server/inference-backend', str(state))
-            for value, expected in [(None, 'cloud'), ('vllm', 'vllm'), ('cloud', 'cloud'),
+            for value, expected in [(None, 'cloud'), ('vllm', 'vllm'),
+                                    ('remote-vllm', 'remote-vllm'), ('cloud', 'cloud'),
                                     ('vllm\ncloud', None), ('$(touch BAD)', None)]:
                 if value is not None:
                     state.write_text(value)
@@ -120,6 +212,43 @@ die() { exit 1; }
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout.strip(), expected)
+
+    def test_vllm_endpoint_validation_accepts_only_host_port(self):
+        import shlex
+        command = 'set -e; source ' + shlex.quote(str(ROOT / 'scripts/common/lib.sh')) + \
+                  '; validate_vllm_endpoint "$1"'
+        for endpoint in ('10.0.1.10:8000', '172.20.1.10:8000', '192.168.1.10:8000'):
+            result = subprocess.run(['bash', '-c', command, 'validate', endpoint],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        for endpoint in ('http://10.0.1.10:8000', '10.0.1.10', '10.0.1.10:70000',
+                         'bad..host:8000', 'bad/host:8000', 'vllm.internal:8000',
+                         '8.8.8.8:8000', '172.32.1.10:8000', '10.0.1.256:8000',
+                         '10.010.1.10:8000', '10.0.1.10:08000'):
+            result = subprocess.run(['bash', '-c', command, 'validate', endpoint],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_remote_render_validation_does_not_require_python(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            bin_directory = Path(directory)
+            failing_python = bin_directory / 'python3'
+            failing_python.write_text('#!/bin/sh\nexit 99\n')
+            failing_python.chmod(0o755)
+            path = f'{bin_directory}:/usr/bin:/bin'
+            result = subprocess.run(['env', f'PATH={path}', 'bash',
+                                     str(ROOT / 'scripts/vllm/install'), '--render',
+                                     '--remote', '10.0.1.10', 'cpu'],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('PublishPort=10.0.1.10:8000:8000', result.stdout)
+
+            result = subprocess.run(['env', f'PATH={path}', 'bash',
+                                     str(ROOT / 'scripts/vllm/install'), '--render',
+                                     '--remote', '8.8.8.8', 'cpu'],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == '__main__':

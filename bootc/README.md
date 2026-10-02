@@ -166,8 +166,8 @@ These commands run the existing harness scripts as `openshell-svc`. Their
 standalone policies permit provider endpoints. The
 [Praxis integration workflow](../docs/quickstarts/openshell-praxis/README.md)
 is separate and experimental. Codex and OpenClaw reject `--config`; OpenCode
-supports the dedicated local vLLM route described below. The historical cloud
-integration results are separate from the local Qwen qualification.
+supports the dedicated Praxis vLLM route described below. The historical cloud
+integration results are separate from the Qwen qualification.
 No SSH helper forwards provider keys. Standalone bindings must be explicit with
 `--provider NAME`; integrated mode rejects them. Successful boot/build checks do
 not prove a real model task works or that direct provider access is denied.
@@ -178,13 +178,13 @@ runtime state under `/sandbox/.local/share`, which the shipped read-only
 That profile needs a separate runtime-state policy design before it is usable
 with OpenCode. Do not broaden the whole review workspace to work around it.
 
-## Optional local inference
+## Optional inference
 
-Run [Qwen3-8B with containerized vLLM](VLLM.md) in CPU or single-NVIDIA-L4
-mode. It is disabled by default; GPU mode requires a driver/toolkit-equipped
-OS image. An optional local Praxis backend and experimental OpenCode
-configuration are included. Build with `NVIDIA_GPU=1` for the L4 OS image;
-see the vLLM guide for deployment and runtime evidence.
+Run [Qwen3-8B with vLLM on a separate server](VLLM.md). The single server keeps
+the OpenCode → Praxis boundary and receives only a private `RFC1918_IP:PORT` upstream.
+The older co-located CPU/single-L4 mode remains available for compatibility but
+is deprecated for new deployments. Use the [AWS helper](../docs/testing/aws.md#separate-vllm-server)
+to grant and discover the private endpoint.
 
 ## Validation
 

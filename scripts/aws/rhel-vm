@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan/apply one tagged RHEL 9 VM, retry its failed launch, or inspect AWS read-only.
+"""Plan/apply tagged RHEL 9 VMs, grant private vLLM access, or inspect AWS read-only.
 
 Requires AWS CLI v2 and its normal credential chain. Never accepts access keys
 as arguments. Creates only a key-pair import, security group, instance and root
@@ -20,7 +20,8 @@ import uuid
 
 OWNER = "309956199498"
 MANAGED = "secure-single-server-test"
-SCENARIOS = ("all-in-one", "remote-gateway", "openshell-praxis")
+SCENARIOS = ("all-in-one", "remote-gateway", "openshell-praxis", "vllm-server")
+VLLM_PORT = 8000
 CONFIG_KEYS = {"scenario", "inference", "arch", "instance_type", "volume_gib", "ami_id", "ssh_access", "https_access"}
 READS = {"get-caller-identity", "describe-instance-types", "describe-images", "describe-subnets",
          "describe-route-tables", "describe-instances", "describe-security-groups", "describe-volumes",
@@ -145,6 +146,232 @@ def check_identity(aws, account):
     return identity
 
 
+def owned_tags(instance, prefix, scenario):
+    actual = {item["Key"]: item["Value"] for item in instance.get("Tags", [])}
+    expected = {item["Key"]: item["Value"] for item in tags(prefix, scenario)}
+    return all(actual.get(key) == value for key, value in expected.items())
+
+
+def vllm_instances(aws, args):
+    query = filters(**{"tag:ManagedBy": MANAGED, "tag:Scenario": "vllm-server",
+                       "instance-state-name": "running"})
+    if args.vllm_instance_id:
+        if args.vllm_prefix:
+            raise ValueError("choose either --vllm-instance-id or --vllm-prefix, not both")
+        if not re.fullmatch(r"i-[0-9a-f]+", args.vllm_instance_id):
+            raise ValueError("vllm-instance-id must be an EC2 instance ID")
+        response = aws.call("ec2", "describe-instances", instance_ids=[args.vllm_instance_id],
+                            filters=query)
+        return [instance for reservation in response["Reservations"]
+                for instance in reservation.get("Instances", [])]
+    if not args.vllm_prefix or not re.fullmatch(r"[a-z][a-z0-9-]{2,39}", args.vllm_prefix):
+        raise ValueError("vllm-prefix must be the complete 3-40 character resource prefix")
+    response = aws.call("ec2", "describe-instances", filters=query + filters(
+        **{"tag:ResourcePrefix": args.vllm_prefix}))
+    return [instance for reservation in response["Reservations"]
+            for instance in reservation.get("Instances", [])]
+
+
+def check_vllm_ingress_is_source_group_only(groups, client_security_group_id=None):
+    client_has_source_group = False
+    for group in groups:
+        for permission in group.get("IpPermissions", []):
+            protocol = permission.get("IpProtocol")
+            if protocol == "-1":
+                port_matches = True
+            elif protocol == "tcp":
+                port_matches = int(permission.get("FromPort", 0)) <= VLLM_PORT <= int(permission.get("ToPort", 65535))
+            else:
+                continue
+            if not port_matches:
+                continue
+            if (permission.get("IpRanges") or permission.get("Ipv6Ranges")
+                    or permission.get("PrefixListIds") or not permission.get("UserIdGroupPairs")):
+                raise ValueError("vLLM port 8000 ingress must use source security groups")
+            if (protocol != "tcp" or permission.get("FromPort") != VLLM_PORT
+                    or permission.get("ToPort") != VLLM_PORT):
+                raise ValueError("vLLM port 8000 ingress must be an exact TCP source-group rule")
+            source_group_ids = [pair.get("GroupId") for pair in permission.get("UserIdGroupPairs", [])]
+            if client_security_group_id is None or client_security_group_id in source_group_ids:
+                client_has_source_group = True
+    if client_security_group_id is not None and not client_has_source_group:
+        raise ValueError("verified client has no source-group access to vLLM port 8000")
+
+
+def vllm_endpoint(aws, args):
+    check_identity(aws, args.account_id)
+    client_state = launch_state(args.client_state_file, args)
+    if client_state["Scenario"] not in SCENARIOS or client_state["Scenario"] == "vllm-server":
+        raise ValueError("client state must describe a supported non-vLLM single server")
+    if not args.client_vpc_id:
+        raise ValueError("client VPC is required for vLLM endpoint discovery")
+    client = described_instance(aws, client_state, client_state["Scenario"])
+    if client.get("VpcId") != args.client_vpc_id:
+        raise ValueError("verified client VPC does not match the selected client VPC")
+    instances = vllm_instances(aws, args)
+    if len(instances) != 1:
+        raise ValueError(f"expected exactly one running tagged vLLM instance, found {len(instances)}")
+    instance = instances[0]
+    actual_tags = {item["Key"]: item["Value"] for item in instance.get("Tags", [])}
+    if actual_tags.get("ManagedBy") != MANAGED or actual_tags.get("Scenario") != "vllm-server":
+        raise ValueError("instance ownership/scenario tags do not match")
+    private_ip = instance.get("PrivateIpAddress")
+    if not private_ip:
+        raise ValueError("vLLM instance has no private IPv4 address yet; wait and rerun")
+    private_address = ipaddress.ip_address(private_ip)
+    private_networks = (ipaddress.ip_network("10.0.0.0/8"),
+                        ipaddress.ip_network("172.16.0.0/12"),
+                        ipaddress.ip_network("192.168.0.0/16"))
+    if private_address.version != 4 or not any(private_address in network for network in private_networks):
+        raise ValueError("vLLM instance private address must be RFC1918")
+    if instance.get("VpcId") != args.client_vpc_id:
+        raise ValueError("vLLM instance is not in the single server's VPC")
+    expected_prefix = actual_tags.get("ResourcePrefix")
+    if not expected_prefix or not owned_tags(instance, expected_prefix, "vllm-server"):
+        raise ValueError("vLLM instance ownership/scenario tags do not match")
+    group_ids = [group["GroupId"] for group in instance.get("SecurityGroups", [])]
+    groups = aws.call("ec2", "describe-security-groups", group_ids=group_ids)["SecurityGroups"] if group_ids else []
+    if (not group_ids or len(groups) != len(group_ids)
+            or any(not owned_tags(group, expected_prefix, "vllm-server") for group in groups)):
+        raise ValueError("vLLM security-group ownership/scenario tags do not match")
+    check_vllm_ingress_is_source_group_only(groups, client_state["SecurityGroupId"])
+    result = {"InstanceId": instance["InstanceId"], "PrivateIpAddress": private_ip,
+              "VllmEndpoint": f"{private_ip}:{VLLM_PORT}", "VpcId": instance.get("VpcId"),
+              "SecurityGroupIds": group_ids, "Result": "private vLLM endpoint discovered"}
+    print(json.dumps(result, indent=2))
+
+
+def launch_state(path, args, scenario=None):
+    state = json.loads(path.read_text())
+    if not isinstance(state, dict):
+        raise ValueError("incomplete launch journal; expected a JSON object")
+    required = {"AccountId", "Region", "Scenario", "Prefix", "InstanceId",
+                "SecurityGroupId", "Ingress"}
+    if not required <= state.keys():
+        raise ValueError("incomplete launch journal; run verify and inspect the VM first")
+    if state["AccountId"] != args.account_id or state["Region"] != args.region:
+        raise ValueError("state file account/region does not match the explicitly selected target")
+    if scenario and state["Scenario"] != scenario:
+        raise ValueError("state file scenario does not match " + scenario)
+    return state
+
+
+def described_instance(aws, state, scenario):
+    response = aws.call("ec2", "describe-instances", instance_ids=[state["InstanceId"]])
+    instances = [instance for reservation in response.get("Reservations", [])
+                 for instance in reservation.get("Instances", [])]
+    if len(instances) != 1:
+        raise ValueError("launch-journal instance was not found")
+    instance = instances[0]
+    if instance["State"]["Name"] != "running" or not owned_tags(instance, state["Prefix"], scenario):
+        raise ValueError("launch-journal instance is not running or its ownership tags changed")
+    if [group["GroupId"] for group in instance["SecurityGroups"]] != [state["SecurityGroupId"]]:
+        raise ValueError("unexpected attached security groups")
+    return instance
+
+
+def source_group_grant_exists(group, source_group_id):
+    for permission in group.get("IpPermissions", []):
+        protocol = permission.get("IpProtocol")
+        if protocol == "tcp":
+            port_matches = (permission.get("FromPort") == VLLM_PORT and
+                            permission.get("ToPort") == VLLM_PORT)
+        else:
+            continue
+        if not port_matches:
+            continue
+        pairs = permission.get("UserIdGroupPairs", [])
+        if (any(item.get("GroupId") == source_group_id for item in pairs)
+                and not permission.get("IpRanges") and not permission.get("Ipv6Ranges")
+                and not permission.get("PrefixListIds")):
+            return True
+    return False
+
+
+def validate_vllm_grant_state(aws, vllm_state, client_security_group_id):
+    groups = aws.call(
+        "ec2",
+        "describe-security-groups",
+        group_ids=[vllm_state["SecurityGroupId"]],
+    )["SecurityGroups"]
+    if len(groups) != 1 or not owned_tags(groups[0], vllm_state["Prefix"], "vllm-server"):
+        raise ValueError("vLLM security-group ownership/scenario tags do not match")
+
+    group = groups[0]
+    existing = source_group_grant_exists(group, client_security_group_id)
+    validation_state = vllm_state
+    if existing and client_security_group_id not in vllm_state.get("ManagedGrants", []):
+        validation_state = {
+            **vllm_state,
+            "ManagedGrants": [
+                *vllm_state.get("ManagedGrants", []),
+                client_security_group_id,
+            ],
+        }
+
+    check_ingress(group, validation_state)
+    check_vllm_ingress_is_source_group_only(groups)
+    return group, existing
+
+
+def vllm_grant(aws, args):
+    check_identity(aws, args.account_id)
+    client_state = launch_state(args.client_state_file, args)
+    vllm_state = launch_state(args.vllm_state_file, args, "vllm-server")
+    if client_state["Scenario"] not in SCENARIOS or client_state["Scenario"] == "vllm-server":
+        raise ValueError("client state must describe a supported non-vLLM single server")
+    client = described_instance(aws, client_state, client_state["Scenario"])
+    vllm = described_instance(aws, vllm_state, "vllm-server")
+    client_groups = aws.call("ec2", "describe-security-groups",
+                             group_ids=[client_state["SecurityGroupId"]])["SecurityGroups"]
+    if len(client_groups) != 1 or not owned_tags(client_groups[0], client_state["Prefix"], client_state["Scenario"]):
+        raise ValueError("client security-group ownership/scenario tags do not match")
+    check_ingress(client_groups[0], client_state)
+    if client.get("VpcId") != vllm.get("VpcId"):
+        raise ValueError("single server and vLLM server must be in the same VPC")
+    group, existing = validate_vllm_grant_state(aws, vllm_state, client_state["SecurityGroupId"])
+    proposal = {"ClientInstanceId": client["InstanceId"], "VllmInstanceId": vllm["InstanceId"],
+                "ClientSecurityGroupId": client_state["SecurityGroupId"],
+                "VllmSecurityGroupId": vllm_state["SecurityGroupId"], "Port": VLLM_PORT,
+                "Exists": existing, "VpcId": client["VpcId"]}
+    print(json.dumps(proposal, indent=2))
+    if existing:
+        print("Private vLLM access already granted; no AWS resource changed.")
+        if args.apply:
+            record_vllm_grant(vllm_state, args, client_state["SecurityGroupId"])
+        return
+    if not args.apply:
+        print("Read-only grant plan complete: no AWS resource was changed.")
+        return
+    confirmation = f"grant {args.account_id} {args.region} {vllm_state['SecurityGroupId']} {client_state['SecurityGroupId']}"
+    if input("Billable-free security-group rule. Type exactly '" + confirmation + "': ") != confirmation:
+        raise ValueError("confirmation did not match; no changes made")
+    aws.apply = True
+    group, existing = validate_vllm_grant_state(aws, vllm_state, client_state["SecurityGroupId"])
+    if existing:
+        print("Private vLLM access already granted; no AWS resource changed.")
+        record_vllm_grant(vllm_state, args, client_state["SecurityGroupId"])
+        return
+    try:
+        aws.call("ec2", "authorize-security-group-ingress", group_id=vllm_state["SecurityGroupId"],
+                 ip_permissions=[{"IpProtocol": "tcp", "FromPort": VLLM_PORT, "ToPort": VLLM_PORT,
+                                  "UserIdGroupPairs": [{"GroupId": client_state["SecurityGroupId"],
+                                                        "Description": "secure-single-server Praxis client"}]}])
+    except AwsError as error:
+        if error.code != "InvalidPermission.Duplicate":
+            raise
+        validate_vllm_grant_state(aws, vllm_state, client_state["SecurityGroupId"])
+    record_vllm_grant(vllm_state, args, client_state["SecurityGroupId"])
+    print("Granted private TCP 8000 access from the single server security group.")
+
+
+def record_vllm_grant(state, args, client_security_group_id):
+    grants = state.setdefault("ManagedGrants", [])
+    if client_security_group_id not in grants:
+        grants.append(client_security_group_id)
+        update_state(args.vllm_state_file, state)
+
+
 def configure(args):
     """Data-only config, then explicit CLI overrides; never source shell code."""
     settings = {}
@@ -171,7 +398,9 @@ def configure(args):
     if inference not in ("none", "cpu", "gpu") or arch not in ("amd64", "arm64"):
         raise ValueError("inference must be none/cpu/gpu and arch must be amd64/arm64")
     if settings.get("scenario") not in SCENARIOS:
-        raise ValueError("set scenario to all-in-one, remote-gateway or openshell-praxis")
+        raise ValueError("set scenario to all-in-one, remote-gateway, openshell-praxis or vllm-server")
+    if settings.get("scenario") == "vllm-server" and inference == "none":
+        raise ValueError("vllm-server requires the cpu or gpu inference hardware profile")
     if inference != "none" and arch != "amd64":
         raise ValueError("the pinned vLLM CPU/GPU profiles require amd64")
     minimum = {"none": 50, "cpu": 100, "gpu": 200}[inference]
@@ -391,14 +620,31 @@ def retry_state(args):
     return state
 
 
-def check_ingress(group, state):
+def check_ingress(group, state, *, require_managed_grants=True):
+    managed_grants = set(state.get("ManagedGrants", []))
+    observed_grants = set()
     normalized = []
     for permission in group["IpPermissions"]:
-        if permission.get("Ipv6Ranges") or permission.get("UserIdGroupPairs") or permission.get("PrefixListIds"):
+        pairs = permission.get("UserIdGroupPairs", [])
+        if pairs:
+            pair_groups = {item.get("GroupId") for item in pairs}
+            grant_matches = (state.get("Scenario") == "vllm-server" and bool(pair_groups)
+                             and pair_groups <= managed_grants
+                             and permission.get("IpProtocol") == "tcp"
+                             and permission.get("FromPort") == VLLM_PORT
+                             and permission.get("ToPort") == VLLM_PORT)
+            if (grant_matches and not permission.get("IpRanges") and not permission.get("Ipv6Ranges")
+                    and not permission.get("PrefixListIds")):
+                observed_grants.update(pair_groups)
+                continue
+            raise ValueError("unexpected non-IPv4 ingress")
+        if permission.get("Ipv6Ranges") or permission.get("PrefixListIds"):
             raise ValueError("unexpected non-IPv4 ingress")
         normalized.append({key: permission[key] for key in ["IpProtocol", "FromPort", "ToPort", "IpRanges"]})
     if sorted(normalized, key=lambda rule: rule["FromPort"]) != state["Ingress"]:
         raise ValueError("security-group ingress differs from the recorded plan")
+    if require_managed_grants and managed_grants != observed_grants:
+        raise ValueError("managed vLLM grants differ from the recorded journal")
 
 
 def check_owned(resource, state):
@@ -505,7 +751,8 @@ def verify(aws, args):
     if not volume["Encrypted"] or not root["Ebs"]["DeleteOnTermination"] or volume["Size"] < state["VolumeGiB"]:
         raise ValueError("unexpected root-disk encryption, size or deletion policy")
     print(json.dumps({"InstanceId": instance["InstanceId"], "State": instance["State"]["Name"],
-                      "PublicIpAddress": instance.get("PublicIpAddress"), "Scenario": state["Scenario"],
+                      "PublicIpAddress": instance.get("PublicIpAddress"), "VpcId": instance.get("VpcId"),
+                      "Scenario": state["Scenario"],
                       "Inference": state.get("Inference", "none"), "InstanceType": state["InstanceType"],
                       "SshAccess": state.get("SshAccess", "restricted"),
                       "HttpsAccess": state.get("HttpsAccess", "restricted" if state["Scenario"] == "remote-gateway" else "disabled"),
@@ -515,11 +762,19 @@ def verify(aws, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["plan", "apply", "verify", "capacity"], nargs="?", default="plan")
+    parser.add_argument("mode", choices=["plan", "apply", "verify", "capacity", "vllm-endpoint", "vllm-grant"],
+                        nargs="?", default="plan")
     parser.add_argument("--region", required=True)
     parser.add_argument("--account-id", required=True)
     parser.add_argument("--profile")
     parser.add_argument("--state-file", type=Path)
+    parser.add_argument("--client-state-file", type=Path)
+    parser.add_argument("--vllm-state-file", type=Path)
+    parser.add_argument("--vllm-prefix")
+    parser.add_argument("--vllm-instance-id")
+    parser.add_argument("--client-vpc-id")
+    parser.add_argument("--apply", action="store_true",
+                        help="with vllm-grant, require typed confirmation and create the source-group rule")
     parser.add_argument("--config", type=Path, help="JSON VM settings; explicit flags override its values")
     parser.add_argument("--scenario", choices=SCENARIOS)
     parser.add_argument("--inference", choices=["none", "cpu", "gpu"], help="hardware profile, not an application install")
@@ -548,6 +803,17 @@ def main():
         if not args.instance_type or not re.fullmatch(r"[a-z0-9]+\.[a-z0-9]+", args.instance_type) or not args.subnet_id:
             raise ValueError("capacity needs --instance-type and --subnet-id")
         print(json.dumps(capacity_report(aws, args), indent=2))
+        return
+    if args.mode == "vllm-endpoint":
+        if not args.client_state_file or not args.client_vpc_id:
+            raise ValueError("vllm-endpoint needs --client-state-file and --client-vpc-id")
+        vllm_endpoint(aws, args)
+        return
+    if args.mode == "vllm-grant":
+        if not args.client_state_file or not args.vllm_state_file:
+            raise ValueError("vllm-grant needs --client-state-file and --vllm-state-file")
+        with deployment_lock(args.vllm_state_file) if args.apply else nullcontext():
+            vllm_grant(aws, args)
         return
     if not args.state_file:
         parser.error("--state-file is required for plan/apply/verify")

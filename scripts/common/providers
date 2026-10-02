@@ -10,7 +10,7 @@ if [[ "${1:-}" == --help || "$#" == 0 ]]; then
 fi
 require_root
 require_command flock
-exec 9>/run/lock/praxis-gateway.lock
+exec 9>"$(gateway_lock_path "${SERVICE_USER}")"
 flock -n 9 || die 'another gateway installation/provider change is running'
 verify_managed_manifest
 python3 "${SCRIPT_DIR}/provider_manage.py" "$@"

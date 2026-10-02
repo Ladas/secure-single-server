@@ -49,6 +49,15 @@ inference_backend() {
   if [[ -f /etc/secure-single-server/inference-backend ]]; then
     backend="$(cat /etc/secure-single-server/inference-backend)"
   fi
-  case "${backend}" in cloud|vllm) ;; *) die 'invalid inference backend; expected cloud or vllm' ;; esac
+  case "${backend}" in cloud|vllm|remote-vllm) ;; *) die 'invalid inference backend; expected cloud, vllm, or remote-vllm' ;; esac
   printf '%s\n' "${backend}"
+}
+
+inference_vllm_endpoint() {
+  local endpoint
+  [[ "$(inference_backend)" == remote-vllm ]] || die 'remote vLLM endpoint is only valid with the remote-vllm backend'
+  [[ -r /etc/secure-single-server/vllm-endpoint ]] || die 'remote vLLM endpoint is not configured'
+  endpoint="$(cat /etc/secure-single-server/vllm-endpoint)"
+  validate_vllm_endpoint "${endpoint}"
+  printf '%s\n' "${endpoint}"
 }

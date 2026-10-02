@@ -4,11 +4,39 @@ import argparse
 import copy
 import json
 from pathlib import Path
+import re
 
 
-def render(original, *, vllm, openai, anthropic):
+class SingleValueAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest + "_seen", False):
+            parser.error(option_string + " may be given only once")
+        setattr(namespace, self.dest + "_seen", True)
+        setattr(namespace, self.dest, values)
+
+
+def validate_vllm_endpoint(endpoint):
+    match = re.fullmatch(
+        r"((?:0|[1-9]\d{0,2})(?:\.(?:0|[1-9]\d{0,2})){3}):(0|[1-9]\d{0,4})", endpoint)
+    if not match:
+        raise ValueError("vLLM endpoint must be RFC1918_IP:PORT")
+    octets = [int(octet) for octet in match.group(1).split(".")]
+    port = int(match.group(2))
+    if any(octet > 255 for octet in octets) or not 1 <= port <= 65535:
+        raise ValueError("vLLM endpoint must be RFC1918_IP:PORT")
+    first, second = octets[:2]
+    if not (first == 10 or first == 192 and second == 168 or
+            first == 172 and 16 <= second <= 31):
+        raise ValueError("vLLM endpoint host must be an RFC1918 IPv4 address")
+
+
+def render(original, *, vllm, openai, anthropic, vllm_endpoint=""):
     if not (vllm or openai or anthropic):
         raise ValueError("enable at least one provider")
+    if vllm_endpoint and not vllm:
+        raise ValueError("--vllm-endpoint requires the vLLM route")
+    if vllm_endpoint:
+        validate_vllm_endpoint(vllm_endpoint)
     config = copy.deepcopy(original)
     remote = len(config["listeners"]) == 1 and config["listeners"][0]["name"] == "https"
     for chain in config["filter_chains"]:
@@ -65,7 +93,10 @@ def render(original, *, vllm, openai, anthropic):
         if vllm:
             filters.append({"filter": "path_rewrite", "strip_prefix": "/vllm", "conditions": [
                 {"when": {"path_prefix": "/vllm"}}]})
-            upstreams.append({"name": "vllm", "endpoints": ["praxis-vllm:8000"]})
+            upstream = {"name": "vllm", "endpoints": [vllm_endpoint or "praxis-vllm:8000"]}
+            if vllm_endpoint:
+                upstream["http"] = {"authority": vllm_endpoint}
+            upstreams.append(upstream)
         filters.append({"filter": "load_balancer", "clusters": upstreams})
         chain["filters"] = filters
     if vllm:
@@ -78,13 +109,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--vllm", action="store_true")
+    parser.add_argument("--vllm-endpoint", default=None, action=SingleValueAction)
     parser.add_argument("--openai-secret", default="")
     parser.add_argument("--anthropic-secret", default="")
     args = parser.parse_args()
+    if args.vllm_endpoint is not None and not args.vllm_endpoint:
+        parser.error("vllm endpoint must be RFC1918_IP:PORT")
     import yaml
     path = args.directory / "shared-gateway.yaml"
     config = render(yaml.safe_load(path.read_text()), vllm=args.vllm,
-                    openai=bool(args.openai_secret), anthropic=bool(args.anthropic_secret))
+                    openai=bool(args.openai_secret), anthropic=bool(args.anthropic_secret),
+                    vllm_endpoint=args.vllm_endpoint)
     path.write_text(json.dumps(config, indent=2) + "\n")
     unit = args.directory / "praxis.container"
     lines = unit.read_text().splitlines()
@@ -93,6 +128,7 @@ def main():
             lines = [line for line in lines if not (line.startswith("Secret=") and line.endswith("target=" + target))]
     unit.write_text("\n".join(lines) + "\n")
     (args.directory / "providers.json").write_text(json.dumps({"vllm": args.vllm,
+        "vllm_endpoint": args.vllm_endpoint or "",
         "openai_secret": args.openai_secret, "anthropic_secret": args.anthropic_secret}, indent=2) + "\n")
 
 

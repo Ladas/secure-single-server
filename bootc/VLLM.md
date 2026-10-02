@@ -4,11 +4,11 @@ This guide is the implementation half of the story. If you want to understand
 why the layers are separated before enabling them, start with the
 [architecture value walkthrough](../docs/quickstarts/architecture-walkthrough/README.md).
 
-This optional deployment runs `Qwen/Qwen3-8B` in a rootless vLLM container on the
-bootc host. It uses the same pull-before-start, immutable image references,
-Quadlet/systemd lifecycle, and persistent container storage as the other
-workloads. It is disabled by default and works with any harness OS variant.
-CPU and GPU are alternative modes; only one service listens on port 8000.
+The supported topology runs `Qwen/Qwen3-8B` in vLLM on a separate server. The
+bootc single server keeps only OpenShell, Praxis, and the harness, preserving
+the **OpenCode → Praxis → vLLM** boundary without coupling inference resources
+to the single-server host. The older co-located bootc profile remains available
+for compatibility but is deprecated for new deployments.
 
 The configured request path is **OpenCode → Praxis → vLLM**. Local vLLM
 serving and the host Praxis route can be checked independently. The sandbox
@@ -17,20 +17,19 @@ local adapters are not enabled.
 
 ## Host requirements
 
-- CPU: x86_64 with AVX-512, at least 32 GB RAM; plan for 64 GiB to leave room
-  for Praxis, OpenShell, and the harness. This is a starting resource budget,
-  not a measured throughput guarantee. The CPU profile uses BF16, a 4 GiB KV
-  cache, and no explicit CPU affinity/NUMA binding.
+- Separate CPU vLLM server: x86_64 with AVX-512, at least 32 GB RAM, and 64
+  GiB recommended. This is a starting resource budget, not a throughput
+  guarantee. The CPU profile uses BF16, a 4 GiB KV cache, and no explicit CPU
+  affinity/NUMA binding.
 - GPU: exactly one NVIDIA L4, a compatible NVIDIA host driver, and
   `nvidia-ctk` installed in the bootc OS image. The reconciler regenerates CDI
   at boot. Build with `NVIDIA_GPU=1` to include the NVIDIA 580 open driver and
   Container Toolkit. The build compiles the module for the kernel inside the
   image and fails if that kernel cannot be supported. Rebuild after kernel
   updates. Secure Boot with a custom signing key is not configured.
-- Persistent disk: allow space for roughly 16 GB of model weights, both
-  workload images if switching modes, caches, and the existing OS/workloads.
-  Budget at least 100 GiB for CPU or 200 GiB for GPU demonstrations and check
-  free space first; the GPU workload image expands to tens of GiB.
+- Persistent disk on the vLLM server: allow space for roughly 16 GB of model
+  weights, workload images, and caches. Budget at least 100 GiB for CPU or
+  200 GiB for GPU demonstrations and check free space first.
 - First startup needs access to Docker Hub and Hugging Face download endpoints.
   No Hugging Face token is required for this public model.
 
@@ -40,7 +39,40 @@ execution, and tensor parallel size 1. GPU memory utilization is limited to
 disabled by default for predictable demo latency; callers can explicitly
 set `chat_template_kwargs.enable_thinking` to true.
 
-## Enable and inspect
+## Separate AWS server and endpoint discovery
+
+Use the [AWS deployment guide](../docs/testing/aws.md#separate-vllm-server)
+to launch a dedicated tagged vLLM VM, grant TCP 8000 only to the single
+server's security group, and discover its private address. After both VMs are
+in the same VPC, the administrator-side helper prints an `RFC1918_IP:PORT` endpoint;
+no AWS credential or instance profile is placed on the single server.
+
+```console
+source scripts/aws/session.sh
+VLLM_INFO="$(aws_test_vllm_endpoint vllm-server-gpu)" \
+  || printf 'Endpoint discovery failed; inspect the vLLM VM.\n'
+VLLM_ENDPOINT="$(printf '%s' "${VLLM_INFO:-}" | jq -er '.VllmEndpoint')" \
+  || printf 'Endpoint JSON was invalid.\n'
+printf 'Private vLLM endpoint: %s\n' "${VLLM_ENDPOINT:-unknown}"
+```
+
+On the dedicated server, use the mutable RHEL vLLM installer with
+`--remote PRIVATE_IP` so port 8000 binds only to its private AWS address. On
+the booted single server, configure Praxis without changing the OpenShell
+harness policy:
+
+```console
+sudo sss-bootc inference remote-vllm "$VLLM_ENDPOINT"
+sudo sss-bootc inference status
+sudo sss-bootc inference check
+```
+
+Praxis continues listening only on `127.0.0.1:8080`; the sandbox still reaches
+`host.openshell.internal:8080` and has no direct vLLM or cloud-provider egress.
+If the remote server stops, Praxis returns an upstream error rather than
+falling back to a cloud provider.
+
+## Deprecated co-located mode
 
 Build and boot the updated OS using the [bootc instructions](README.md).
 For a GPU image, use a distinct image prefix on the RHEL builder:
@@ -125,9 +157,9 @@ References: [vLLM CPU installation](https://docs.vllm.ai/en/v0.19.0/getting_star
 [Qwen3-8B model card](https://huggingface.co/Qwen/Qwen3-8B),
 and [reference GPU launcher](https://github.com/cooktheryan/openshell-lab/blob/9b35d982bc8fea3f36a4069b1eaa0098fb9fbabd/labs/lab5/configure-vllm.sh).
 
-## Route Praxis to vLLM
+## Route Praxis to the deprecated local backend
 
-After vLLM answers the direct health/model/chat requests, select the local
+After local vLLM answers the direct health/model/chat requests, select the local
 backend on the booted host:
 
 ```console
@@ -157,7 +189,7 @@ backend changes; avoid changing it while a sandbox is in use.
 
 ## OpenCode configuration
 
-Use the **OpenCode** bootc variant. Once local inference is selected, this
+Use the **OpenCode** bootc variant. Once either vLLM backend is selected, this
 command automatically selects the Qwen3-8B Praxis provider and dedicated dev
 policy, rejecting a direct `--provider` or custom `--config` override:
 

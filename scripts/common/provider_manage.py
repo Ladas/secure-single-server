@@ -15,7 +15,7 @@ import tempfile
 import time
 import uuid
 
-from provider_config import render
+from provider_config import SingleValueAction, render, validate_vllm_endpoint
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = Path(os.environ.get("PRAXIS_CONFIG_DIR", "/etc/praxis"))
@@ -34,7 +34,8 @@ def updated_config(template, installed, previous, selected, *, legacy=False):
     """Never reset settings from a different checkout during a provider change."""
     def configured(state):
         return render(template, vllm=state["vllm"], openai=bool(state["openai_secret"]),
-                      anthropic=bool(state["anthropic_secret"]))
+                      anthropic=bool(state["anthropic_secret"]),
+                      vllm_endpoint=state.get("vllm_endpoint", ""))
 
     expected = template if legacy else configured(previous)
     if installed != expected:
@@ -124,6 +125,9 @@ def main():
     parser.add_argument("action", choices=("show", "enable", "disable"))
     parser.add_argument("provider", nargs="?", choices=("vllm", "openai", "anthropic"))
     parser.add_argument("--secret", help="use an existing secret NAME; omit to enter a new cloud key at a hidden prompt")
+    parser.add_argument("--vllm-endpoint",
+                        help="enable the separate-server route with RFC1918_IP:PORT; omit for deprecated co-located mode",
+                        action=SingleValueAction)
     args = parser.parse_args()
     if args.action != "show" and not args.provider:
         parser.error("enable/disable requires a provider")
@@ -131,6 +135,15 @@ def main():
         parser.error("--secret applies only when enabling OpenAI/Anthropic")
     if args.secret and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", args.secret):
         parser.error("invalid secret name")
+    if args.vllm_endpoint is not None and (args.action != "enable" or args.provider != "vllm"):
+        parser.error("--vllm-endpoint applies only when enabling vllm")
+    if args.vllm_endpoint is not None:
+        if not args.vllm_endpoint:
+            parser.error("vllm endpoint must be RFC1918_IP:PORT")
+        try:
+            validate_vllm_endpoint(args.vllm_endpoint)
+        except ValueError as error:
+            parser.error(str(error))
     account = pwd.getpwnam(os.environ.get("PRAXIS_SERVICE_USER", "praxis-svc"))
     profile = (CONFIG / "shared-gateway.profile").read_text().strip()
     scenario = (CONFIG / "gateway.scenario").read_text().strip()
@@ -138,7 +151,7 @@ def main():
         parser.error("optional providers require all-in-one/remote-gateway with memory/valkey")
     unit_path = Path(f"/etc/containers/systemd/users/{account.pw_uid}/praxis.container")
     unit = unit_path.read_text()
-    state = {"vllm": False, "openai_secret": "", "anthropic_secret": ""}
+    state = {"vllm": False, "vllm_endpoint": "", "openai_secret": "", "anthropic_secret": ""}
     for provider in ("openai", "anthropic"):
         matches = re.findall(r"^Secret=([^,\n]+),type=env,target=" + provider.upper() + r"_API_KEY$", unit, re.M)
         if matches:
@@ -146,8 +159,11 @@ def main():
     state_file = CONFIG / "providers.json"
     if state_file.exists():
         stored = json.loads(state_file.read_text())
-        if set(stored) != set(state) or any(stored[p] != state[p] for p in ("openai_secret", "anthropic_secret")):
+        legacy_state = set(state) - {"vllm_endpoint"}
+        if set(stored) not in (set(state), legacy_state) or any(
+                stored[p] != state[p] for p in ("openai_secret", "anthropic_secret")):
             raise ValueError("provider state differs from the installed secret references")
+        stored.setdefault("vllm_endpoint", "")
         state = stored
     if args.action == "show":
         print(json.dumps(state, indent=2))
@@ -156,6 +172,7 @@ def main():
     version = None
     if args.provider == "vllm":
         state["vllm"] = args.action == "enable"
+        state["vllm_endpoint"] = args.vllm_endpoint or "" if args.action == "enable" else ""
     else:
         if args.action == "enable":
             if not args.secret:

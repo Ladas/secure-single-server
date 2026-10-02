@@ -87,6 +87,15 @@ service_home() {
   getent passwd "${SERVICE_USER}" | awk -F: '{print $6}'
 }
 
+vllm_uses_praxis_network() {
+  local root="${1:-/}" uid="${2:-}" unit state
+  [[ -n "${uid}" ]] || uid="$(service_uid)"
+  unit="${root}/etc/containers/systemd/users/${uid}/praxis-vllm.container"
+  state="${root}/etc/praxis-vllm"
+  [[ -f "${unit}" && -f "${state}/manifest" ]] || return 1
+  grep -q '^Network=praxis.network$' "${unit}"
+}
+
 as_service() {
   local uid home
   uid="$(service_uid)"
@@ -108,6 +117,22 @@ validate_secret_name() {
 
 validate_model_name() {
   [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._:/-]*$ ]] || die "invalid model name: $1"
+}
+
+validate_vllm_endpoint() {
+  local host port octet
+  [[ "$1" =~ ^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2}):(0|[1-9][0-9]{0,4})$ ]] ||
+    die "vLLM endpoint must be RFC1918_IP:PORT"
+  host="${1%:*}"
+  port="${1##*:}"
+  for octet in "${BASH_REMATCH[@]:1:4}"; do
+    (( 10#${octet} <= 255 )) || die "invalid vLLM endpoint host"
+  done
+  if [[ "${host}" != 10.* && "${host}" != 192.168.* &&
+        ! "${host}" =~ ^172\.(1[6-9]|2[0-9]|3[01])\. ]]; then
+    die "vLLM endpoint host must be an RFC1918 IPv4 address"
+  fi
+  (( 10#${port} >= 1 && 10#${port} <= 65535 )) || die "invalid vLLM endpoint port"
 }
 
 validate_digest_image() {

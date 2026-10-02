@@ -126,6 +126,15 @@ class PlanTest(unittest.TestCase):
         vm.configure(args)
         self.assertEqual(args.instance_type, "m7g.2xlarge")
 
+    def test_vllm_server_scenario_requires_inference_hardware(self):
+        for inference, instance, disk in (("cpu", "m7i.4xlarge", 100),
+                                          ("gpu", "g6.2xlarge", 200)):
+            args = self.settings(scenario="vllm-server", inference=inference)
+            vm.configure(args)
+            self.assertEqual((args.instance_type, args.volume_gib), (instance, disk))
+        with self.assertRaisesRegex(ValueError, "vllm-server requires"):
+            vm.configure(self.settings(scenario="vllm-server", inference="none"))
+
     def test_invalid_config_is_rejected_before_cloud_calls(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "vm.json"
@@ -417,11 +426,340 @@ class PlanTest(unittest.TestCase):
         self.assertEqual([rule["FromPort"] for rule in vm.ingress("all-in-one", "192.0.2.1/32")], [22])
         self.assertEqual([rule["FromPort"] for rule in vm.ingress("remote-gateway", "192.0.2.1/32")], [22, 8443])
         self.assertEqual([rule["FromPort"] for rule in vm.ingress("openshell-praxis", "192.0.2.1/32")], [22])
+        self.assertEqual([rule["FromPort"] for rule in vm.ingress("vllm-server", "192.0.2.1/32")], [22])
         with self.assertRaises(ValueError):
             vm.ingress("typo", "192.0.2.1/32")
         for bad in ["0.0.0.0/0", "192.0.2.0/24", "::/0", "bad"]:
             with self.assertRaises(ValueError):
                 vm.ingress("remote-gateway", bad)
+
+    def endpoint_args(self, **overrides):
+        values = {"account_id": "123456789012", "region": "eu-central-1",
+                  "vllm_prefix": "gateway-test-vllm-server", "vllm_instance_id": None,
+                  "client_vpc_id": "vpc-test", "client_state_file": None}
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    def test_vllm_endpoint_discovers_one_private_address_and_requires_source_group_ingress(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client_state = {"AccountId": "123456789012", "Region": "eu-central-1",
+                            "Prefix": "gateway-test-all-in-one", "Scenario": "all-in-one",
+                            "InstanceId": "i-client", "SecurityGroupId": "sg-client",
+                            "Ingress": vm.ingress("all-in-one", "192.0.2.1/32")}
+            client_state_path = Path(directory) / "client.json"
+            vm.save_state(client_state_path, client_state)
+            client = {"InstanceId": "i-client", "State": {"Name": "running"}, "VpcId": "vpc-test",
+                      "Tags": vm.tags(client_state["Prefix"], client_state["Scenario"]),
+                      "SecurityGroups": [{"GroupId": "sg-client"}]}
+            instance = {"InstanceId": "i-vllm", "PrivateIpAddress": "10.0.1.10", "VpcId": "vpc-test",
+                        "Tags": vm.tags("gateway-test-vllm-server", "vllm-server"),
+                        "SecurityGroups": [{"GroupId": "sg-vllm"}]}
+            group = {"GroupId": "sg-vllm", "IpPermissions": [{"IpProtocol": "tcp", "FromPort": 8000,
+                        "ToPort": 8000, "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            group["Tags"] = vm.tags("gateway-test-vllm-server", "vllm-server")
+            identity = {"Account": "123456789012", "Arn": "arn:aws:iam::123456789012:user/test"}
+            client_reply = {"Reservations": [{"Instances": [client]}]}
+            vllm_reply = {"Reservations": [{"Instances": [instance]}]}
+            replies = [identity, client_reply, vllm_reply, {"SecurityGroups": [group]}]
+            aws = vm.Aws("eu-central-1", None, False)
+            endpoint_args = self.endpoint_args(client_state_file=client_state_path)
+            with patch.object(aws, "call", side_effect=replies) as calls, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                vm.vllm_endpoint(aws, endpoint_args)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["VllmEndpoint"], "10.0.1.10:8000")
+            self.assertEqual(result["VpcId"], "vpc-test")
+            self.assertEqual([call.args[1] for call in calls.call_args_list],
+                             ["get-caller-identity", "describe-instances", "describe-instances",
+                              "describe-security-groups"])
+            self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
+            public_groups = []
+            for permission in ({"IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+                               {"Ipv6Ranges": [{"CidrIpv6": "::/0"}]},
+                               {"IpRanges": [{"CidrIp": "0.0.0.0/1"}, {"CidrIp": "128.0.0.0/1"}]},
+                               {"Ipv6Ranges": [{"CidrIpv6": "2600::/23"}]},
+                               {"IpRanges": [{"CidrIp": "10.0.0.0/8"}]},
+                               {"IpRanges": [{"CidrIp": "172.16.0.0/12"}]},
+                               {"IpRanges": [{"CidrIp": "192.168.0.0/16"}]},
+                               {"Ipv6Ranges": [{"CidrIpv6": "fc00::/7"}]},
+                               {"PrefixListIds": [{"PrefixListId": "pl-public"}]}):
+                bad_group = copy.deepcopy(group)
+                bad_group["IpPermissions"][0]["UserIdGroupPairs"] = []
+                bad_group["IpPermissions"][0].pop("IpRanges", None)
+                bad_group["IpPermissions"][0].pop("Ipv6Ranges", None)
+                bad_group["IpPermissions"][0].update(permission)
+                public_groups.append(bad_group)
+            for bad_group in public_groups:
+                with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
+                                                            {"SecurityGroups": [bad_group]}]), \
+                        self.assertRaisesRegex(ValueError, "port 8000 ingress"):
+                    vm.vllm_endpoint(aws, endpoint_args)
+
+            all_protocol_group = copy.deepcopy(group)
+            all_protocol_group["IpPermissions"] = [{"IpProtocol": "-1",
+                                                    "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]
+            with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
+                                                        {"SecurityGroups": [all_protocol_group]}]), \
+                    self.assertRaisesRegex(ValueError, "exact TCP source-group rule"):
+                vm.vllm_endpoint(aws, endpoint_args)
+
+            missing_prefix_instance = copy.deepcopy(instance)
+            missing_prefix_instance["Tags"] = [tag for tag in missing_prefix_instance["Tags"]
+                                               if tag["Key"] != "ResourcePrefix"]
+            with patch.object(aws, "call", side_effect=[identity, client_reply,
+                                                        {"Reservations": [{"Instances": [missing_prefix_instance]}]}]), \
+                    self.assertRaisesRegex(ValueError, "instance ownership"):
+                vm.vllm_endpoint(aws, endpoint_args)
+
+            unmanaged_group = copy.deepcopy(group)
+            unmanaged_group["Tags"] = vm.tags("attacker", "vllm-server")
+            with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
+                                                        {"SecurityGroups": [unmanaged_group]}]), \
+                    self.assertRaisesRegex(ValueError, "security-group ownership"):
+                vm.vllm_endpoint(aws, endpoint_args)
+
+            other_client_group = copy.deepcopy(group)
+            other_client_group["IpPermissions"][0]["UserIdGroupPairs"] = [{"GroupId": "sg-other"}]
+            with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
+                                                        {"SecurityGroups": [other_client_group]}]), \
+                    self.assertRaisesRegex(ValueError, "verified client has no source-group access"):
+                vm.vllm_endpoint(aws, endpoint_args)
+
+            with patch.object(aws, "call", side_effect=[identity, client_reply, {"Reservations": []}]), \
+                    self.assertRaisesRegex(ValueError, "exactly one"):
+                vm.vllm_endpoint(aws, endpoint_args)
+            non_rfc1918_instance = copy.deepcopy(instance)
+            non_rfc1918_instance["PrivateIpAddress"] = "100.64.1.10"
+            with patch.object(aws, "call", side_effect=[identity, client_reply,
+                                                        {"Reservations": [{"Instances": [non_rfc1918_instance]}]}]), \
+                    self.assertRaisesRegex(ValueError, "RFC1918"):
+                vm.vllm_endpoint(aws, endpoint_args)
+            other_vpc_instance = copy.deepcopy(instance)
+            other_vpc_instance["VpcId"] = "vpc-other"
+            with patch.object(aws, "call", side_effect=[identity, client_reply,
+                                                        {"Reservations": [{"Instances": [other_vpc_instance]}]}]), \
+                    self.assertRaisesRegex(ValueError, "vLLM instance is not"):
+                vm.vllm_endpoint(aws, endpoint_args)
+
+    def test_vllm_grant_uses_source_group_and_requires_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            client_state = {"AccountId": "123456789012", "Region": "eu-central-1",
+                            "Prefix": "gateway-test-all-in-one", "Scenario": "all-in-one",
+                            "InstanceId": "i-client", "SecurityGroupId": "sg-client",
+                            "Ingress": vm.ingress("all-in-one", "192.0.2.1/32")}
+            vllm_state = {"AccountId": "123456789012", "Region": "eu-central-1",
+                          "Prefix": "gateway-test-vllm-server", "Scenario": "vllm-server",
+                          "InstanceId": "i-vllm", "SecurityGroupId": "sg-vllm",
+                          "Ingress": vm.ingress("vllm-server", "192.0.2.1/32")}
+            client_state_path = root / "client.json"
+            vllm_state_path = root / "vllm.json"
+            vm.save_state(client_state_path, client_state)
+            vm.save_state(vllm_state_path, vllm_state)
+            client = {"InstanceId": "i-client", "State": {"Name": "running"}, "VpcId": "vpc-test",
+                      "Tags": vm.tags(client_state["Prefix"], client_state["Scenario"]),
+                      "SecurityGroups": [{"GroupId": "sg-client"}]}
+            vllm = {"InstanceId": "i-vllm", "State": {"Name": "running"}, "VpcId": "vpc-test",
+                    "Tags": vm.tags(vllm_state["Prefix"], vllm_state["Scenario"]),
+                    "SecurityGroups": [{"GroupId": "sg-vllm"}]}
+            client_group = {"GroupId": "sg-client"}
+            client_group["Tags"] = vm.tags(client_state["Prefix"], client_state["Scenario"])
+            client_group["IpPermissions"] = copy.deepcopy(client_state["Ingress"])
+            group = {"GroupId": "sg-vllm", "IpPermissions": []}
+            group["Tags"] = vm.tags(vllm_state["Prefix"], vllm_state["Scenario"])
+            group["IpPermissions"] = copy.deepcopy(vllm_state["Ingress"])
+            identity = {"Account": "123456789012", "Arn": "arn:aws:iam::123456789012:user/test"}
+            args = SimpleNamespace(account_id="123456789012", region="eu-central-1",
+                                   client_state_file=root / "client.json",
+                                   vllm_state_file=root / "vllm.json", apply=False)
+            aws = vm.Aws(args.region, None, False)
+            tampered_client_state = {**client_state, "Scenario": "attacker"}
+            tampered_client_path = root / "tampered-client.json"
+            vm.save_state(tampered_client_path, tampered_client_state)
+            tampered_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                            client_state_file=tampered_client_path,
+                                            vllm_state_file=vllm_state_path, apply=True)
+            with patch.object(aws, "call", return_value=identity) as calls:
+                with self.assertRaisesRegex(ValueError, "supported non-vLLM single server"):
+                    vm.vllm_grant(aws, tampered_args)
+            calls.assert_called_once()
+
+            client_reply = {"Reservations": [{"Instances": [client]}]}
+            vllm_reply = {"Reservations": [{"Instances": [vllm]}]}
+            client_group_reply = {"SecurityGroups": [client_group]}
+            vllm_group_reply = {"SecurityGroups": [group]}
+            replies = [identity, client_reply, vllm_reply, client_group_reply, vllm_group_reply]
+            tampered_client_group = copy.deepcopy(client_group)
+            tampered_client_group["Tags"] = vm.tags("attacker", client_state["Scenario"])
+            with patch.object(aws, "call", side_effect=[identity, client_reply, vllm_reply,
+                                                        {"SecurityGroups": [tampered_client_group]}]) as calls:
+                with self.assertRaisesRegex(ValueError, "client security-group ownership"):
+                    vm.vllm_grant(aws, args)
+            self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
+            with patch.object(aws, "call", side_effect=replies) as calls, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                vm.vllm_grant(aws, args)
+            self.assertIn('"Exists": false', output.getvalue())
+            self.assertEqual([call.args[1] for call in calls.call_args_list],
+                             ["get-caller-identity", "describe-instances", "describe-instances",
+                              "describe-security-groups", "describe-security-groups"])
+
+            wrong_group = copy.deepcopy(group)
+            wrong_group["Tags"] = vm.tags(client_state["Prefix"], client_state["Scenario"])
+            with patch.object(aws, "call", side_effect=[*replies[:4],
+                                                        {"SecurityGroups": [wrong_group]}]), \
+                    self.assertRaisesRegex(ValueError, "security-group ownership"):
+                vm.vllm_grant(aws, args)
+
+            args.apply = True
+            aws = vm.Aws(args.region, None, False)
+            confirmation = "grant 123456789012 eu-central-1 sg-vllm sg-client"
+            with patch.object(aws, "call", side_effect=[*replies,
+                                                        {"SecurityGroups": [group]}, {}]) as calls, \
+                    patch("builtins.input", return_value=confirmation), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                vm.vllm_grant(aws, args)
+            mutation = calls.call_args_list[-1]
+            self.assertEqual(mutation.args[1], "authorize-security-group-ingress")
+            self.assertEqual(mutation.kwargs["group_id"], "sg-vllm")
+            self.assertEqual(mutation.kwargs["ip_permissions"][0]["UserIdGroupPairs"],
+                             [{"GroupId": "sg-client",
+                               "Description": "secure-single-server Praxis client"}])
+            self.assertEqual(json.loads(vllm_state_path.read_text()).get("ManagedGrants"), ["sg-client"])
+
+            rule_group = {"GroupId": "sg-vllm", "IpPermissions": [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                 "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            rule_group["Tags"] = group["Tags"]
+            duplicate = vm.AwsError("InvalidPermission.Duplicate", "rule already exists")
+            vm.update_state(vllm_state_path, vllm_state)
+            with patch.object(aws, "call", side_effect=[*replies,
+                                                        {"SecurityGroups": [group]},
+                                                        duplicate,
+                                                        {"SecurityGroups": [rule_group]}]) as calls, \
+                    patch("builtins.input", return_value=confirmation), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                vm.vllm_grant(aws, args)
+            self.assertEqual(calls.call_args_list[-1].args[1], "describe-security-groups")
+            self.assertIn("Granted private TCP 8000 access", output.getvalue())
+            self.assertEqual(json.loads(vllm_state_path.read_text()).get("ManagedGrants"), ["sg-client"])
+            vm.update_state(vllm_state_path, vllm_state)
+
+            stale_state = dict(vllm_state)
+            stale_state["ManagedGrants"] = ["sg-client"]
+            stale_path = root / "stale.json"
+            vm.save_state(stale_path, stale_state)
+            stale_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                         client_state_file=client_state_path,
+                                         vllm_state_file=stale_path, apply=True)
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2], client_group_reply,
+                                                        {"SecurityGroups": [group]}]) as calls, \
+                    patch("builtins.input", return_value=confirmation), \
+                    self.assertRaisesRegex(ValueError, "managed vLLM grants differ"):
+                vm.vllm_grant(aws, stale_args)
+            self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
+            drifted_group = copy.deepcopy(group)
+            drifted_group["Tags"] = vm.tags("attacker", "vllm-server")
+            drift_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                         client_state_file=client_state_path,
+                                         vllm_state_file=vllm_state_path, apply=True)
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2], client_group_reply,
+                                                        {"SecurityGroups": [group]},
+                                                        {"SecurityGroups": [drifted_group]}]) as calls, \
+                    patch("builtins.input", return_value=confirmation), \
+                    self.assertRaisesRegex(ValueError, "security-group ownership"):
+                vm.vllm_grant(aws, drift_args)
+            self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+
+            public_group = copy.deepcopy(group)
+            public_group["IpPermissions"] = [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": vm.VLLM_PORT, "ToPort": vm.VLLM_PORT,
+                 "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]
+            public_state = {**vllm_state,
+                            "Ingress": copy.deepcopy(public_group["IpPermissions"])}
+            with patch.object(aws, "call", return_value={"SecurityGroups": [public_group]}):
+                with self.assertRaisesRegex(ValueError, "port 8000 ingress"):
+                    vm.validate_vllm_grant_state(aws, public_state, "sg-client")
+
+            all_protocol_group = {"GroupId": "sg-vllm", "IpPermissions": [{"IpProtocol": "-1",
+                                    "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            self.assertFalse(vm.source_group_grant_exists(all_protocol_group, "sg-client"))
+            all_protocol_state = {**vllm_state, "ManagedGrants": ["sg-client"]}
+            with self.assertRaisesRegex(ValueError, "ingress"):
+                vm.check_ingress(all_protocol_group, all_protocol_state)
+
+            broad_private_group = {"GroupId": "sg-vllm", "IpPermissions": [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                 "IpRanges": [{"CidrIp": "10.0.0.0/8"}]}]}
+            with self.assertRaisesRegex(ValueError, "ingress differs"):
+                vm.check_ingress(broad_private_group, vllm_state)
+            broad_private_group["Tags"] = group["Tags"]
+            broad_private_state = {**vllm_state, "Ingress": copy.deepcopy(broad_private_group["IpPermissions"])}
+            with patch.object(aws, "call", return_value={"SecurityGroups": [broad_private_group]}):
+                with self.assertRaisesRegex(ValueError, "port 8000 ingress"):
+                    vm.validate_vllm_grant_state(aws, broad_private_state, "sg-client")
+
+            extra_group_state = {**vllm_state, "ManagedGrants": ["sg-client"]}
+            extra_group_rule = {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                                "UserIdGroupPairs": [{"GroupId": "sg-client"}, {"GroupId": "sg-other"}]}
+            extra_group = {"GroupId": "sg-vllm", "IpPermissions": [
+                *vllm_state["Ingress"], extra_group_rule]}
+            with self.assertRaisesRegex(ValueError, "unexpected non-IPv4 ingress"):
+                vm.check_ingress(extra_group, extra_group_state)
+            tracked_group_state = {**vllm_state, "ManagedGrants": ["sg-client", "sg-other"]}
+            vm.check_ingress(extra_group, tracked_group_state)
+
+            missing_grant_state = {**vllm_state, "ManagedGrants": ["sg-client", "sg-other"]}
+            missing_grant_group = {"GroupId": "sg-vllm", "IpPermissions": [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                 "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            with self.assertRaisesRegex(ValueError, "managed vLLM grants differ"):
+                vm.check_ingress(missing_grant_group, missing_grant_state)
+
+            missing_journal_state = dict(vllm_state)
+            missing_journal_path = root / "missing-journal.json"
+            vm.save_state(missing_journal_path, missing_journal_state)
+            missing_journal_group = {"GroupId": "sg-vllm", "Tags": group["Tags"], "IpPermissions": [
+                *vllm_state["Ingress"],
+                {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                 "UserIdGroupPairs": [{"GroupId": "sg-client"}]}]}
+            missing_journal_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                                   client_state_file=client_state_path,
+                                                   vllm_state_file=missing_journal_path, apply=True)
+            with patch.object(aws, "call", side_effect=[identity, replies[1], replies[2], client_group_reply,
+                                                        {"SecurityGroups": [missing_journal_group]}]), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                vm.vllm_grant(aws, missing_journal_args)
+            self.assertIn("already granted", output.getvalue())
+            self.assertEqual(json.loads(missing_journal_path.read_text())["ManagedGrants"], ["sg-client"])
+
+            malformed = root / "malformed.json"
+            malformed.write_text("[]")
+            malformed_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                             client_state_file=malformed)
+            with self.assertRaisesRegex(ValueError, "expected a JSON object"):
+                vm.launch_state(malformed, malformed_args)
+
+            incomplete = root / "incomplete.json"
+            incomplete.write_text(json.dumps({key: value for key, value in client_state.items()
+                                               if key != "Prefix"}))
+            incomplete_args = SimpleNamespace(account_id=args.account_id, region=args.region,
+                                              client_state_file=incomplete)
+            with self.assertRaisesRegex(ValueError, "incomplete launch journal"):
+                vm.launch_state(incomplete, incomplete_args)
+
+            aws = vm.Aws(args.region, None, False)
+            with patch.object(aws, "call", return_value={"Reservations": []}) as calls:
+                with self.assertRaisesRegex(ValueError, "instance was not found"):
+                    vm.described_instance(aws, client_state, client_state["Scenario"])
+                calls.assert_called_once()
 
     def test_missing_public_key_fails_before_aws_calls(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -583,6 +921,23 @@ class PlanTest(unittest.TestCase):
             with patch.object(aws, "call", side_effect=responses) as calls, contextlib.redirect_stdout(io.StringIO()):
                 vm.verify(aws, args)
                 self.assertTrue(all(call.args[1] in vm.READS for call in calls.call_args_list))
+            state["ManagedGrants"] = ["sg-client"]
+            vm.update_state(args.state_file, state)
+            managed_rule = {"IpProtocol": "tcp", "FromPort": 8000, "ToPort": 8000,
+                            "UserIdGroupPairs": [{"GroupId": "sg-client"}]}
+            responses[3]["SecurityGroups"][0]["IpPermissions"].append(managed_rule)
+            with patch.object(aws, "call", side_effect=responses), self.assertRaisesRegex(ValueError, "ingress"):
+                vm.verify(aws, args)
+            vllm_grant_state = {**state, "Scenario": "vllm-server",
+                                "Ingress": vm.ingress("vllm-server", "192.0.2.1/32")}
+            vm.check_ingress({"IpPermissions": [*vllm_grant_state["Ingress"], managed_rule]},
+                             vllm_grant_state)
+            managed_rule["UserIdGroupPairs"] = [{"GroupId": "sg-unrelated"}]
+            with patch.object(aws, "call", side_effect=responses), self.assertRaisesRegex(ValueError, "ingress"):
+                vm.verify(aws, args)
+            responses[3]["SecurityGroups"][0]["IpPermissions"] = copy.deepcopy(state["Ingress"])
+            del state["ManagedGrants"]
+            vm.update_state(args.state_file, state)
             # Public SSH must remain verifiable without accepting public HTTPS drift.
             state["SshAccess"] = "public"
             state["Ingress"] = vm.ingress("remote-gateway", "192.0.2.1/32", ssh_access="public")
