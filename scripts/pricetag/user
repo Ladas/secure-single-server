@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Register a spending identity and issue/rotate its JWT after administrator SSH."""
+import argparse
+import hashlib
+import http.cookiejar
+import json
+import math
+import os
+from pathlib import Path
+import re
+import ssl
+import subprocess
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def private(path):
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+        raise ValueError(f'{path}: use a private regular file with mode 0600 or 0400')
+    return path.read_text().strip()
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--subject', required=True)
+    p.add_argument('--name', help='display name when creating a new person')
+    p.add_argument('--monthly-usd', type=float, help='optional per-person override; renewal otherwise leaves it unchanged')
+    p.add_argument('--rotate', action='store_true', help='replace the existing token for this subject')
+    p.add_argument('--registry', type=Path, default=Path('/etc/praxis-pricetag/gateway/users.json'))
+    p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--gateway', default='https://localhost:8443')
+    p.add_argument('--ca', type=Path, default=Path('/etc/praxis-pricetag/ca.pem'))
+    p.add_argument('--key', type=Path, default=Path('/root/pricetag-admin/issuer/private.pem'))
+    p.add_argument('--admin-token', type=Path, default=Path('/root/pricetag-admin/admin.jwt'))
+    args = p.parse_args()
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}', args.subject):
+        p.error('invalid subject')
+    if args.monthly_usd is not None and (not math.isfinite(args.monthly_usd) or not 0 < args.monthly_usd <= 10000):
+        p.error('monthly-usd must be greater than zero and at most 10000')
+    endpoint = urllib.parse.urlsplit(args.gateway)
+    if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment or endpoint.path not in ('', '/'):
+        p.error('gateway must be an HTTPS origin')
+    if args.output.exists() or args.output.is_symlink():
+        p.error('use a new token output path; existing credentials are never overwritten')
+    private(args.key)
+    token = private(args.admin_token)
+    context = ssl.create_default_context(cafile=str(args.ca))
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
+                                         urllib.request.HTTPCookieProcessor(jar),
+                                         urllib.request.HTTPSHandler(context=context))
+
+    login = urllib.request.Request(args.gateway.rstrip('/') + '/login',
+        data=urllib.parse.urlencode({'api_key': token}).encode(),
+        headers={'Content-Type': 'application/x-www-form-urlencoded', 'Origin': args.gateway.rstrip('/')})
+    try:
+        opener.open(login, timeout=15)
+    except urllib.error.HTTPError as error:
+        if error.code != 302 or not any(cookie.name == 'metering_session' for cookie in jar):
+            raise ValueError('administrator dashboard login failed') from None
+
+    def api(path, body=None, method=None):
+        payload = None if body is None else json.dumps(body).encode()
+        req = urllib.request.Request(args.gateway.rstrip('/') + path, data=payload, method=method,
+            headers={'Origin': args.gateway.rstrip('/'), 'Content-Type': 'application/json'})
+        with opener.open(req, timeout=15) as response:
+            return json.load(response)
+
+    identities = api('/api/v1/admin/identities')
+    matches = [row for row in identities if row['username'] == args.subject]
+    if len(matches) > 1:
+        raise ValueError('ambiguous existing identity; review the directory')
+    if matches:
+        slug = matches[0]['person_slug']
+    else:
+        slug = 'jwt_' + hashlib.sha256(args.subject.encode()).hexdigest()[:24]
+        try:
+            api('/api/v1/admin/people/' + slug)
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+            created = api('/api/v1/admin/people', {'slug': slug, 'full_name': args.name or args.subject})
+            slug = created['slug']
+        api('/api/v1/admin/identities', {'username': args.subject, 'person_slug': slug})
+    if args.monthly_usd is not None:
+        api('/api/v1/admin/quota/overrides', {'scope': 'user', 'principal': slug,
+            'monthly_usd': args.monthly_usd}, 'PUT')
+    os.umask(0o077)
+    subprocess.run([str(ROOT / 'scripts/pricetag/credentials'), 'rotate' if args.rotate else 'issue',
+        '--key', str(args.key), '--registry', str(args.registry),
+        '--subject', args.subject, '--output', str(args.output)], check=True)
+    print(f'Credential saved to {args.output}. Subject and spending history retained: {args.subject}')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except urllib.error.HTTPError as error:
+        raise SystemExit(f'Metering administration returned HTTP {error.code}; no credential issued') from None
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit(str(error)) from None

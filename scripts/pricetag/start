@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Activate the already prepared PriceTag deployment without changing other services.
+set -euo pipefail
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/common/lib.sh
+source "${SCRIPT_DIR}/../common/lib.sh"
+require_root
+readonly DEPLOY_DIR=/etc/praxis-pricetag
+readonly PROBE_IMAGE=docker.io/library/python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
+[[ -f "${DEPLOY_DIR}/bootstrap.sql" ]] || die 'run scripts/pricetag/prepare.py first'
+uid="$(service_uid)"
+units="/etc/containers/systemd/users/${uid}"
+install -d -m 0755 "${units}"
+for unit in pricetag.network pricetag-db.volume pricetag-db.container pricetag-metering.container pricetag-gateway.container; do
+  install -m 0644 "${DEPLOY_DIR}/quadlets/${unit}" "${units}/${unit}"
+done
+if [[ -f "${DEPLOY_DIR}/quadlets/pricetag-provider.container" ]]; then
+  install -m 0644 "${DEPLOY_DIR}/quadlets/pricetag-provider.container" "${units}/pricetag-provider.container"
+fi
+semanage fcontext -a -t container_file_t '/etc/praxis-pricetag(/.*)?' 2>/dev/null ||
+  semanage fcontext -m -t container_file_t '/etc/praxis-pricetag(/.*)?'
+restorecon -R "${DEPLOY_DIR}"
+as_service systemctl --user daemon-reload
+as_service systemctl --user start pricetag-db.service
+ready=0
+for ((attempt=0; attempt<60; attempt++)); do
+  if as_service podman exec pricetag-db pg_isready -U metering -d metering >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+[[ "${ready}" == 1 ]] || die 'PostgreSQL did not become ready'
+as_service systemctl --user start pricetag-metering.service
+as_service podman run --rm --network pricetag-private "${PROBE_IMAGE}" python3 -c '
+import time, urllib.request
+for attempt in range(60):
+    try:
+        with urllib.request.urlopen("http://pricetag-metering:8080/ready", timeout=2) as r:
+            if r.status == 200:
+                break
+    except OSError:
+        pass
+    time.sleep(1)
+else:
+    raise SystemExit("metering did not become ready")
+'
+if [[ ! -f "${DEPLOY_DIR}/bootstrap.done" ]]; then
+  rows="$(as_service podman exec pricetag-db psql -U metering -d metering -At -c 'SELECT count(*) FROM usage_events;')"
+  [[ "${rows}" == 0 ]] || die 'refusing first-time bootstrap on a database with usage; inspect its migration state'
+  as_service podman exec -i pricetag-db psql -U metering -d metering -v ON_ERROR_STOP=1 < "${DEPLOY_DIR}/bootstrap.sql"
+  install -m 0600 /dev/null "${DEPLOY_DIR}/bootstrap.done"
+fi
+if [[ -f "${DEPLOY_DIR}/quadlets/pricetag-provider.container" ]]; then
+  as_service systemctl --user start pricetag-provider.service
+fi
+as_service systemctl --user start pricetag-gateway.service
+python3 - "${DEPLOY_DIR}/ca.pem" <<'PY'
+import ssl, sys, time, urllib.request
+context = ssl.create_default_context(cafile=sys.argv[1])
+for attempt in range(60):
+    try:
+        with urllib.request.urlopen('https://localhost:8443/login', context=context, timeout=2) as response:
+            if response.status == 200:
+                break
+    except OSError:
+        pass
+    time.sleep(.5)
+else:
+    raise SystemExit('gateway HTTPS did not become ready')
+PY
+note 'PriceTag gateway ready on HTTPS 8443. Caller JWT required for inference and dashboard login.'
+note 'Copy /etc/praxis-pricetag/ca.pem to clients; distribute individual JWTs from /root/pricetag-admin securely.'

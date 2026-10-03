@@ -15,9 +15,9 @@ def qwen_limits(model):
     return (32768, 8192) if model == "qwen3.8-27b-int4" else (16384, 4096)
 
 
-def write_codex_catalog(model, directory):
+def write_codex_catalog(model, directory, limits=None):
     """Pinned Codex 0.157.1 ModelsResponse; only the explicitly selected preset."""
-    context, output = qwen_limits(model)
+    context, output = limits or qwen_limits(model)
     catalog = {"models": [{"slug": model, "display_name": model, "description": "Local Qwen through Praxis",
         "model_messages": {"instructions_template": "You are a coding assistant working in the user's repository. "
             "Follow the user's instructions and applicable repository guidance. Inspect relevant files before editing. "
@@ -46,7 +46,8 @@ def write_codex_catalog(model, directory):
 
 
 def configuration(name, provider, model, base, caller, *, prompt=None, messages_base=None,
-                  catalog_path=None, gateway_discovery=False, route_prefix=""):
+                  catalog_path=None, gateway_discovery=False, route_prefix="", unified=False,
+                  model_limits=None, upstream_model=None):
     if route_prefix and (provider == "vllm" or not re.fullmatch(r"/providers/[a-z][a-z0-9-]{0,31}", route_prefix)):
         raise ValueError("route prefix requires a custom /providers/NAME route and an OpenAI or Anthropic API")
     name = "claude" if name == "claude-code" else name
@@ -54,10 +55,10 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
         raise ValueError("native gateway discovery is a Claude option; Codex/OpenCode use configured catalogs")
     if (name, provider) in (("codex", "anthropic"), ("claude", "openai")):
         raise ValueError("this harness requires a different native API; no provider translation is configured")
-    context, output = qwen_limits(model) if provider == "vllm" else (128000, 4096)
+    context, output = model_limits or (qwen_limits(upstream_model or model) if provider == "vllm" else (128000, 4096))
     messages_base = (messages_base or base).rstrip("/") + route_prefix
     base = base.rstrip("/") + route_prefix
-    if provider == "vllm":
+    if provider == "vllm" and not unified:
         base += "/vllm"
         messages_base += "/vllm"
     env = {"PRAXIS_PLACEHOLDER_KEY": caller}
@@ -108,7 +109,7 @@ def configuration(name, provider, model, base, caller, *, prompt=None, messages_
         command = ["claude", *(["-p"] if prompt else []), "--model", model]
         if provider == "vllm":
             command += ["--permission-mode", "default"]
-        if provider == "vllm" and model == "qwen3.8-27b-int4":
+        if provider == "vllm" and (upstream_model or model) == "qwen3.8-27b-int4":
             # This model's template rejects Claude's default "high" effort.
             command += ["--effort", "medium"]
         if prompt:

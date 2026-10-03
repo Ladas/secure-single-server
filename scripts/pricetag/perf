@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Bounded multi-user HTTPS load and ledger reconciliation for a mock-only pilot."""
+import argparse
+import base64
+from concurrent.futures import ThreadPoolExecutor
+import http.client
+import json
+import math
+import os
+from pathlib import Path
+import re
+import ssl
+import subprocess
+import threading
+import time
+from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def private(path):
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+        raise ValueError('credentials must be private regular files')
+    return path.read_text().strip()
+
+
+def identities(directory):
+    result = []
+    for path in sorted(directory.glob('*.jwt')):
+        token = private(path)
+        claim = token.split('.')[1]
+        subject = json.loads(base64.urlsafe_b64decode(claim + '=' * (-len(claim) % 4)))['sub']
+        if not re.fullmatch(r'perf-[a-z0-9-]{1,100}', subject):
+            raise ValueError('use dedicated perf-* users, never admin or real user tokens')
+        result.append((subject, token))
+    if len({s for s, _ in result}) != len(result) or not result:
+        raise ValueError('one distinct JWT per performance user is required')
+    return result
+
+
+def percentile(values, fraction):
+    return sorted(values)[max(0, math.ceil(len(values) * fraction) - 1)] if values else None
+
+
+def valid_reply(body, stream):
+    if stream:
+        lines = [line[6:] for line in body.splitlines() if line.startswith(b'data: ')]
+        if not lines or lines[-1] != b'[DONE]':
+            return False
+        events = [json.loads(line) for line in lines[:-1]]
+        usage = next((event['usage'] for event in events if event.get('usage')), {})
+    else:
+        usage = json.loads(body).get('usage', {})
+    return usage.get('prompt_tokens') == 2 and usage.get('completion_tokens') == 3 and usage.get('total_tokens') == 5
+
+
+def users(args):
+    if not re.fullmatch(r'perf-[a-z0-9-]{1,80}', args.prefix):
+        raise ValueError('prefix must start perf- and contain lowercase letters/digits/hyphens')
+    args.tokens.mkdir(mode=0o700, parents=True, exist_ok=False)
+    state = args.local_state
+    for index in range(args.count):
+        subject = f'{args.prefix}-{index:02d}'
+        command = [str(ROOT / 'scripts/pricetag/user'), '--subject', subject,
+                   '--monthly-usd', '100', '--output', str(args.tokens / (subject + '.jwt'))]
+        if state:
+            command += ['--registry', str(state / 'gateway/users.json'), '--key', str(state / 'issuer/private.pem'),
+                        '--admin-token', str(state / 'admin.jwt'), '--ca', str(state / 'tls/ca.pem')]
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+        if state:
+            context = ssl.create_default_context(cafile=str(state / 'tls/ca.pem'))
+            token = private(args.tokens / (subject + '.jwt'))
+            for _ in range(50):
+                connection = http.client.HTTPSConnection('localhost', 8443, context=context, timeout=5)
+                try:
+                    connection.request('GET', '/v1/models', headers={'Authorization': 'Bearer ' + token})
+                    response = connection.getresponse()
+                    response.read()
+                    if response.status == 200:
+                        break
+                finally:
+                    connection.close()
+                time.sleep(.1)
+            else:
+                raise ValueError('updated registry is not visible through Podman sharing')
+    print(f'Created {args.count} distinct users with $100 test allowances; credentials: {args.tokens}')
+
+
+def run(args):
+    endpoint = urlsplit(args.url)
+    if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.path not in ('', '/') or endpoint.query or endpoint.fragment:
+        raise ValueError('url must be an HTTPS origin')
+    callers = identities(args.tokens)
+    if max(args.concurrency) > len(callers):
+        raise ValueError('not enough distinct user tokens')
+    context = ssl.create_default_context(cafile=str(args.ca))
+    body = json.dumps({'model': args.model, 'messages': [{'role': 'user', 'content': 'synthetic performance probe'}],
+                       'max_tokens': 32, 'stream': not args.json, 'stream_options': {'include_usage': True}})
+    report = {'url': args.url, 'model': args.model, 'stream': not args.json, 'requests_per_user': args.requests,
+              'think_seconds': args.think, 'connection_policy': 'new TLS connection per request', 'phases': []}
+    os.umask(0o077)
+    with args.output.open('x') as output:
+        for concurrency in args.concurrency:
+            barrier = threading.Barrier(concurrency)
+
+            def worker(caller):
+                subject, token = caller
+                samples = []
+                barrier.wait()
+                for _ in range(args.requests):
+                    start = time.monotonic()
+                    connection = http.client.HTTPSConnection(endpoint.hostname, endpoint.port or 443,
+                                                             context=context, timeout=args.timeout)
+                    sample = {'subject': subject, 'status': 0, 'ok': False}
+                    try:
+                        connection.request('POST', '/v1/chat/completions', body,
+                            {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+                        response = connection.getresponse()
+                        first = response.read(1)
+                        sample.update(status=response.status, first_byte_seconds=time.monotonic() - start)
+                        data = first + response.read(1048576)
+                        sample['ok'] = response.status == 200 and valid_reply(data, not args.json)
+                        sample['bytes'] = len(data)
+                    except (OSError, ValueError, http.client.HTTPException):
+                        sample['error'] = 'transport-or-protocol'
+                    finally:
+                        connection.close()
+                    sample['seconds'] = time.monotonic() - start
+                    samples.append(sample)
+                    time.sleep(args.think)
+                return samples
+
+            started = time.monotonic()
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                samples = [s for result in pool.map(worker, callers[:concurrency]) for s in result]
+            elapsed = time.monotonic() - started
+            good = [s for s in samples if s['ok']]
+            latencies = [s['seconds'] for s in good]
+            phase = {'users': concurrency, 'elapsed_seconds': elapsed, 'attempts': len(samples),
+                     'successes': len(good), 'successful_requests_per_second': len(good) / elapsed,
+                     'p50_seconds': percentile(latencies, .5), 'p95_seconds': percentile(latencies, .95),
+                     'p99_seconds': percentile(latencies, .99),
+                     'p95_first_byte_seconds': percentile([s['first_byte_seconds'] for s in good], .95),
+                     'statuses': {str(code): sum(s['status'] == code for s in samples) for code in sorted({s['status'] for s in samples})},
+                     'samples': samples}
+            report['phases'].append(phase)
+            print(json.dumps({k: v for k, v in phase.items() if k != 'samples'}), flush=True)
+            output.seek(0); json.dump(report, output, indent=2); output.truncate(); output.flush()
+    return int(any(p['successes'] != p['attempts'] for p in report['phases']))
+
+
+def verify(args):
+    report = json.loads(args.report.read_text())
+    counts = {}
+    for phase in report['phases']:
+        for sample in phase['samples']:
+            subject = sample['subject']
+            if not re.fullmatch(r'perf-[a-z0-9-]{1,100}', subject):
+                raise ValueError('unexpected subject in report')
+            counts[subject] = counts.get(subject, 0) + int(sample['ok'])
+    prefix = []
+    if args.service_user:
+        uid = subprocess.check_output(['id', '-u', args.service_user], text=True).strip()
+        prefix = ['sudo', '-u', args.service_user, 'env', 'XDG_RUNTIME_DIR=/run/user/' + uid,
+                  'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/' + uid + '/bus']
+    query = "SELECT username,count(*),sum(prompt_tokens),sum(completion_tokens),sum(total_tokens) FROM usage_events WHERE username IN (" + ','.join("'" + s + "'" for s in counts) + ') GROUP BY username;'
+    expected = {s: [n, n * 2, n * 3, n * 5] for s, n in counts.items() if n}
+    for _ in range(30):
+        raw = subprocess.check_output(prefix + ['podman', 'exec', args.database, 'psql', '-U', 'metering',
+            '-d', 'metering', '-At', '-c', query], text=True, cwd='/tmp')
+        actual = {parts[0]: list(map(int, parts[1:])) for parts in (line.split('|') for line in raw.splitlines())}
+        if actual == expected:
+            print('PASS: exact per-user event and token totals match completed mock requests')
+            return 0
+        time.sleep(1)
+    print(json.dumps({'expected': expected, 'actual': actual}))
+    return 1
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    p = commands.add_parser('users')
+    p.add_argument('--tokens', type=Path, required=True)
+    p.add_argument('--prefix', required=True)
+    p.add_argument('--count', type=int, choices=range(1, 21), default=20)
+    p.add_argument('--local-state', type=Path)
+    p = commands.add_parser('run')
+    p.add_argument('--url', required=True); p.add_argument('--ca', type=Path, required=True)
+    p.add_argument('--tokens', type=Path, required=True); p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--model', default='demo-model')
+    p.add_argument('--concurrency', type=int, nargs='+', choices=range(1, 21), default=[1, 5, 10, 20])
+    p.add_argument('--requests', type=int, choices=range(1, 1001), default=20)
+    p.add_argument('--think', type=float, default=1)
+    p.add_argument('--timeout', type=float, default=30)
+    p.add_argument('--json', action='store_true')
+    p = commands.add_parser('verify')
+    p.add_argument('--report', type=Path, required=True)
+    p.add_argument('--database', default='praxis-pricetag-db')
+    p.add_argument('--service-user')
+    args = parser.parse_args()
+    if args.command == 'run' and (not math.isfinite(args.think) or not 0 <= args.think <= 60 or not math.isfinite(args.timeout) or not 0 < args.timeout <= 300):
+        parser.error('think must be 0–60 seconds and timeout greater than zero, at most 300')
+    return {'users': users, 'run': run, 'verify': verify}[args.command](args) or 0
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(main())
+    except (OSError, ValueError, KeyError, IndexError, subprocess.CalledProcessError) as error:
+        raise SystemExit(type(error).__name__ + ': performance operation failed; inspect local setup') from None
