@@ -353,6 +353,23 @@ embedded in the OS image. First boot pulls the digest-pinned control-plane and
 selected harness images. For bare metal, use the same official process to
 create the appropriate deployment image.
 
+### Experiment with the container image in Podman
+
+A bootc image is also a standard OCI container image. For lightweight
+userspace experimentation, pull the resolved digest and start an interactive
+shell with Podman. Replace the OpenCode reference with the OpenClaw variant
+when needed:
+
+```bash
+podman pull quay.io/redhat-et/secure-single-server-opencode@RESOLVED_DIGEST
+podman run --rm -it quay.io/redhat-et/secure-single-server-opencode@RESOLVED_DIGEST bash
+```
+
+This does not boot the OS or run the boot reconciliation service, so it cannot
+validate the always-on OpenShell gateway, lingering service account, host
+SELinux state, or sandbox lifecycle. Use the VM or bare-metal deployment for
+those qualification checks.
+
 ### Verify and create the sandbox
 
 After boot, SSH to the administrator account and verify the deployment:
