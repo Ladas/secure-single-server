@@ -333,7 +333,7 @@ sudo grep '^sandbox_runtime_image' \
 On a booted RHEL image-mode host, stage the selected image and reboot:
 
 ```console
-sudo bootc switch quay.io/redhat-et/secure-single-server-opencode@RESOLVED_DIGEST
+sudo bootc switch quay.io/redhat-et/secure-single-server-opencode:v0.1
 sudo bootc status
 sudo systemctl reboot
 ```
@@ -361,8 +361,8 @@ shell with Podman. Replace the OpenCode reference with the OpenClaw variant
 when needed:
 
 ```bash
-podman pull quay.io/redhat-et/secure-single-server-opencode@RESOLVED_DIGEST
-podman run --rm -it quay.io/redhat-et/secure-single-server-opencode@RESOLVED_DIGEST bash
+podman pull quay.io/redhat-et/secure-single-server-opencode:v0.1
+podman run --rm -it quay.io/redhat-et/secure-single-server-opencode:v0.1 bash
 ```
 
 This does not boot the OS or run the boot reconciliation service, so it cannot
