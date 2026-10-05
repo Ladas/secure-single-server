@@ -344,11 +344,14 @@ migrate existing sandboxes. Export and recreate them as needed.
 
 ### Apply the image to a fresh single server or bare-metal host
 
-For a fresh host, use the existing image as the input to Red Hat's
-[bootc image builder instructions](../../../bootc/README.md#install-and-boot).
-The resulting disk or bare-metal image contains the selected OpenShell and
-harness deployment; no application container is embedded in the OS image. First
-boot pulls the digest-pinned control-plane and selected harness images.
+For a fresh VM, follow Red Hat's official instructions for
+[creating bootc-compatible disk images with bootc image
+builder](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_image_mode_for_rhel_to_build_deploy_and_manage_operating_systems/creating-bootc-compatible-base-disk-images-with-bootc-image-builder_using-image-mode-for-rhel-to-build-deploy-and-manage-operating-systems).
+Use the existing image as the builder input. The resulting disk image contains
+the selected OpenShell and harness deployment; no application container is
+embedded in the OS image. First boot pulls the digest-pinned control-plane and
+selected harness images. For bare metal, use the same official process to
+create the appropriate deployment image.
 
 ### Verify and create the sandbox
 
