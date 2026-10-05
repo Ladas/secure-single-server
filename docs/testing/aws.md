@@ -4,6 +4,58 @@ Start here. Deploy any of the VMs below; each has its own plan, launch
 and journal. They can run at the same time. AWS deployment prepares the host;
 [smoke tests](rhel-smoke.md) install and test the services afterward.
 
+For the PriceTag metering pilot, reuse an existing VM with the procedure below.
+Provision a new VM only if you want a separate environment; the gateway,
+metering/dashboard and PostgreSQL are independent containers, and metering does
+not require a GPU. [PriceTag deployment and local Podman dashboards](pricetag.md).
+
+## PriceTag on an existing VM
+
+Resume the existing run's AWS credentials, region, account, SSH key and launch
+journal using [resume settings](aws-operations.md#resume-a-terminal-or-inspect-an-earlier-vm).
+Run these commands from this checkout. `RHEL_STATE_FILE` must be the existing
+VM's launch journal, even if that file lives in an earlier worktree.
+
+```console
+if [ -n "${RHEL_STATE_FILE:-}" ] && CLIENT_IP="$(curl -4 -fsS https://checkip.amazonaws.com)"; then
+  CLIENT_CIDR="$CLIENT_IP/32"
+  scripts/aws/https-access --state-file "$RHEL_STATE_FILE" \
+    --account-id "$ACCOUNT" --region "$REGION" --allowed-cidr "$CLIENT_CIDR" \
+    || printf 'HTTPS plan failed; correct the error before applying.\n'
+else
+  printf 'Resume the launch settings and check your public IP before continuing.\n'
+fi
+```
+
+Review the instance, security group and single client `/32`. Then apply:
+
+```console
+if [ -n "${RHEL_STATE_FILE:-}" ] && [ -n "${CLIENT_CIDR:-}" ]; then
+  scripts/aws/https-access --state-file "$RHEL_STATE_FILE" \
+    --account-id "$ACCOUNT" --region "$REGION" --allowed-cidr "$CLIENT_CIDR" --apply \
+    || printf 'HTTPS update stopped; inspect the security group and journal before retrying.\n'
+else
+  printf 'Resume the launch settings and run the HTTPS plan first.\n'
+fi
+```
+
+This adds **TCP 8443 from your workstation IP only**, preserves SSH rules,
+and updates the existing journal so subsequent verification recognizes the
+change. It checks account, ownership tags, instance and security-group state;
+unexpected existing ingress is rejected. It does not launch a VM or install
+services. If you use an AWS named profile, add `--profile NAME` to both commands.
+
+Your browser and local OpenCode use the public HTTPS address. Harnesses on the
+VM use `https://localhost:8443` with the same JWT authentication and CA checks.
+The VM's public IP does **not** need a separate ingress rule for those tests.
+Continue with [PriceTag service preparation and startup](pricetag.md#prepare-the-existing-rhel-vm).
+
+For a separate gateway host, use the **all-in-one without vLLM** recipe below
+to prepare the private provider configuration this pilot consumes. Complete
+provider/catalog setup, add the workstation-only HTTPS rule above, then deploy
+PriceTag's remote endpoint. Reusing the GPU VM is sufficient for the initial
+local vLLM pilot; keep the memory/context sizing below for inference decisions.
+
 | VM name | Scenario | Inference preset |
 | --- | --- | --- |
 | `all-in-one-gpu` | Local users, optional OpenShell | GPU: `g6.2xlarge`, L4, 32 GiB RAM, 200 GiB disk |
@@ -290,6 +342,8 @@ aws_test_deploy all-in-one-cloud "${ALL_IN_ONE_CLOUD_VM[@]}" \
 ### Remote-gateway without vLLM
 
 Uses HTTPS/JWT to reach external providers; no model download or GPU.
+For the PriceTag dashboard/metering deployment and its larger disk preset,
+follow [AWS remote gateway with PriceTag](aws-pricetag.md).
 
 ```console
 REMOTE_GATEWAY_CLOUD_VM=(configs/aws/no-vllm.json --scenario remote-gateway "${REMOTE_GATEWAY_ACCESS[@]}")

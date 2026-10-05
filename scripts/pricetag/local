@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""Persistent localhost-only PriceTag demo, using a synthetic inference provider."""
+import argparse
+import json
+import os
+from pathlib import Path
+import secrets
+import shutil
+import ssl
+import subprocess
+import sys
+import time
+import urllib.request
+
+from gateway import render
+
+ROOT = Path(__file__).resolve().parents[2]
+STATE = ROOT / '.state/pricetag'
+NAME = 'praxis-pricetag'
+PRAXIS = os.environ.get('PRAXIS_IMAGE', 'localhost/praxis-experimental:manual-jwt')
+POSTGRES = 'docker.io/library/postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea'
+PYTHON = 'docker.io/library/python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7'
+METERING = os.environ.get('METERING_IMAGE', 'localhost/pricetag-metering:upstream-557ceb1')
+
+
+def run(*args, data=None):
+    result = subprocess.run(list(map(str, args)), input=data, text=True, capture_output=True, timeout=180)
+    if result.returncode:
+        # Never echo arguments: an engine command may contain credentials.
+        raise RuntimeError(f'{args[0]} {args[1]} failed: ' + result.stderr[:2000])
+    return result.stdout.strip()
+
+
+def exists(kind, name):
+    return subprocess.run(['podman', kind, 'exists', name], capture_output=True).returncode == 0
+
+
+def environment(path, values):
+    path.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
+    path.chmod(0o600)
+
+
+def initialize():
+    if (STATE / 'deployment.json').exists():
+        if json.loads((STATE / 'deployment.json').read_text()).get('auth') != 'manual-jwt':
+            raise RuntimeError('existing state has an unsupported authentication schema; do not reuse it silently')
+        return
+    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if list(STATE.iterdir()):
+        raise RuntimeError('partial initialization: preserve the directory and use a fresh state path')
+    credential = ROOT / 'scripts/remote-gateway/credentials'
+    run(credential, 'init-jwt', '--directory', STATE / 'issuer')
+    run(credential, 'lab-tls', '--directory', STATE / 'tls', '--hostname', 'localhost',
+        '--alt-hostname', '127.0.0.1')
+    bundle = STATE / 'gateway'
+    bundle.mkdir(mode=0o700)
+    initialize_credentials()
+    for source, target in [(STATE / 'issuer/public.pem', 'jwt-public.pem'),
+                           (STATE / 'tls/server.pem', 'tls.pem'),
+                           (STATE / 'tls/server-key.pem', 'tls-key.pem')]:
+        shutil.copyfile(source, bundle / target)
+    write_gateway()
+    password, m2m = secrets.token_hex(32), secrets.token_hex(32)
+    environment(STATE / 'postgres.env', {'POSTGRES_USER': 'metering', 'POSTGRES_DB': 'metering',
+        'POSTGRES_PASSWORD': password, 'TZ': 'UTC', 'PGTZ': 'UTC'})
+    environment(STATE / 'metering.env', {
+        'DATABASE_URL': f'postgres://metering:{password}@{NAME}-db:5432/metering?sslmode=disable',
+        'SESSION_SECRET': secrets.token_hex(32), 'M2M_SHARED_SECRET': m2m,
+        'M2M_AUTH_REQUIRED': 'true', 'MONTHLY_TOKEN_QUOTA': '10000000000', 'SUPERADMIN_USERS': 'admin',
+        'MAAS_VALIDATE_URL': 'http://pricetag-gateway:18084/validate',
+        'TZ': 'UTC'})
+    environment(STATE / 'gateway.env', {'M2M_SHARED_SECRET': m2m})
+    (STATE / 'deployment.json').write_text(json.dumps({'origin': 'https://localhost:8443', 'auth': 'manual-jwt',
+        'praxis_image': run('podman', 'image', 'inspect', PRAXIS, '--format', '{{.Id}}'),
+        'metering_image': run('podman', 'image', 'inspect', METERING, '--format', '{{.Id}}')}, indent=2))
+
+
+def initialize_credentials():
+    manual = ROOT / 'scripts/pricetag/credentials'
+    registry = STATE / 'gateway/users.json'
+    run(manual, 'init', '--registry', registry)
+    for user in ('alice', 'bob', 'admin'):
+        run(manual, 'issue', '--key', STATE / 'issuer/private.pem', '--registry', registry,
+            '--subject', user, '--output', STATE / (user + '.jwt'))
+
+
+def write_gateway():
+    models = [{'id': 'demo-model', 'provider': 'vllm', 'model': 'fixture',
+               'apis': ['openai', 'anthropic'], 'context': 32768, 'output': 4096}]
+    original = {'filter_chains': [{'name': api, 'filters': [
+        {'filter': 'headers', 'request_remove': ['Authorization', 'X-Api-Key']},
+        {'filter': 'load_balancer', 'clusters': [{'name': 'vllm',
+         'endpoints': [NAME + '-provider:' + port]}]}]}
+        for api, port in [('openai', '18080'), ('anthropic', '18081')]]}
+    (STATE / 'gateway/gateway.json').write_text(json.dumps(render(original, models), indent=2))
+
+
+def sql(statement):
+    return run('podman', 'exec', '-i', NAME + '-db', 'psql', '-U', 'metering', '-d', 'metering',
+               '-v', 'ON_ERROR_STOP=1', '-At', data=statement)
+
+
+def start_container(suffix, options, image, *command):
+    name = NAME + '-' + suffix
+    if exists('container', name):
+        run('podman', 'start', name)
+    else:
+        run('podman', 'run', '-d', '--name', name, '--network', NAME, *options, image, *command)
+
+
+def up():
+    initialize()
+    write_gateway()
+    if not exists('network', NAME):
+        run('podman', 'network', 'create', NAME)
+    if not exists('volume', NAME + '-db'):
+        run('podman', 'volume', 'create', NAME + '-db')
+    start_container('db', ['--env-file', STATE / 'postgres.env', '-v', NAME + '-db:/var/lib/postgresql/data'], POSTGRES)
+    for _ in range(60):
+        try:
+            if sql('SELECT 1;') == '1':
+                break
+        except RuntimeError:
+            pass
+        time.sleep(1)
+    else:
+        raise RuntimeError('database not ready')
+    common = ['--read-only', '--cap-drop', 'all', '--security-opt', 'no-new-privileges',
+              '--user', '1001:1001', '--userns', 'keep-id:uid=1001,gid=1001']
+    start_container('provider', common + ['-v', f'{ROOT}/tests/common/provider.py:/fixtures/provider.py:ro',
+        '-v', f'{ROOT}/tests/pricetag/provider.py:/demo.py:ro'], PYTHON, 'python3', '/demo.py')
+    image = json.loads((STATE / 'deployment.json').read_text())['metering_image']
+    start_container('metering', common + ['--network-alias', 'pricetag-metering',
+        '--env-file', STATE / 'metering.env'], image)
+    # Check the app's actual readiness, not only its initial database migration.
+    for _ in range(90):
+        try:
+            run('podman', 'exec', NAME + '-provider', 'python3', '-c',
+                'import urllib.request; urllib.request.urlopen("http://pricetag-metering:8080/ready", timeout=2)')
+            break
+        except RuntimeError:
+            time.sleep(1)
+    else:
+        raise RuntimeError('metering not ready')
+    if not (STATE / 'initialized').exists():
+        # Fresh demo DB only. Existing production databases use PriceTag's
+        # reviewed idempotency migration during an ingestion maintenance window.
+        sql("""CREATE UNIQUE INDEX IF NOT EXISTS uq_usage_events_event_id ON usage_events(event_id);
+UPDATE quota_policy SET default_monthly_usd=1, enforced=true, allowed_over_limit_models='{}', over_cap_ceiling_usd=NULL;
+INSERT INTO model_pricing(model,provider,input_cost_per_mtok,output_cost_per_mtok)
+VALUES ('demo-model','vllm',10000,10000) ON CONFLICT (model) DO NOTHING;
+""")
+        (STATE / 'initialized').write_text('Fresh demo initialized; do not reset budgets on restart.\n')
+    # The pinned gateway reads configuration at startup. Reusing a running
+    # container after rendering would keep its old routes and model catalog.
+    if exists('container', NAME + '-gateway'):
+        run('podman', 'stop', NAME + '-gateway')
+    start_container('gateway', common + ['--network-alias', 'pricetag-gateway', '-p', '127.0.0.1:8443:8443',
+        '--env-file', STATE / 'gateway.env', '-v', f'{STATE}/gateway:/etc/praxis:ro'],
+        json.loads((STATE / 'deployment.json').read_text())['praxis_image'], '-c', '/etc/praxis/gateway.json')
+    context = ssl.create_default_context(cafile=str(STATE / 'tls/ca.pem'))
+    for _ in range(60):
+        try:
+            with urllib.request.urlopen('https://localhost:8443/login', context=context, timeout=2) as response:
+                if response.status == 200:
+                    break
+        except OSError:
+            pass
+        time.sleep(.5)
+    else:
+        raise RuntimeError('gateway HTTPS login did not become ready; inspect podman logs')
+    print('Dashboard: https://localhost:8443/login')
+    print('CA certificate: ' + str(STATE / 'tls/ca.pem'))
+    print('User JWT: ' + str(STATE / 'alice.jwt'))
+    print('Admin JWT: ' + str(STATE / 'admin.jwt'))
+    print('Synthetic provider only; demo prices are deliberately inflated for budget tests.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('command', choices=['up', 'down', 'status'])
+    args = parser.parse_args()
+    os.umask(0o077)
+    if args.command == 'up':
+        up()
+    elif args.command == 'down':
+        for suffix in ('gateway', 'metering', 'provider', 'db'):
+            if exists('container', NAME + '-' + suffix):
+                run('podman', 'stop', NAME + '-' + suffix)
+        print('Containers stopped. Database, credentials and configuration retained.')
+    else:
+        print(run('podman', 'ps', '-a', '--filter', 'name=' + NAME,
+                  '--format', '{{.Names}}\t{{.Status}}\t{{.Ports}}'))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+        sys.exit(str(error))

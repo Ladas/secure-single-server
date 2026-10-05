@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Launch a native harness from the HTTPS gateway's authenticated model catalog."""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import ssl
+import sys
+import urllib.request
+from urllib.parse import urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
+from harness import configuration, write_codex_catalog
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError('gateway redirected the authenticated catalog request')
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('harness', choices=['opencode', 'codex', 'claude-code'])
+    p.add_argument('--url', required=True)
+    p.add_argument('--token-file', type=Path, required=True)
+    p.add_argument('--ca-file', type=Path)
+    p.add_argument('--model', required=True, help='gateway alias, including its provider prefix')
+    p.add_argument('--api', choices=['openai', 'anthropic'], help='OpenCode dialect when both are available')
+    p.add_argument('--print-config', action='store_true', help='redacted preview; do not launch')
+    a = p.parse_args()
+    origin = urlsplit(a.url)
+    if origin.scheme != 'https' or not origin.hostname or origin.username or origin.password or origin.path not in ('', '/') or origin.query or origin.fragment:
+        p.error('url must be an HTTPS origin')
+    if a.token_file.is_symlink() or not a.token_file.is_file() or a.token_file.stat().st_mode & 0o077:
+        p.error('token-file must be a private regular file (0600 or 0400)')
+    caller = a.token_file.read_text().strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', caller):
+        p.error('token-file must contain a caller JWT')
+    context = ssl.create_default_context(cafile=str(a.ca_file) if a.ca_file else None)
+    request = urllib.request.Request(a.url.rstrip('/') + '/v1/models',
+                                     headers={'Authorization': 'Bearer ' + caller})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
+                                         urllib.request.HTTPSHandler(context=context))
+    with opener.open(request, timeout=15) as response:
+        catalog = json.load(response)['data']
+    entries = [m for m in catalog if m['id'] == a.model]
+    if len(entries) != 1:
+        p.error('model is absent or ambiguous in the authenticated gateway catalog')
+    meta = entries[0]['praxis']
+    name = 'claude' if a.harness == 'claude-code' else a.harness
+    api = a.api or ('anthropic' if name == 'claude' else 'openai')
+    if a.api is None and name == 'opencode' and api not in meta['apis']:
+        api = 'anthropic'
+    if api not in meta['apis'] or (name == 'codex' and api != 'openai') or (name == 'claude' and api != 'anthropic'):
+        p.error('this harness/model combination needs an unsupported API translation')
+    limits = (meta['context'], meta['output'])
+    if any(type(n) is not int for n in limits) or not 0 < limits[1] < limits[0] <= 2000000:
+        p.error('invalid model limits in gateway catalog')
+    provider = 'vllm' if meta['provider'] == 'vllm' and not (name == 'opencode' and api == 'anthropic') else api
+    local_catalog = write_codex_catalog(a.model, Path.home() / '.cache/pricetag-harness', limits) if name == 'codex' and provider == 'vllm' else None
+    command, additions = configuration(name, provider, a.model, a.url, caller,
+        unified=True, model_limits=limits, upstream_model=meta['upstream_model'], catalog_path=local_catalog)
+    if name == 'opencode':
+        config = json.loads(additions['OPENCODE_CONFIG_CONTENT'])
+        config.update(enabled_providers=['praxis'], disabled_providers=[])
+        additions['OPENCODE_CONFIG_CONTENT'] = json.dumps(config)
+    if name == 'codex' and provider != 'vllm':
+        command += ['-c', f'model_context_window={limits[0]}', '-c', f'model_auto_compact_token_limit={limits[0]-limits[1]}']
+    if name == 'claude':
+        additions['CLAUDE_CODE_MAX_OUTPUT_TOKENS'] = str(limits[1])
+        additions['CLAUDE_CODE_MAX_CONTEXT_TOKENS'] = str(limits[0])
+    if a.ca_file:
+        ca = str(a.ca_file.resolve(strict=True))
+        additions.update(NODE_EXTRA_CA_CERTS=ca, SSL_CERT_FILE=ca, CODEX_CA_CERTIFICATE=ca)
+    if a.print_config:
+        print(json.dumps({'command': command, 'environment': additions}, indent=2).replace(caller, '[caller]'))
+        return
+    environment = {k: v for k, v in os.environ.items()
+                   if not k.startswith(('OPENAI_', 'ANTHROPIC_', 'PRAXIS_', 'CLAUDE_CODE_USE_'))}
+    environment.update(additions)
+    os.execvpe(command[0], command, environment)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, KeyError) as error:
+        raise SystemExit(str(error)) from None
