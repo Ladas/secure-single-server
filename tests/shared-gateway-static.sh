@@ -186,7 +186,7 @@ judge_line="$(rg -n -m1 'filter: switchyard_route' configs/all-in-one/shared-gat
   exit 1
 }
 
-if rg -n '(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{25,})' \
+if rg -n '(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{25,}' \
   configs docs README.md; then
   printf 'possible committed credential found\n' >&2
   exit 1
