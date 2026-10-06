@@ -74,7 +74,15 @@ Review the account, subnet, hardware, disk and `/32` rules, then:
 
 ```console
 aws_test_deploy pricetag-real "${PRICETAG_VM[@]}"
-aws_test_verify pricetag-real
+```
+
+Wait for the recorded instance to reach `running`, then verify:
+
+```console
+PRICETAG_INSTANCE=$(jq -er '.InstanceId' \
+  ".state/$RUN_PREFIX-pricetag-real.json") &&
+  aws --region "$REGION" ec2 wait instance-running --instance-ids "$PRICETAG_INSTANCE" &&
+  aws_test_verify pricetag-real
 ```
 
 Plan and launch the performance server separately:
@@ -87,8 +95,22 @@ After reviewing that plan:
 
 ```console
 aws_test_deploy pricetag-perf "${PRICETAG_VM[@]}"
-aws_test_verify pricetag-perf
 ```
+
+Wait and verify this instance independently:
+
+```console
+PRICETAG_INSTANCE=$(jq -er '.InstanceId' \
+  ".state/$RUN_PREFIX-pricetag-perf.json") &&
+  aws --region "$REGION" ec2 wait instance-running --instance-ids "$PRICETAG_INSTANCE" &&
+  aws_test_verify pricetag-perf
+```
+
+Launch returns before boot finishes. If verification reports `pending`, the VM
+has already been created: run its wait/verify block again, not `aws_test_deploy`.
+The [AWS waiter](https://docs.aws.amazon.com/cli/latest/reference/ec2/wait/instance-running.html)
+only waits for the EC2 running state; SSH and application readiness are separate
+checks. If it fails, inspect the instance state before continuing.
 
 Keep both journals:
 
@@ -96,6 +118,23 @@ Keep both journals:
 REAL_STATE=".state/$RUN_PREFIX-pricetag-real.json"
 PERF_STATE=".state/$RUN_PREFIX-pricetag-perf.json"
 ```
+
+### Show both deployed servers
+
+In the same workstation terminal, with the AWS credentials and launch-session
+settings still loaded, run:
+
+```console
+printf 'Run prefix: %s\n' "$RUN_PREFIX"
+aws_test_verify pricetag-real && aws_test_verify pricetag-perf
+```
+
+This prints each instance ID, current state, public IP, hardware, access mode,
+SSH login, key path and journal path. It performs read-only AWS checks and does
+not print credential values. Share this output with the deployment operator.
+The selected `RHEL_HOST` afterwards is the performance VM; explicitly select
+the real VM again before working on it. For a new terminal, restore the existing
+run using [AWS operations](aws-operations.md); do not generate a new run prefix.
 
 These commands provision infrastructure, not applications. Give the deployment
 operator both journal paths, the two public hosts and the SSH key path; never
@@ -110,10 +149,37 @@ shared dashboard/inference HTTPS listener to the workstation `/32`.
 
 ## Prepare each fresh host
 
-Copy the reviewed server checkout's tracked/staged files without `.state`, Git
-metadata or credentials. Copy the reviewed experimental build inputs separately
-as described in [the deployment guide](pricetag.md). Build the two application
-images natively on RHEL; do not reuse ARM images from an ARM laptop.
+Run this section once for each VM. On the workstation, from this server checkout,
+select the destination explicitly before copying files:
+
+```console
+VM_NAME=pricetag-real
+aws_test_verify "$VM_NAME"
+printf 'Destination: %s; SSH key: %s\n' "$RHEL_HOST" "$SSH_KEY"
+```
+
+For the second pass set `VM_NAME=pricetag-perf`. Copy the complete required source
+directories; the existing-GPU guide's smaller copy command omits the fresh-host
+installer, provider templates and performance fixtures:
+
+```console
+set -o pipefail
+git ls-files -z scripts configs tests | tar --no-xattrs --null -T - -czf - | \
+  ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+    'mkdir -p ~/secure-single-server-pricetag && tar -xzf - -C ~/secure-single-server-pricetag'
+EXPERIMENTAL_CHECKOUT='/absolute/path/to/reviewed/experimental-checkout'
+git -C "$EXPERIMENTAL_CHECKOUT" ls-files -z \
+  Cargo.toml Cargo.lock Containerfile LICENSE rust-toolchain.toml crates demos/ai-gateway | \
+  tar --no-xattrs -C "$EXPERIMENTAL_CHECKOUT" --null -T - -czf - | \
+  ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+    'mkdir -p ~/experimental && tar -xzf - -C ~/experimental'
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST"
+```
+
+Replace `EXPERIMENTAL_CHECKOUT` with the reviewed checkout containing
+`manual_jwt`. These commands copy tracked/staged source files, not `.state`, Git
+metadata or credential directories. Stop if either copy fails. Build images
+natively on each RHEL host; do not reuse ARM images from an ARM laptop.
 
 On RHEL, install the base prerequisites and prepare only the service account:
 
@@ -128,14 +194,39 @@ service account and user manager without starting the old gateway or its token
 limiter. The real-provider path below supplies native provider configuration;
 the mock path needs no provider keys or existing gateway configuration.
 
-Build and load Praxis and unmodified metering into `praxis-svc` storage using
-the commands in [pricetag.md](pricetag.md#prepare-the-existing-rhel-vm).
-Normalize the returned IDs: Podman may omit the `sha256:` prefix:
+**Temporary image-build path:** until an image containing `manual_jwt` is
+published and its source revision verified, build it manually. Replace this
+step with a reviewed immutable registry digest when available; do not assume
+an older image or `latest` contains the filter. Metering is unmodified upstream.
+
+In the same RHEL shell, build and load Praxis and unmodified metering. On a fresh
+host the source clone below must not already exist. The helper builds its pinned
+revision, not the moving repository HEAD:
 
 ```console
+git clone https://github.com/redhat-et/pricetag-metering.git ~/pricetag-metering
+python3 scripts/pricetag/build-metering --source ~/pricetag-metering
+podman build --build-arg FEATURES=otel -t localhost/praxis-experimental:manual-jwt \
+  -f ~/experimental/Containerfile ~/experimental
+PRICETAG_UID=$(id -u praxis-svc)
+svc() {
+  (cd /tmp && sudo -u praxis-svc env \
+    XDG_RUNTIME_DIR="/run/user/$PRICETAG_UID" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$PRICETAG_UID/bus" "$@")
+}
+set -o pipefail
+podman save localhost/pricetag-metering:upstream-557ceb1 | svc podman load
+podman save localhost/praxis-experimental:manual-jwt | svc podman load
+PRAXIS_IMAGE=$(svc podman image inspect localhost/praxis-experimental:manual-jwt --format '{{.Id}}')
+METERING_IMAGE=$(svc podman image inspect localhost/pricetag-metering:upstream-557ceb1 --format '{{.Id}}')
 PRAXIS_IMAGE="sha256:${PRAXIS_IMAGE#sha256:}"
 METERING_IMAGE="sha256:${METERING_IMAGE#sha256:}"
 ```
+
+Stop on any build/load failure. Keep these variables and `svc` in the RHEL shell
+for the matching installation section below. The `sha256:` normalization handles
+Podman versions that omit that prefix from local image IDs. Continue with only
+the real-provider or performance section for this host, then client setup.
 
 ## Install the real-provider server
 
@@ -147,14 +238,17 @@ provider keys stay in service-account Podman secrets; users receive only JWTs.
 Enter the provider key at a hidden prompt on RHEL. Shell tracing must be off:
 
 ```console
+(
+set -o pipefail
 set +x
 set +a
-sudo -v
-printf 'OpenAI API key: '
-IFS= read -r -s PRICETAG_OPENAI_KEY
-printf '\n'
-printf '%s' "$PRICETAG_OPENAI_KEY" | sudo scripts/common/secret-set openai v1
 unset PRICETAG_OPENAI_KEY
+sudo -v &&
+printf 'OpenAI API key: ' &&
+IFS= read -r -s PRICETAG_OPENAI_KEY &&
+printf '\n' &&
+printf '%s' "$PRICETAG_OPENAI_KEY" | sudo scripts/common/secret-set openai v1
+)
 ```
 
 Stop on an error. To rotate later, create a new version and update only the
@@ -212,6 +306,11 @@ printf '%s\n' '[Container]' \
 PRICETAG_UID=$(id -u praxis-svc)
 sudo install -m 0644 configs/common/quadlet/praxis.network \
   "/etc/containers/systemd/users/$PRICETAG_UID/praxis.network"
+```
+
+Continue with the selected real server's hostname:
+
+```console
 GATEWAY_HOST='REPLACE_WITH_REAL_SERVER_PUBLIC_IP_OR_DNS'
 sudo python3 scripts/pricetag/prepare.py \
   --hostname "$GATEWAY_HOST" --praxis-image "$PRAXIS_IMAGE" \
@@ -261,19 +360,71 @@ container loopback. It is a test fixture, not an inference service.
 sudo scripts/pricetag/start
 ```
 
-On either server, export the CA and individual JWTs using [client setup](pricetag.md#test-jwt-access-on-the-vm-and-from-your-laptop).
-Open `https://YOUR_HOST:8443/login`; use the admin JWT and `/admin#quotas` for
-budgets. Never place issuer/CA signing keys on a client or in a container.
-For per-user allowances, use `scripts/pricetag/user`: it links the JWT subject
-to a PriceTag person before setting an override. Raw JWT issuance alone does
-not create that directory relationship.
-
 ## Client access and qualification
 
-On each VM, export its own CA and caller JWT into a separate private client
-directory. Use that VM's public HTTPS origin and advertised model alias with
-`scripts/pricetag/harness`. The real VM is for real harness requests; the mock
-VM's `demo-model` is for synthetic protocol/load tests.
+Run on each RHEL VM after startup. Preparation already created Alice's initial
+JWT; link that subject to a person and rotate it before distributing credentials:
+
+```console
+cd ~/secure-single-server-pricetag
+sudo python3 scripts/pricetag/user --subject alice --name Alice --rotate \
+  --monthly-usd 5 --output /root/pricetag-admin/alice-ready.jwt
+sudo python3 -c 'import json; print("\n".join(m["id"] for m in json.load(open("/etc/praxis-pricetag/models.json"))))'
+```
+
+Record the real model alias printed above (`openai/` plus the selected model ID).
+The performance server advertises only `demo-model`. Raw JWT issuance alone does
+not create the person relationship required for individual overrides. Use
+[the credential administration guide](pricetag.md#administrator-scripts-provision-rotate-and-revoke)
+for new users, further rotations and revocation. Use a new output filename for
+each rotation; preparation and token issuance refuse to overwrite existing state.
+
+Back on the workstation, from this checkout and with the AWS session restored,
+select the host again. Use a distinct client directory for each VM:
+
+```console
+VM_NAME=pricetag-real
+aws_test_verify "$VM_NAME"
+CLIENT_DIR="$HOME/.config/praxis-pricetag/$RUN_PREFIX-$VM_NAME"
+install -d -m 0700 "$CLIENT_DIR"
+umask 077
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+  'sudo -n cat /etc/praxis-pricetag/ca.pem' > "$CLIENT_DIR/ca.pem"
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+  'sudo -n cat /root/pricetag-admin/alice-ready.jwt' > "$CLIENT_DIR/caller.jwt"
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+  'sudo -n cat /root/pricetag-admin/admin.jwt' > "$CLIENT_DIR/admin.jwt"
+chmod 0600 "$CLIENT_DIR/caller.jwt" "$CLIENT_DIR/admin.jwt"
+GATEWAY_URL="https://${RHEL_HOST#*@}:8443"
+```
+
+Complete the preview below for the selected real server first. Later repeat this
+client section with `VM_NAME=pricetag-perf` and `MODEL_ALIAS=demo-model`. Stop on
+any SSH/copy error.
+If preparation used a DNS hostname instead of the IP, set `GATEWAY_URL` to that
+exact HTTPS hostname and port. Never copy issuer/CA signing keys. Admin JWTs are
+for dashboard administration, not harnesses or budget-denial tests.
+
+On the real VM's client setup, choose its actual model alias and preview:
+
+```console
+MODEL_ALIAS='openai/REPLACE_WITH_SELECTED_MODEL_ID'
+python3 scripts/pricetag/harness opencode --url "$GATEWAY_URL" \
+  --token-file "$CLIENT_DIR/caller.jwt" --ca-file "$CLIENT_DIR/ca.pem" \
+  --model "$MODEL_ALIAS" --print-config
+```
+
+Remove `--print-config` to launch an installed OpenCode. Run the helper by absolute
+path from the project you want to work on so OpenCode keeps that working directory.
+For the performance server use `MODEL_ALIAS=demo-model` and preview only: the mock
+cannot perform useful coding work. On-VM harnesses use `https://localhost:8443`
+with that same VM's CA/JWT; no additional public-IP ingress rule is needed.
+
+Trust the appropriate CA in your browser separately from CLI trust. Open
+`$GATEWAY_URL/login` and paste `caller.jwt` for usage, or use a separate browser
+profile with `admin.jwt` and open `$GATEWAY_URL/admin#quotas` for budgets. JWTs
+have no automatic expiry; existing browser cookies can survive JWT revocation
+for seven days. No SSH tunnel is needed.
 
 First verify invalid JWT rejection, private-route isolation, user/admin access,
 USD denial, revocation and accounting persistence. Keep both IP-bound during

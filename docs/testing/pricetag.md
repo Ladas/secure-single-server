@@ -287,69 +287,116 @@ rejects combinations that require API translation the gateway does not provide.
 
 ## Administrator scripts: provision, rotate and revoke
 
-After SSH, link the prepared Alice subject to a person, set a monthly USD
-allowance, and replace its initial credential:
+### 1. Connect from your workstation
 
 ```console
-sudo python3 scripts/pricetag/user --subject alice --name 'Alice' --rotate \
-  --monthly-usd 5 --output /root/pricetag-admin/alice-new.jwt
+SSH_KEY='/absolute/path/to/your/ssh-key'
+RHEL_HOST='ec2-user@YOUR_GATEWAY_IP'
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST"
 ```
 
-For a new user, choose an unused subject/output path and omit `--rotate`.
-The helper logs into the dashboard over verified HTTPS loopback using the admin
-JWT, uses the returned session for its admin API calls, and issues the caller
-credential into a new private file. It never prints token values. The person
-mapping is deterministic and existing mappings are retained.
+### 2. Provision the initial caller — RHEL
 
-Rotate an existing credential without changing any spending configuration:
+Run after gateway startup. Preparation already issued Alice's initial token;
+`--rotate` replaces it and links her person and $5 monthly allowance.
+
+```console
+cd ~/secure-single-server-pricetag
+sudo python3 scripts/pricetag/user --subject alice --name Alice --rotate \
+  --monthly-usd 5 --output /root/pricetag-admin/alice-ready.jwt
+```
+
+### 3. Add a new user — RHEL
+
+```console
+sudo python3 scripts/pricetag/user --subject charlie --name Charlie \
+  --monthly-usd 10 --output /root/pricetag-admin/charlie-v1.jwt
+```
+
+### 4. Copy a caller key — workstation
+
+Use your selected host/key variables from step 1. Stop on a failed copy.
+
+```console
+CLIENT_DIR="$HOME/.config/praxis-pricetag/YOUR_GATEWAY_NAME"
+install -d -m 0700 "$CLIENT_DIR"
+umask 077
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+  'sudo -n cat /etc/praxis-pricetag/ca.pem' > "$CLIENT_DIR/ca.pem"
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+  'sudo -n cat /root/pricetag-admin/alice-ready.jwt' > "$CLIENT_DIR/caller-next.jwt" &&
+  mv "$CLIENT_DIR/caller-next.jwt" "$CLIENT_DIR/caller.jwt"
+chmod 0600 "$CLIENT_DIR/caller.jwt"
+```
+
+Use `caller.jwt` with the harness helper or dashboard login. Signing keys stay
+on the server; admin JWTs are only for administration.
+
+### 5. Rotate a caller key — RHEL
 
 ```console
 sudo python3 scripts/pricetag/credentials rotate --subject alice \
-  --output /root/pricetag-admin/alice-rotated.jwt
+  --output /root/pricetag-admin/alice-v2.jwt
 ```
 
-The old token stops working for subsequent inference requests and new logins;
-the new token retains the exact same `sub`, person, allowance and usage history.
-Rotation has no overlap period. Distribute the replacement privately and restart
-the user's harness with its updated token file. In-flight requests may complete.
-Admin tokens use the same command with `--subject admin`; update the private
-admin-token file used by `scripts/pricetag/user` afterward.
+Identity, allowance and spending history remain unchanged. On your workstation:
 
-Revoke or inspect credentials without contacting metering:
+```console
+umask 077
+ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
+  'sudo -n cat /root/pricetag-admin/alice-v2.jwt' > "$CLIENT_DIR/caller-next.jwt" &&
+  mv "$CLIENT_DIR/caller-next.jwt" "$CLIENT_DIR/caller.jwt"
+```
+
+Restart the harness. The old token stops working for subsequent authentication;
+in-flight inference can finish.
+
+### 6. Revoke or list keys — RHEL
 
 ```console
 sudo python3 scripts/pricetag/credentials revoke --subject alice
 sudo python3 scripts/pricetag/credentials list
 ```
 
-Use `rotate` to restore a revoked subject with a new token. `issue` refuses an
-existing subject; `rotate` and `revoke` refuse unknown subjects. Output files are
-created with mode 0600 and never overwritten. Registry updates are locked and
-atomically replaced, retaining their owner and permissions. Mount the entire
-gateway directory, so replacements are visible inside the container. A missing
-or corrupt registry fails closed with 503; revoked/unknown tokens return 401.
-Keep its parent directory writable only by the administrator. On macOS Podman,
-the shared filesystem can briefly report a missing file after atomic replacement;
-the gateway returns 503 until the updated registry is visible. RHEL uses a
-server-local file.
+To restore a revoked user, run `rotate` with a new output filename. `issue`
+refuses existing subjects. Output files are private and never overwritten.
 
-**Browser-session boundary:** PriceTag validates the JWT only at login. Existing
-browser cookies remain valid for seven days despite token revocation/rotation.
-They do not contain a token identifier, so individual immediate browser-session
-revocation is unavailable with unmodified metering. An administrator can rotate
-`SESSION_SECRET` and restart metering to invalidate **all** dashboard sessions;
-this preserves inference tokens and spending. Browser logout only clears that
-browser's cookie. A compromised account may require both token revocation and
-global session invalidation. JWTs themselves remain valid indefinitely until
-manual revocation, rotation or issuer-key replacement.
+### 7. Rotate the admin key — RHEL
 
-For local Podman administration, override paths:
+```console
+sudo python3 scripts/pricetag/credentials rotate --subject admin \
+  --output /root/pricetag-admin/admin-v2.jwt
+sudo install -m 0600 -o root -g root \
+  /root/pricetag-admin/admin-v2.jwt /root/pricetag-admin/admin.jwt
+```
+
+Update any private workstation copy afterward. `scripts/pricetag/user` reads
+the canonical `admin.jwt` path. Use a fresh filename for every later rotation.
+
+### 8. Change a USD allowance
+
+Log in with the admin JWT and open `/admin#quotas`. Change the person's monthly
+USD override there; no token rotation or gateway restart is required.
+
+### Browser sessions
+
+JWTs have no automatic expiry. Revocation/rotation blocks new inference and
+new logins, but existing dashboard cookies can survive for seven days. Immediate
+per-user browser-session revocation is unavailable with unmodified metering.
+Rotating `SESSION_SECRET` invalidates all browser sessions; restart metering and
+then run `sudo scripts/pricetag/start` to restore its dependent gateway too.
+
+### Local Podman paths
 
 ```console
 python3 scripts/pricetag/credentials rotate --subject alice \
   --registry .state/pricetag/gateway/users.json --key .state/pricetag/issuer/private.pem \
-  --output .state/pricetag/alice-rotated.jwt
+  --output .state/pricetag/alice-v2.jwt
 ```
+
+The registry uses locked atomic updates. Keep its directory administrator-owned
+and mount the directory read-only into the gateway. Missing/corrupt registry
+state fails closed with 503; invalid/revoked credentials return 401.
 
 ## Boundaries and operation
 
