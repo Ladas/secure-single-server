@@ -1,17 +1,15 @@
 # OpenCode harness
 
-OpenCode provides the coding-agent experience: prompts, model choice, streaming,
-and tool calls. This directory packages its lifecycle scripts and OpenShell
-profiles; the architecture does not replace OpenCode with a custom agent.
+OpenCode provides the coding-agent experience: prompts, model interactions,
+and tool calls. This directory packages its lifecycle scripts, pinned image
+reference, and OpenShell profiles; it does not replace OpenCode with a custom
+agent.
 
-The validated local path is **OpenCode → Praxis → vLLM**. OpenCode receives only
-the Praxis endpoint and a placeholder API key, while the sandbox policy permits
-only that endpoint. The model can still invoke tools, but those tools do not
-receive direct vLLM or cloud-provider access.
-
-Start with the [architecture value walkthrough](../../docs/quickstarts/architecture-walkthrough/README.md),
-then use the [OpenCode recipe](../../docs/quickstarts/opencode.md) for setup,
-commands and current limitations. Shared policy semantics and trust boundaries
-are documented in the [OpenShell guide](../../docs/README.md).
+Deploy and test OpenCode from the
+[OpenShell single-server guide](../../../docs/quickstarts/openshell-single-server/README.md).
+The optional Praxis route is documented separately for administrators who
+select it. In that route, tools do not receive direct vLLM or cloud-provider
+access. In standalone OpenShell mode, selected model endpoints remain governed
+by the harness policy.
 
 The preinstalled harness image is digest-pinned in `openshell/configs/images.env`.

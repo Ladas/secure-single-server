@@ -3,6 +3,40 @@
 This is the historical cloud-profile report. For the updated OpenShell pins and
 local CPU/GPU Qwen route, see [2026-09-28 vLLM validation](VLLM-VALIDATION.md).
 
+## Published quickstart verification (October 2)
+
+The OpenCode and OpenClaw `v0.1` bootc quickstarts were qualified in AWS
+`us-east-1` from their exact published Quay digests, not from locally rebuilt
+images:
+
+| Variant | Published `v0.1` digest | Test AMI | Test instance |
+| --- | --- | --- | --- |
+| OpenCode | `sha256:4effd535f8c7111f540ecc4f015a2a17b2b1c6d5c8fdd582e9d162a6778cb734` | `ami-0d9e2d1a1160563af` | `i-006c2e1397993b555` |
+| OpenClaw | `sha256:f2dbdfcc449a2753202b0438c2dd29e68641a07aea0647bc7184920c500580e6` | `ami-0c3d00a28112c3f43` | `i-08578a1f22257f2b6` |
+
+Each VMDK was built on a disposable RHEL 9.8 x86_64 EC2 builder with
+`quay.io/centos-bootc/bootc-image-builder@sha256:afeffdb5a7ab6bb9d0593b5765412c4d821a9492dbaf26bb5a494e27181d2019`,
+imported through the test S3 bucket, and registered as a separate AMI. The
+builder instance was `i-045d9a5c2b74a5369`. Registry tags are mutable; the
+digests above, not the `v0.1` tags, are the reproducibility record.
+
+Both booted hosts reported the exact source digest through `bootc status`,
+activated `secure-single-server.service`, rendered the digest-pinned
+`sandbox_runtime_image`, kept SELinux Enforcing, enabled lingering for
+`openshell-svc`, and bound ports 8090/8091 only to `127.0.0.1`. OpenShell
+reported `0.1.2-rhaiv.0`.
+
+The selected dev sandbox reached Ready on both hosts. OpenCode reported
+`1.18.31`; OpenClaw reported `2026.9.5 (ec9c1a1)`. File creation and readback
+inside `/sandbox` passed. The controlled policy qualification passed on both
+hosts: the allowed request reached the local fixture and returned HTTP 401,
+while the denied request returned `EACCES` without a server-side hit. Podman
+inspection reported two CPUs, 4 GiB, and 2048 PIDs for each sandbox.
+
+Model routing and real inference were not active. OpenClaw's browser/service
+command remains separately unqualified; this run verified its sandbox, CLI
+version, shell access, policy, and runtime limits.
+
 Built with rootful Podman 5.8.2 on an AWS RHEL 9.8 x86_64 PAYG builder.
 Application services run rootless on the booted host. No real provider keys
 or paid model requests were used.

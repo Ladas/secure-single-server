@@ -35,7 +35,8 @@ the final inference-image check.
 `.github/workflows/bootc-images.yml` builds only the image groups whose inputs
 changed. Pull requests build and test locally but do not publish. Pushes to
 `main` publish the selected images to `quay.io/redhat-et` with the release-facing
-`v0.1` tag and immutable `sha-<commit>` audit tags.
+`v0.1` tag and `sha-<commit>` audit tags. Record the resolved digest when
+reproducibility matters; registry tags are mutable.
 
 The workflow authenticates to `registry.redhat.io` with a Red Hat registry
 service account and uses `RHSM_ORG_ID` plus `RHSM_ACTIVATION_KEY` as ephemeral
