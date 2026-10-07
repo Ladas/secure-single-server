@@ -3,6 +3,7 @@
 import argparse
 import copy
 import json
+import math
 import os
 from pathlib import Path
 import pwd
@@ -46,12 +47,26 @@ def mock_inputs():
     return config, models
 
 
-def bootstrap(models, sources, budget):
+def bootstrap(models, sources, budget, seeds=None):
     statements = ['BEGIN;',
         'CREATE UNIQUE INDEX IF NOT EXISTS uq_usage_events_event_id ON usage_events(event_id);',
         f"UPDATE quota_policy SET enforced=true, default_monthly_usd={budget}, "
         "allowed_over_limit_models='{}', over_cap_ceiling_usd=NULL;"]
     fields = 'input_cost_per_mtok,output_cost_per_mtok,cache_write_cost_per_mtok,cache_read_cost_per_mtok'
+    if seeds is not None and not isinstance(seeds, dict):
+        raise ValueError('price-seeds must be an object keyed by upstream model ID')
+    for model, row in (seeds or {}).items():
+        if (not isinstance(model, str) or not model or not isinstance(row, dict)
+                or set(row) != {'provider', 'input', 'output', 'cache_write', 'cache_read'}
+                or not isinstance(row['provider'], str) or not row['provider']):
+            raise ValueError('invalid price seed; require provider and four token rates')
+        rates = [row[k] for k in ('input', 'output', 'cache_write', 'cache_read')]
+        if any(type(rate) not in (int, float) or not math.isfinite(rate) or not 0 <= rate <= 100000 for rate in rates):
+            raise ValueError('price seed rates must be finite nonnegative USD per million tokens')
+        if model in {sources.get(m['id'], m['model']) for m in models}:
+            statements.append(f'INSERT INTO model_pricing(model,provider,{fields}) '
+                f'VALUES ({literal(model)},{literal(row["provider"])},{",".join(map(str, rates))}) '
+                'ON CONFLICT(model) DO NOTHING;')
     for model in models:
         alias, source = literal(model['id']), literal(sources.get(model['id'], model['model']))
         statements += [
@@ -80,6 +95,8 @@ def main():
     parser.add_argument('--monthly-usd', type=int, default=5)
     parser.add_argument('--price-sources', type=Path, required=True,
                         help='JSON mapping gateway aliases to reviewed PriceTag pricing model IDs')
+    parser.add_argument('--price-seeds', type=Path,
+                        help='reviewed fallback USD/MTok rates; inserts missing upstream rows only')
     parser.add_argument('--directory', type=Path, default=Path('/etc/praxis-pricetag'))
     parser.add_argument('--admin-directory', type=Path, default=Path('/root/pricetag-admin'))
     args = parser.parse_args()
@@ -109,6 +126,8 @@ def main():
         parser.error('price-sources must map aliases to model names')
     if any(m['id'] == sources.get(m['id'], m['model']) for m in models):
         parser.error('use distinct gateway aliases to keep their initial pricing snapshot stable')
+    seeds = json.loads(args.price_seeds.read_text()) if args.price_seeds else None
+    bootstrap_sql = bootstrap(models, sources, args.monthly_usd, seeds)
     provider_secrets = []
     for line in ([] if args.mock_provider else args.provider_unit.read_text().splitlines()):
         if re.fullmatch(r'Secret=[A-Za-z0-9_.-]+,type=env,target=[A-Z0-9_]+_API_KEY', line):
@@ -159,7 +178,7 @@ def main():
         'SUPERADMIN_USERS': 'admin', 'MONTHLY_TOKEN_QUOTA': '10000000000', 'TZ': 'UTC',
         'MAAS_VALIDATE_URL': 'http://pricetag-gateway:18084/validate'})
     env('gateway.env', {'M2M_SHARED_SECRET': m2m})
-    (args.directory / 'bootstrap.sql').write_text(bootstrap(models, sources, args.monthly_usd))
+    (args.directory / 'bootstrap.sql').write_text(bootstrap_sql)
     (args.directory / 'models.json').write_text(json.dumps(models, indent=2) + '\n')
     (args.directory / 'price-sources.json').write_text(json.dumps(sources, indent=2) + '\n')
     (units / 'pricetag.network').write_text('[Network]\nNetworkName=pricetag-private\nDriver=bridge\n')

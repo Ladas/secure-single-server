@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+"""Prepare native provider inputs and private secrets for a fresh PriceTag gateway."""
+import argparse
+import getpass
+import json
+import os
+from pathlib import Path
+import pwd
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ROOT = Path(__file__).resolve().parents[2]
+STATE = Path('/root/pricetag-provider-inputs')
+DEPLOY = Path('/etc/praxis-pricetag')
+DEBUG = False
+# Operators review/edit these non-secret presets before first-time setup.
+PRESETS = json.loads((ROOT / 'configs/pricetag/provider-models.json').read_text())
+
+
+def normalize_url(value, api):
+    from provider_config import endpoint
+    value = value.strip()
+    if '://' not in value:
+        value = 'https://' + value
+    endpoint(value)
+    origin = 'https://' + urllib.parse.urlsplit(value).netloc
+    return origin + ('/v1' if api == 'openai' else '')
+
+
+def pricetag_urls(value):
+    """Derive the documented route pair; generic hosts serve both API paths."""
+    origin = normalize_url(value, 'anthropic')
+    parsed = urllib.parse.urlsplit(origin)
+    authority = parsed.netloc
+    messages, openai = authority, authority
+    if authority.lower().startswith('ai-gateway-unified-'):
+        openai = 'ai-gateway-openai-' + authority[len('ai-gateway-unified-'):]
+    elif authority.lower().startswith('ai-gateway-openai-'):
+        messages = 'ai-gateway-unified-' + authority[len('ai-gateway-openai-'):]
+    return {'anthropic': normalize_url('https://' + messages, 'anthropic'),
+            'openai': normalize_url('https://' + openai, 'openai')}
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError('Model discovery refused a redirect; use the final HTTPS provider origin')
+
+
+def debug_response(api, url, status, headers, elapsed, key):
+    if not DEBUG:
+        return
+    def safe(value):
+        text = str(value or '').replace(key, '[redacted]')
+        return ''.join(c for c in text if 32 <= ord(c) < 127)[:200]
+    print('DEBUG response:', json.dumps({'api': api, 'url': url, 'status': status,
+        'elapsed_seconds': round(elapsed, 3),
+        'content_type': safe(headers.get('Content-Type')),
+        'request_id': safe(headers.get('x-request-id'))}, sort_keys=True))
+
+
+def discover_models(url, api, key):
+    from provider_config import endpoint
+    endpoint(url)
+    base = url.rstrip('/')
+    if not base.endswith('/v1'):
+        base += '/v1'
+    headers = {'Accept': 'application/json'}
+    if api == 'openai':
+        headers['Authorization'] = 'Bearer ' + key
+    else:
+        headers.update({'x-api-key': key, 'anthropic-version': '2023-06-01'})
+    # Never forward a credential through redirects or inherited proxy settings.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    models, cursor = {}, ''
+    for _ in range(20):
+        target = base + '/models'
+        if cursor:
+            target += '?' + urllib.parse.urlencode({'after_id': cursor})
+        if DEBUG:
+            auth = 'Authorization: Bearer [redacted]' if api == 'openai' else 'x-api-key: [redacted]'
+            print(f'DEBUG request: GET {target}; api={api}; auth={auth}; TLS verification=on; redirects=off')
+        started = time.monotonic()
+        try:
+            with opener.open(urllib.request.Request(target, headers=headers), timeout=20) as response:
+                raw = response.read(1048577)
+                debug_response(api, target, getattr(response, 'status', 200),
+                               getattr(response, 'headers', {}), time.monotonic() - started, key)
+            if len(raw) > 1048576:
+                raise ValueError('Model catalog is too large')
+            data = json.loads(raw)
+        except urllib.error.HTTPError as error:
+            status = error.code
+            debug_response(api, target, status, error.headers or {}, time.monotonic() - started, key)
+            error.close()
+            raise ValueError(f'{api} model discovery returned HTTP {status} at {target}; check endpoint/key permissions') from None
+        except (urllib.error.URLError, OSError) as error:
+            if DEBUG:
+                reason = getattr(error, 'reason', error)
+                print('DEBUG connection failure:', type(reason).__name__)
+            raise ValueError(f'{api} discovery failed at {target}; check HTTPS certificate, endpoint and connectivity') from None
+        except (json.JSONDecodeError, UnicodeError):
+            raise ValueError('Model discovery did not return valid JSON') from None
+        if not isinstance(data, dict) or not isinstance(data.get('data'), list):
+            raise ValueError('Expected a /v1/models response with a data list')
+        if DEBUG:
+            print(f'DEBUG catalog: api={api}; page_entries={len(data["data"])}; has_more={bool(data.get("has_more"))}')
+        for item in data['data']:
+            model = item.get('id') if isinstance(item, dict) else None
+            if (isinstance(model, str) and key not in model and
+                    re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,179}', model)):
+                models[model] = item
+        if not data.get('has_more'):
+            return [models[name] for name in sorted(models)]
+        following = data.get('last_id')
+        if not isinstance(following, str) or following not in models or following == cursor:
+            raise ValueError('Invalid model pagination cursor')
+        cursor = following
+    raise ValueError('Model catalog exceeds the pagination limit')
+
+
+def check_host():
+    if os.geteuid() != 0:
+        raise ValueError('Run with sudo on the gateway host')
+    if DEPLOY.exists() or Path('/root/pricetag-admin').exists():
+        raise ValueError('Already prepared: this helper is for first-time provider setup only')
+    if STATE.is_symlink() or (STATE.exists() and (
+            not STATE.is_dir() or STATE.stat().st_uid != 0 or STATE.stat().st_mode & 0o077)):
+        raise ValueError('Provider inputs must be a root-owned private directory')
+
+
+def service(*args, **kwargs):
+    uid = pwd.getpwnam('praxis-svc').pw_uid
+    return subprocess.run(['sudo', '-u', 'praxis-svc', 'env',
+        'XDG_RUNTIME_DIR=/run/user/' + str(uid),
+        'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/' + str(uid) + '/bus',
+        *args], cwd='/tmp', capture_output=True, **kwargs)
+
+
+def prompt(label, default=''):
+    value = input(label + (f' [{default}]' if default else '') + ': ').strip()
+    value = value or default
+    if not value:
+        raise ValueError('A value is required')
+    return value
+
+
+def provider_settings(name, api, url, key, urls=None):
+    from unified_config import validate
+    urls = {dialect: normalize_url(address, dialect) for dialect, address in (urls or {api: url}).items()}
+    active_urls = {}
+    selected, prices = {}, {}
+    for dialect, address in urls.items():
+        available = {m['id']: m for m in discover_models(address, dialect, key)}
+        enabled = 0
+        for model, context, output in PRESETS[dialect]:
+            if model not in available:
+                print('Unavailable; skipped:', model)
+                continue
+            metadata = available[model].get('praxis', {})
+            if isinstance(metadata, dict):
+                advertised_context, advertised_output = metadata.get('context'), metadata.get('output')
+                if (type(advertised_context) is int and type(advertised_output) is int
+                        and 0 < advertised_output < advertised_context <= 2000000):
+                    context, output = min(context, advertised_context), min(output, advertised_output)
+            alias = name + '/' + model
+            selected[alias] = {'id': alias, 'provider': name, 'model': model,
+                               'apis': [dialect], 'context': context, 'output': output}
+            prices[alias] = model
+            enabled += 1
+            print(f'Enabled {alias}: {dialect}, context={context}, output={output}')
+        if enabled:
+            active_urls[dialect] = address
+        else:
+            print('No matching presets; disabled API:', dialect)
+            print('Advertised models:', ', '.join(sorted(available)[:30]) or '(empty catalog)')
+    if not selected:
+        raise ValueError('No preset models available on either endpoint; no secret saved')
+    models = validate(list(selected.values()))
+    version = 1
+    while service('podman', 'secret', 'exists', f'praxis-{name}-api-key-v{version}').returncode == 0:
+        version += 1
+    return {'models': models, 'prices': prices, 'urls': active_urls,
+            'model': models[0], 'api': api, 'url': url, 'price': prices[models[0]['id']],
+            'secret': f'praxis-{name}-api-key-v{version}'}
+
+
+def add_provider(name, urls=None, replace=False):
+    if not sys.stdin.isatty():
+        raise ValueError('Run interactively over SSH; never pipe provider keys')
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    destination = STATE / ('provider-' + name + '.json')
+    if destination.exists() and not replace:
+        raise ValueError(name + ' is already configured; use --replace to update presets with a newly entered key')
+    api = 'openai' if name == 'openai' else 'both'
+    if name == 'openai':
+        urls = {'openai': 'https://api.openai.com'}
+    else:
+        overrides = {api: url for api, url in (urls or {}).items() if url}
+        if len(overrides) == 2:
+            urls = overrides
+        else:
+            base = next(iter(overrides.values()), None) or prompt(
+                'PriceTag host or URL (second hostname, https:// and /v1 are automatic)')
+            urls = pricetag_urls(base)
+            urls.update(overrides)
+    urls = {dialect: normalize_url(address, dialect) for dialect, address in urls.items()}
+    for dialect, address in urls.items():
+        print('Credential destination:', dialect, address)
+    url = next(iter(urls.values()))
+    if len(urls) > 1:
+        print('Use one PriceTag key authorized for both URLs.')
+    key = getpass.getpass(name + ' provider key (hidden): ').strip()
+    if not key or len(key) > 16384 or not re.fullmatch(r'[\x21-\x7e]+', key):
+        raise ValueError('Expected one nonempty credential line')
+    settings = provider_settings(name, api, url, key, urls=urls)
+    for model in settings.get('models', [settings['model']]):
+        print('Ready:', model['id'], 'via', ', '.join(model.get('apis', [api])))
+    result = service('podman', 'secret', 'create', settings['secret'], '-', input=key.encode())
+    del key
+    if result.returncode:
+        raise ValueError('Podman secret creation failed; credential values are not shown')
+    with tempfile.NamedTemporaryFile(mode='w', dir=STATE, prefix='.provider-', delete=False) as output:
+        temporary = Path(output.name)
+        json.dump(settings, output, indent=2)
+    try:
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    print('Provider configured; key stored as a Podman secret')
+
+
+def export():
+    import yaml
+    from provider_config import render
+    from unified_config import validate
+    entries = {}
+    for name in ('openai', 'pricetag'):
+        path = STATE / ('provider-' + name + '.json')
+        if path.is_file():
+            entries[name] = json.loads(path.read_text())
+    if not entries:
+        raise ValueError('Configure at least one provider before export')
+    models = validate([model for entry in entries.values() for model in entry['models']])
+    source = yaml.safe_load((ROOT / 'configs/all-in-one/shared-gateway.yaml').read_text())
+    custom = {'pricetag': {api + '_url': url for api, url in entries['pricetag']['urls'].items()}} if 'pricetag' in entries else {}
+    providers = render(source, vllm=False, openai='openai' in entries,
+                       anthropic=False, custom=custom)
+    prices, lines = {}, ['[Container]']
+    for name, entry in entries.items():
+        prices.update(entry['prices'])
+        if service('podman', 'secret', 'exists', entry['secret']).returncode:
+            raise ValueError('Required provider secret is missing')
+        target = 'OPENAI_API_KEY' if name == 'openai' else 'CUSTOM_PRICETAG_API_KEY'
+        lines.append(f'Secret={entry["secret"]},type=env,target={target}')
+    for filename, data in [('providers.json', providers), ('models.json', models), ('prices.json', prices)]:
+        (STATE / filename).write_text(json.dumps(data, indent=2) + '\n')
+    (STATE / 'provider-secrets.container').write_text('\n'.join(lines) + '\n')
+    print(f'Exported {len(models)} models and secret references to {STATE}; no services started')
+
+
+def main():
+    global DEBUG
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('command', choices=['openai', 'pricetag', 'export'])
+    parser.add_argument('--openai-url', help='optional hosted PriceTag OpenAI endpoint override; HTTPS added if omitted')
+    parser.add_argument('--anthropic-url', help='optional hosted PriceTag Messages endpoint override')
+    parser.add_argument('--replace', action='store_true', help='replace saved provider inputs before activation; preserves old secrets')
+    parser.add_argument('--debug', action='store_true', help='print request URLs, auth header names, HTTP status and model counts; no keys or response bodies')
+    args = parser.parse_args()
+    DEBUG = args.debug
+    check_host()
+    os.umask(0o077)
+    sys.path.insert(0, str(ROOT / 'scripts/common'))
+    if args.command == 'export':
+        export()
+    else:
+        urls = {}
+        for api in ('openai', 'anthropic'):
+            value = getattr(args, api + '_url')
+            if value:
+                urls[api] = value
+        add_provider(args.command, urls=urls, replace=args.replace)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        raise SystemExit('Setup stopped: ' + (str(error) if not isinstance(error, subprocess.CalledProcessError)
+                                            else 'subprocess failed; no credential values printed')) from None

@@ -94,9 +94,13 @@ application containers with their existing state and database volume.
 
 You can also preview client configuration against this local gateway:
 
-The OpenCode helper explicitly enables the `praxis` provider in its per-process
-configuration, so a pre-existing provider allowlist cannot hide this gateway's
-models. It does not edit the user's persistent OpenCode configuration.
+The OpenCode helper loads the full authenticated catalog into the per-process
+providers `praxis-openai` and `praxis-messages`, enabling whichever APIs are
+advertised. `--model` sets the starting model; `/models` switches between gateway
+models in the same session. Relaunch to refresh the catalog after server changes.
+Per-provider allowlists exclude inherited local model entries; background tasks
+use the starting gateway model through the session's `small_model` setting.
+It does not edit the user's persistent OpenCode configuration.
 [OpenCode provider configuration](https://opencode.ai/docs/config/#enabled-providers).
 
 ```console
@@ -267,7 +271,7 @@ The model argument is the complete gateway alias, such as
 
 | Harness argument | Configuration supplied at launch | Persistent alternative |
 | --- | --- | --- |
-| `opencode` | `OPENCODE_CONFIG_CONTENT`: provider `praxis`, base URL ending `/v1`, caller JWT, selected model and limits. Chooses OpenAI-compatible or Anthropic SDK from the catalog; `--api anthropic` selects Messages on a dual-API model | Put the provider/model block in `opencode.json` and load the JWT from a private environment variable |
+| `opencode` | `OPENCODE_CONFIG_CONTENT`: full catalog grouped into `praxis-openai` and `praxis-messages`, caller JWT and per-model limits. GPT-5/GPT-6/o1/o3/o4 use the OpenAI Responses SDK; other OpenAI models use Chat Completions; Messages models use the Anthropic SDK. `--api anthropic` selects the starting dialect for a dual-API model | Put the provider/model blocks in `opencode.json` and load the JWT from a private environment variable |
 | `codex` | Command-line provider settings using `/v1/responses`, caller JWT environment variable and context/compaction limits. Local vLLM gets a generated model catalog under `~/.cache/pricetag-harness` | Put the equivalent provider/model settings in `~/.codex/config.toml`, keeping credentials in the environment |
 | `claude-code` | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, explicit model/context/output settings; local Qwen gets the existing custom-menu settings and compatible reasoning effort | Export the same environment settings before launching `claude`; keep the token in a private file |
 

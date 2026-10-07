@@ -75,6 +75,9 @@ def main():
             return json.load(response)
 
     identities = api('/api/v1/admin/identities')
+    # Metering serializes its empty Go slice as JSON null on a fresh database.
+    if identities is None:
+        identities = []
     matches = [row for row in identities if row['username'] == args.subject]
     if len(matches) > 1:
         raise ValueError('ambiguous existing identity; review the directory')

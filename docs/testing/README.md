@@ -31,6 +31,13 @@ References, as needed:
 - [vLLM administration](../quickstarts/common/vllm.md): installation without the smoke runner and maintenance.
 - [vLLM debugging](vllm-debugging.md): known failures, upstream leads and fix qualification.
 
+## PriceTag remote gateway
+
+For a fresh AWS RHEL VM, follow [AWS + PriceTag setup](aws-pricetag.md) from VM
+creation through provider secrets, rootless services, user JWTs and local
+OpenCode with the full gateway catalog. Use the separate mock VM for
+[performance and storage measurements](pricetag-perf.md).
+
 ## Local development checks
 
 Run the offline regression suite from the repository root:

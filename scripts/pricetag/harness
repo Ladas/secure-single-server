@@ -19,13 +19,53 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError('gateway redirected the authenticated catalog request')
 
 
+def opencode_catalog(catalog, model, api, base, caller):
+    """Expose each advertised native API without translating model aliases."""
+    providers, seen = {}, set()
+    names = {'openai': 'praxis-openai', 'anthropic': 'praxis-messages'}
+    for item in catalog:
+        alias, meta = item['id'], item['praxis']
+        if alias in seen:
+            raise ValueError('ambiguous model in gateway catalog')
+        seen.add(alias)
+        limits = (meta['context'], meta['output'])
+        if any(type(n) is not int for n in limits) or not 0 < limits[1] < limits[0] <= 2000000:
+            raise ValueError('invalid model limits in gateway catalog')
+        for dialect in names:
+            if dialect not in meta['apis']:
+                continue
+            provider = 'vllm' if meta['provider'] == 'vllm' and dialect == 'openai' else dialect
+            _, additions = configuration('opencode', provider, alias, base, caller,
+                unified=True, model_limits=limits, upstream_model=meta['upstream_model'])
+            entry = json.loads(additions['OPENCODE_CONFIG_CONTENT'])['provider']['praxis']
+            upstream = meta['upstream_model'].lower()
+            if dialect == 'openai' and upstream.startswith(('gpt-5', 'gpt-6', 'o1', 'o3', 'o4')):
+                # Modern GPT uses Responses; generic Chat SDK max_tokens is rejected.
+                entry['models'][alias].update(provider={'npm': '@ai-sdk/openai'}, reasoning=True,
+                    options={'store': False, 'reasoningEffort': 'medium',
+                             'include': ['reasoning.encrypted_content']})
+            name = names[dialect]
+            if name not in providers:
+                entry['name'] = 'Praxis ' + ('OpenAI' if dialect == 'openai' else 'Messages')
+                providers[name] = entry
+            else:
+                providers[name]['models'].update(entry['models'])
+    ordered = {name: providers[name] for name in names.values() if name in providers}
+    for entry in ordered.values():
+        # Inline config merges with persistent models under the same provider ID.
+        entry.update(whitelist=list(entry['models']), blacklist=[])
+    selected = names[api] + '/' + model
+    return {'model': selected, 'small_model': selected, 'provider': ordered,
+            'enabled_providers': list(ordered), 'disabled_providers': []}
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('harness', choices=['opencode', 'codex', 'claude-code'])
     p.add_argument('--url', required=True)
     p.add_argument('--token-file', type=Path, required=True)
     p.add_argument('--ca-file', type=Path)
-    p.add_argument('--model', required=True, help='gateway alias, including its provider prefix')
+    p.add_argument('--model', required=True, help='starting gateway alias; OpenCode lists the full catalog')
     p.add_argument('--api', choices=['openai', 'anthropic'], help='OpenCode dialect when both are available')
     p.add_argument('--print-config', action='store_true', help='redacted preview; do not launch')
     a = p.parse_args()
@@ -62,9 +102,8 @@ def main():
     command, additions = configuration(name, provider, a.model, a.url, caller,
         unified=True, model_limits=limits, upstream_model=meta['upstream_model'], catalog_path=local_catalog)
     if name == 'opencode':
-        config = json.loads(additions['OPENCODE_CONFIG_CONTENT'])
-        config.update(enabled_providers=['praxis'], disabled_providers=[])
-        additions['OPENCODE_CONFIG_CONTENT'] = json.dumps(config)
+        additions['OPENCODE_CONFIG_CONTENT'] = json.dumps(
+            opencode_catalog(catalog, a.model, api, a.url, caller))
     if name == 'codex' and provider != 'vllm':
         command += ['-c', f'model_context_window={limits[0]}', '-c', f'model_auto_compact_token_limit={limits[0]-limits[1]}']
     if name == 'claude':

@@ -4,10 +4,11 @@ Start here. Deploy any of the VMs below; each has its own plan, launch
 and journal. They can run at the same time. AWS deployment prepares the host;
 [smoke tests](rhel-smoke.md) install and test the services afterward.
 
-For the PriceTag metering pilot, reuse an existing VM with the procedure below.
-Provision a new VM only if you want a separate environment; the gateway,
-metering/dashboard and PostgreSQL are independent containers, and metering does
-not require a GPU. [PriceTag deployment and local Podman dashboards](pricetag.md).
+For a fresh PriceTag gateway, follow [AWS + PriceTag setup](aws-pricetag.md):
+VM creation, source transfer, images, provider setup, user budgets/JWTs and local
+OpenCode. It needs no GPU or pre-existing gateway. Reusing an existing local-vLLM
+VM is a separate option below. [Local Podman dashboards](pricetag.md) provide a
+development path.
 
 ## PriceTag on an existing VM
 
@@ -50,11 +51,10 @@ VM use `https://localhost:8443` with the same JWT authentication and CA checks.
 The VM's public IP does **not** need a separate ingress rule for those tests.
 Continue with [PriceTag service preparation and startup](pricetag.md#prepare-the-existing-rhel-vm).
 
-For a separate gateway host, use the **all-in-one without vLLM** recipe below
-to prepare the private provider configuration this pilot consumes. Complete
-provider/catalog setup, add the workstation-only HTTPS rule above, then deploy
-PriceTag's remote endpoint. Reusing the GPU VM is sufficient for the initial
-local vLLM pilot; keep the memory/context sizing below for inference decisions.
+For a separate PriceTag gateway host, use [the fresh-host guide](aws-pricetag.md)
+instead of installing an all-in-one gateway first. Reusing a GPU VM is only
+needed when you also want its local vLLM; keep the memory/context sizing below
+for inference decisions.
 
 | VM name | Scenario | Inference preset |
 | --- | --- | --- |
