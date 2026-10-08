@@ -15,7 +15,7 @@ development path.
 Resume the existing run's AWS credentials, region, account, SSH key and launch
 journal using [resume settings](aws-operations.md#resume-a-terminal-or-inspect-an-earlier-vm).
 Run these commands from this checkout. `RHEL_STATE_FILE` must be the existing
-VM's launch journal, even if that file lives in an earlier worktree.
+VM's saved launch journal. Keep that journal when switching branches.
 
 ```console
 if [ -n "${RHEL_STATE_FILE:-}" ] && CLIENT_IP="$(curl -4 -fsS https://checkip.amazonaws.com)"; then
@@ -49,7 +49,7 @@ services. If you use an AWS named profile, add `--profile NAME` to both commands
 Your browser and local OpenCode use the public HTTPS address. Harnesses on the
 VM use `https://localhost:8443` with the same JWT authentication and CA checks.
 The VM's public IP does **not** need a separate ingress rule for those tests.
-Continue with [PriceTag service preparation and startup](pricetag.md#prepare-the-existing-rhel-vm).
+Continue with [PriceTag service preparation and startup](pricetag.md#add-metering-beside-an-existing-all-in-one-rhel-installation).
 
 For a separate PriceTag gateway host, use [the fresh-host guide](aws-pricetag.md)
 instead of installing an all-in-one gateway first. Reusing a GPU VM is only

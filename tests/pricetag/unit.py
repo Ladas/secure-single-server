@@ -272,6 +272,16 @@ class HarnessTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'limits'):
             self.preview('opencode')
 
+    def test_opencode_glm_is_text_only_with_hosted_limits(self):
+        self.model.update(id='pricetag/rits/zai-org/glm-5-3', praxis={
+            'provider': 'pricetag', 'upstream_model': 'rits/zai-org/glm-5-3',
+            'context': 262144, 'output': 65536, 'apis': ['anthropic']})
+        config = json.loads(self.preview('opencode')['environment']['OPENCODE_CONFIG_CONTENT'])
+        entry = config['provider']['praxis-messages']['models'][self.model['id']]
+        self.assertEqual(entry['limit'], {'context': 262144, 'output': 65536})
+        self.assertEqual(entry['modalities'], {'input': ['text'], 'output': ['text']})
+        self.assertFalse(entry['attachment'])
+
     def test_public_token_file_is_rejected_before_network(self):
         self.token.chmod(0o644)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

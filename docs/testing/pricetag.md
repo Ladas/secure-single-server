@@ -1,9 +1,12 @@
 # Remote gateway with PriceTag spending budgets
 
-This pilot adds a JWT-authenticated HTTPS gateway, PriceTag user/admin dashboards
-and PostgreSQL beside an existing all-in-one installation. It reuses that
-installation's providers and model aliases. The original gateway and vLLM stay
-available while the new endpoint is qualified. The metered endpoint uses USD
+For a **new cloud-only RHEL VM**, follow [AWS installation](aws-pricetag.md)
+from VM creation through provider setup, users, dashboards and OpenCode.
+This page covers local Podman testing, adding metering beside an existing
+all-in-one installation, and ongoing user/JWT administration.
+
+The deployment adds a JWT-authenticated HTTPS gateway, PriceTag user/admin
+dashboards and PostgreSQL. The metered endpoint uses USD
 budgets and retains PriceTag’s legacy 10-billion-token monthly safety net.
 It has no Praxis `token_rate_limit` filter.
 
@@ -51,7 +54,7 @@ Use `--platform linux/amd64` for an image to transfer to an x86 RHEL host; build
 natively on RHEL is faster than emulation. Local ARM and RHEL AMD64 builds have
 different image IDs even when they use the same source.
 
-Build the experimental worktree containing `manual_jwt`:
+Build the reviewed experimental checkout containing `manual_jwt`:
 
 ```console
 podman build --build-arg FEATURES=otel -t localhost/praxis-experimental:manual-jwt \
@@ -60,7 +63,7 @@ python3 scripts/pricetag/local up
 python3 -B tests/pricetag/local.py
 ```
 
-Replace `../experimental` with the reviewed filter worktree path. After release,
+Replace `../experimental` with the reviewed experimental repository path. After release,
 use the published image digest only after confirming it includes `manual_jwt`.
 The experimental repository publishes to GHCR; the Quay image also depends on
 its downstream build completing. Set `PRAXIS_IMAGE` and `METERING_IMAGE` before
@@ -112,7 +115,7 @@ python3 scripts/pricetag/harness opencode --url https://localhost:8443 \
 The synthetic provider is for protocol and spending tests. Use the real vLLM
 on RHEL for interactive coding tasks.
 
-## Prepare the existing RHEL VM
+## Add metering beside an existing all-in-one RHEL installation
 
 First follow [AWS HTTPS access](aws.md#pricetag-on-an-existing-vm). Only your
 workstation's public IPv4 `/32` needs TCP 8443 access. On-host tests use HTTPS
@@ -122,8 +125,8 @@ Use an existing all-in-one provider configuration with a unified model catalog.
 The first pilot needs `/etc/praxis/shared-gateway.yaml` in the installer's JSON
 format and `/etc/praxis/unified-models.json`. It needs the locked `praxis-svc`
 account, its `praxis.network` Quadlet and its existing provider secret references.
-On a fresh VM, complete the [provider setup](../quickstarts/common/providers.md)
-and unified catalog first. A separate external vLLM can replace the local model
+For a fresh cloud-only VM, use [AWS installation](aws-pricetag.md) instead of
+this existing-installation path. A separate external vLLM can replace the local model
 later without moving the metering database.
 
 From the secure-single-server checkout, copy only the deployment sources:
@@ -215,6 +218,15 @@ Existing databases require PriceTag's separate event-idempotency migration.
 
 ## Test JWT access on the VM and from your laptop
 
+Provision Alice before exporting her caller token. If the AWS guide already
+provisioned her, skip this block and use its `alice-ready.jwt`:
+
+```console
+cd ~/secure-single-server-pricetag
+sudo python3 scripts/pricetag/user --subject alice --name Alice --rotate \
+  --monthly-usd 5 --output /root/pricetag-admin/alice-ready.jwt
+```
+
 On RHEL, use HTTPS loopback with the CA and an ordinary user's JWT. The test
 certificate includes localhost and the configured public host. As the SSH
 administrator, export only a user token and the public CA certificate into
@@ -223,7 +235,7 @@ your own private client directory:
 ```console
 install -d -m 0700 "$HOME/.config/praxis-pricetag"
 sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" \
-  /root/pricetag-admin/alice.jwt "$HOME/.config/praxis-pricetag/caller.jwt"
+  /root/pricetag-admin/alice-ready.jwt "$HOME/.config/praxis-pricetag/caller.jwt"
 sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" \
   /etc/praxis-pricetag/ca.pem "$HOME/.config/praxis-pricetag/ca.pem"
 cd ~/secure-single-server-pricetag
@@ -301,8 +313,10 @@ ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST"
 
 ### 2. Provision the initial caller — RHEL
 
-Run after gateway startup. Preparation already issued Alice's initial token;
-`--rotate` replaces it and links her person and $5 monthly allowance.
+Run after gateway startup if Alice has not already been provisioned by the
+installation guide. Preparation issued her initial token; `--rotate` replaces it
+and links her person and $5 monthly allowance. For an existing provisioned user,
+use the rotation or allowance instructions below instead.
 
 ```console
 cd ~/secure-single-server-pricetag
@@ -326,7 +340,8 @@ CLIENT_DIR="$HOME/.config/praxis-pricetag/YOUR_GATEWAY_NAME"
 install -d -m 0700 "$CLIENT_DIR"
 umask 077
 ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
-  'sudo -n cat /etc/praxis-pricetag/ca.pem' > "$CLIENT_DIR/ca.pem"
+  'sudo -n cat /etc/praxis-pricetag/ca.pem' > "$CLIENT_DIR/ca-next.pem" &&
+  mv "$CLIENT_DIR/ca-next.pem" "$CLIENT_DIR/ca.pem"
 ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
   'sudo -n cat /root/pricetag-admin/alice-ready.jwt' > "$CLIENT_DIR/caller-next.jwt" &&
   mv "$CLIENT_DIR/caller-next.jwt" "$CLIENT_DIR/caller.jwt"
@@ -369,7 +384,7 @@ refuses existing subjects. Output files are private and never overwritten.
 
 ```console
 sudo python3 scripts/pricetag/credentials rotate --subject admin \
-  --output /root/pricetag-admin/admin-v2.jwt
+  --output /root/pricetag-admin/admin-v2.jwt &&
 sudo install -m 0600 -o root -g root \
   /root/pricetag-admin/admin-v2.jwt /root/pricetag-admin/admin.jwt
 ```
@@ -402,6 +417,91 @@ The registry uses locked atomic updates. Keep its directory administrator-owned
 and mount the directory read-only into the gateway. Missing/corrupt registry
 state fails closed with 503; invalid/revoked credentials return 401.
 
+## Replace a running gateway's PriceTag endpoint or key
+
+For deployments created with `scripts/pricetag/providers`, SSH to the gateway
+host and run:
+
+```console
+cd ~/secure-single-server-pricetag
+sudo python3 scripts/pricetag/providers pricetag --replace --debug
+```
+
+Enter the new hostname once, review both credential destinations, then enter
+the key at the hidden prompt. For a deployment initialized with a different
+provider-input directory, add `--state-dir /root/YOUR_PROVIDER_INPUT_DIRECTORY`.
+That directory must retain the original provider configuration and secret
+references and be root-owned with private permissions.
+
+The command preserves installed models and limits, direct OpenAI, JWTs,
+allowances, pricing and spending history. It creates a new Podman secret and
+restarts only Praxis; expect a brief inference/dashboard interruption. It
+backs up affected files privately and rolls back if activation fails. If
+recovery also fails, the error reports the backup directory and manifest.
+Old secrets remain available for rollback. Do not run `prepare` afterward.
+
+For direct OpenAI key replacement, use:
+
+```console
+sudo python3 scripts/pricetag/providers openai --replace --debug
+```
+
+This keeps the direct OpenAI endpoint and existing catalog; the PriceTag
+provider remains unchanged.
+
+Discovery must confirm the installed models and their configured limits, or
+you must explicitly pin confirmed catalog omissions using the
+[discovery options](aws-pricetag.md). A pin does not prove inference access.
+Plain replacement refuses new models, lower served limits or missing unpinned models.
+After success, test an actual request on each configured upstream API. The
+activation check verifies gateway HTTPS and authentication, not upstream inference.
+
+### Refresh PriceTag models when migrating providers
+
+To replace its model catalog with advertised presets plus explicit pins, use:
+
+```console
+sudo python3 scripts/pricetag/providers pricetag --replace --refresh-models --debug \
+  --pin-model anthropic:rits/zai-org/glm-5-3
+```
+
+This can remove PriceTag models omitted by the new catalog. Pin other documented,
+confirmed models explicitly if discovery omits them. Direct OpenAI models remain
+configured. The command prints additions/removals and updates native routes,
+the authenticated catalog and price-source mappings together. It refuses native
+gateway edits that do not match saved provider inputs.
+
+Missing alias prices are copied from the existing metering price source in a
+transaction before activation. Missing sources or historical unpriced usage stop
+the update. Existing price rows, retired-model usage, identities and budgets are
+never reset. Newly inserted alias prices remain if configuration rolls back.
+GLM's upstream seed is zero-priced; review that chargeback policy before enabling
+it. Relaunch clients after a catalog change. Its context/output caps are
+262144/65536 and its OpenCode configuration is text-only; avoid image history.
+
+### Diagnose PriceTag authentication or catalog omissions
+
+Each command prompts for the host and key without saving the key or changing
+provider configuration. Catalog checks try both credential headers:
+
+```console
+sudo python3 scripts/pricetag/providers pricetag --check-auth --debug
+```
+
+For a reviewed model that is missing from discovery, test its actual inference
+route. This makes a small request with a 16-token output cap and can incur usage:
+
+```console
+sudo python3 scripts/pricetag/providers pricetag \
+  --check-inference openai:gpt-6-luna --debug
+```
+
+Use `anthropic:rits/zai-org/glm-5-3` to test the GLM Messages route instead.
+The diagnostic retries the alternate header only after 401/403 and prints no
+credential values or response bodies. It does not establish streaming or tool
+support. If both headers fail, verify credential issuance, endpoint and access;
+do not bypass authentication errors with a model pin.
+
 ## Boundaries and operation
 
 - USD allowances are the primary budget. `MONTHLY_TOKEN_QUOTA=10000000000`
@@ -432,7 +532,7 @@ The original all-in-one services and model weights remain available. Remove the
 Do not run the original shared-gateway quota helper against this USD policy.
 
 For broader client access later, follow
-[the public HTTPS transition](aws-pricetag.md#open-the-real-server-to-any-ip-later).
+[the public HTTPS transition](pricetag-access.md).
 Retain JWT/TLS, private accounting/database ports and restricted SSH. The admin
 dashboard shares port 8443 with inference: opening that port also makes its login
 and routes publicly reachable, with authentication and role checks still enforced.

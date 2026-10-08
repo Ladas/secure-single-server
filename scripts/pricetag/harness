@@ -39,6 +39,9 @@ def opencode_catalog(catalog, model, api, base, caller):
                 unified=True, model_limits=limits, upstream_model=meta['upstream_model'])
             entry = json.loads(additions['OPENCODE_CONFIG_CONTENT'])['provider']['praxis']
             upstream = meta['upstream_model'].lower()
+            if upstream == 'rits/zai-org/glm-5-3':
+                entry['models'][alias].update(attachment=False,
+                    modalities={'input': ['text'], 'output': ['text']})
             if dialect == 'openai' and upstream.startswith(('gpt-5', 'gpt-6', 'o1', 'o3', 'o4')):
                 # Modern GPT uses Responses; generic Chat SDK max_tokens is rejected.
                 entry['models'][alias].update(provider={'npm': '@ai-sdk/openai'}, reasoning=True,
