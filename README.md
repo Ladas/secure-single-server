@@ -76,12 +76,29 @@ To install OpenShell, harnesses, and Praxis separately on a fresh VM or bare
 metal, follow the [manual single-server guide](docs/quickstarts/openshell-single-server/manual.md)
 and [Praxis installation walkthrough](docs/quickstarts/openshell-praxis/install.md).
 
+The manual guide installs Git and Podman, clones the reviewed revision to the
+service-readable `/opt/secure-single-server` path, and runs the installer from
+that checkout. After the guide's `repo` and `os_run` definitions are active,
+connect to an OpenCode sandbox with:
+
+```bash
+os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev
+```
+
+The connect entry point also accepts an optional remote command. For a simple
+Bash session without editing the harness script, use:
+
+```bash
+os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev bash
+```
+
 ## Explore Further
 
 - [Architecture walkthrough](docs/quickstarts/architecture-walkthrough/README.md):
   why each layer exists and what its evidence does not prove.
 - [Manual single-server guide](docs/quickstarts/openshell-single-server/manual.md):
-  OpenShell installation, harness setup, verification, and policy tests.
+  OpenShell installation from a service-readable checkout, harness setup, Bash
+  sandbox access, verification, and policy tests.
 - [OpenShell trust model](openshell/docs/threat-model.md): the execution
   boundary and assumptions behind the current single-operator deployment.
 - [Praxis integration](docs/quickstarts/openshell-praxis/README.md): model
