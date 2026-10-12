@@ -329,6 +329,17 @@ if args[:2] == ["sandbox", "list"]:
                 self.assertTrue(marker.exists(), "connect failed before invoking SSH")
                 self.assertEqual(result.returncode, 255, result.stderr)
 
+    def test_connect_entry_points_accept_remote_command(self):
+        for harness in ("opencode", "codex", "openclaw"):
+            with self.subTest(harness=harness):
+                result = subprocess.run(
+                    ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"),
+                     "--name", "test", "bash"],
+                    env=self.env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                arguments = (self.work / "capture.ssh").read_text().splitlines()
+                self.assertEqual(arguments[-2:], ["sandbox@test", "bash"])
+
     def test_openclaw_waits_for_initial_policy_before_uploading_config(self):
         cli = self.work / "openshell"
         source = cli.read_text().replace('print("Acknowledged initial policy revision as loaded")',

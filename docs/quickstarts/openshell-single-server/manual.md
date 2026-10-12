@@ -11,17 +11,25 @@ an optional, separately installed model gateway. Review the
 ## 1. Install OpenShell
 
 Use a dedicated RHEL 9 x86_64 host. For first qualification, use a disposable
-instance before changing a long-lived server. On the host, install Podman,
-Python 3, OpenSSH clients, curl, and the SELinux management tools, then
-transfer or check out the reviewed repository revision. Run from the repository
-root:
+instance before changing a long-lived server. Install Git, Podman, Python 3,
+OpenSSH clients, curl, and the SELinux management tools:
 
 ```bash
-sudo dnf install -y podman python3 policycoreutils openssh-clients curl
+sudo dnf install -y git podman python3 policycoreutils openssh-clients curl
+```
+
+Clone the reviewed repository to a durable, service-readable location, review
+the checked-out revision, and run the installer from that directory:
+
+```bash
+sudo install -d -o "$(id -un)" -m 0755 /opt/secure-single-server
+git clone https://github.com/redhat-et/secure-single-server /opt/secure-single-server
+cd /opt/secure-single-server
+repo="$PWD"
 ```
 
 ```bash
-sudo openshell/scripts/install.sh --owner openshell-svc
+sudo ./openshell/scripts/install.sh --owner openshell-svc
 ```
 
 The installer creates the locked `openshell-svc` account, enables lingering so
@@ -69,6 +77,13 @@ os_run "$repo/openshell/harnesses/$harness/connect.sh" --name "$harness"-dev
 OpenCode launches its CLI. OpenClaw opens a shell for inspecting the sandbox.
 For OpenClaw model tasks, configure Praxis and use the
 [bounded model and tool workflow](../openshell-praxis/openclaw.md).
+
+To inspect any harness sandbox with a Bash session, pass `bash` as the remote
+command instead of modifying the harness script:
+
+```bash
+os_run "$repo/openshell/harnesses/$harness/connect.sh" --name "$harness"-dev bash
+```
 
 Use `dev` for the initial deployment. Each sandbox defaults to two CPUs, 4 GiB
 of memory, and 2048 PIDs. See the [qualification reference](reference.md) for

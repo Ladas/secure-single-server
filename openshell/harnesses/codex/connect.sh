@@ -5,5 +5,13 @@ H_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${H_DIR}/../../scripts/harness-lib.sh"
 NAME="codex-dev"
-[[ "${1:-}" == "--name" ]] && NAME="$2"
-harness_connect_tty "${NAME}" "codex"
+if [[ $# -gt 0 ]]; then
+  [[ $# -ge 2 && "$1" == "--name" ]] || die 'usage: connect.sh [--name NAME] [COMMAND...]'
+  NAME="$2"
+  shift 2
+fi
+if [[ $# -eq 0 ]]; then
+  harness_connect_tty "${NAME}" codex
+else
+  harness_connect_tty "${NAME}" "$@"
+fi
