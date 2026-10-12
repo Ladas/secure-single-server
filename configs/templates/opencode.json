@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "harness": "opencode",
+      "profile": "review",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/opencode/profiles/review/policy.yaml"
+    },
+    {
+      "harness": "opencode",
+      "profile": "dev",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/opencode/profiles/dev/policy.yaml"
+    },
+    {
+      "harness": "opencode",
+      "profile": "automation",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/opencode/profiles/automation/policy.yaml"
+    },
+    {
+      "harness": "opencode",
+      "profile": "interactive",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/opencode/profiles/interactive/policy.yaml"
+    },
+    {
+      "harness": "opencode",
+      "profile": "review",
+      "backend": "cloud",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/openshell-praxis"
+    },
+    {
+      "harness": "opencode",
+      "profile": "dev",
+      "backend": "cloud",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/openshell-praxis"
+    },
+    {
+      "harness": "opencode",
+      "profile": "automation",
+      "backend": "cloud",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/openshell-praxis"
+    },
+    {
+      "harness": "opencode",
+      "profile": "interactive",
+      "backend": "cloud",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/openshell-praxis"
+    },
+    {
+      "harness": "opencode",
+      "profile": "dev",
+      "backend": "vllm",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/vllm/harness",
+      "model_id": "Qwen/Qwen3-8B"
+    },
+    {
+      "harness": "opencode",
+      "profile": "dev",
+      "backend": "remote-vllm",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/vllm/harness",
+      "model_id": "Qwen/Qwen3-8B"
+    }
+  ]
+}

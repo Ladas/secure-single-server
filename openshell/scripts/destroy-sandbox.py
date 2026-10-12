@@ -9,7 +9,12 @@ import sys
 import time
 
 
-def destroy(binary, name, timeout=120):
+# v0.1.3 may retain a removed resource's metadata for its five-minute
+# orphan grace plus a one-minute reconciliation sweep when watch events lag.
+DEFAULT_TIMEOUT = 420
+
+
+def destroy(binary, name, timeout=DEFAULT_TIMEOUT):
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]*', name):
         raise ValueError('invalid sandbox name')
     if not math.isfinite(timeout) or timeout <= 0:
@@ -37,11 +42,11 @@ def destroy(binary, name, timeout=120):
             if not isinstance(items, list) or any(not isinstance(s, dict) or
                                                   not isinstance(s.get('name'), str) for s in items):
                 raise ValueError('invalid sandbox listing')
-            if any(s['name'] == name for s in items):
-                return True
-            token = data.get('next_page_token', '')
+            token = data.get('next_page_token')
             if not isinstance(token, str):
                 raise ValueError('invalid sandbox continuation token')
+            if any(s['name'] == name for s in items):
+                return True
             if not token:
                 return False
             if token in seen:
@@ -60,7 +65,7 @@ def destroy(binary, name, timeout=120):
 
 if __name__ == '__main__':
     try:
-        destroy(sys.argv[1], sys.argv[2], float(os.environ.get('OPENSHELL_CLEANUP_TIMEOUT', '120')))
+        destroy(sys.argv[1], sys.argv[2], float(os.environ.get('OPENSHELL_CLEANUP_TIMEOUT', str(DEFAULT_TIMEOUT))))
     except (ValueError, KeyError, TypeError, OSError, RuntimeError, TimeoutError,
             subprocess.TimeoutExpired) as error:
         print(f'sandbox cleanup failed: {error}', file=sys.stderr)

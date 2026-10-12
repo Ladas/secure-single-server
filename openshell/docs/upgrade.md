@@ -53,5 +53,6 @@ is read-only; agent files live in `/home/node/.openclaw/workspace`. Follow the
 Repository test cleanup uses `destroy-sandbox.py` to confirm absence through
 successful paginated listings. Failed deletion, failed listing, malformed output
 and incomplete cleanup fail the check; an already-absent sandbox is safe to
-remove again. The deadline defaults to 120 seconds and can be changed with
+remove again. The deadline defaults to 420 seconds (seven minutes) to allow the pinned
+gateway’s orphan grace and reconciliation interval, and can be changed with
 `OPENSHELL_CLEANUP_TIMEOUT` when a disposable test needs more time.

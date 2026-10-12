@@ -24,6 +24,7 @@ if args[1]=='delete':
  if mode=='delete-error': sys.exit(7)
  (td/'deleted').touch(); sys.exit(0)
 if mode=='list-error' or (mode=='poll-error' and (td/'deleted').exists()): sys.exit(9)
+if mode=='incomplete': print(json.dumps({'sandboxes':[]})); sys.exit(0)
 if mode=='bad-json': print('{}'); sys.exit(0)
 if mode=='malformed': print('{'); sys.exit(0)
 page=args[args.index('--page-token')+1]
@@ -67,7 +68,7 @@ exit "$3"
         self.assertFalse(any(c[1]=='delete' for c in calls))
 
     def test_failures_never_certify_cleanup(self):
-        for mode in ('delete-error', 'list-error', 'poll-error', 'bad-json', 'malformed', 'loop'):
+        for mode in ('delete-error', 'list-error', 'poll-error', 'bad-json', 'incomplete', 'malformed', 'loop'):
             with self.subTest(mode=mode):
                 result, _ = self.run_case(mode)
                 self.assertNotEqual(result.returncode, 0)

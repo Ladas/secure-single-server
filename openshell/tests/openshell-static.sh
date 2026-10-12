@@ -79,9 +79,9 @@ grep -q ': "${OPENSHELL_SANDBOX_CPU:=2}"' "${hl}" || fail "harness CPU default m
 # shellcheck disable=SC2016
 grep -q ': "${OPENSHELL_SANDBOX_MEMORY:=4Gi}"' "${hl}" || fail "harness memory default missing"
 # shellcheck disable=SC2016
-grep -q -- '--cpu "${OPENSHELL_SANDBOX_CPU}"' "${hl}" || fail "sandbox create must pass --cpu"
+grep -q -- '--cpu "${OPENSHELL_SANDBOX_CPU}"' "${hl}" || fail "explicit workload must pass --cpu"
 # shellcheck disable=SC2016
-grep -q -- '--memory "${OPENSHELL_SANDBOX_MEMORY}"' "${hl}" || fail "sandbox create must pass --memory"
+grep -q -- '--memory "${OPENSHELL_SANDBOX_MEMORY}"' "${hl}" || fail "explicit workload must pass --memory"
 
 # 4c. Zero and malformed resource values are rejected before sandbox create.
 for bad_cpu in 0 0.0 0m -1 2x .5; do
@@ -89,7 +89,7 @@ for bad_cpu in 0 0.0 0m -1 2x .5; do
     fail "invalid OPENSHELL_SANDBOX_CPU accepted: ${bad_cpu}"
   fi
 done
-for bad_memory in 0 0Gi -4Gi 4Xi Gi; do
+for bad_memory in 0 0Gi -4Gi 4Xi Gi 1024B; do
   if validate_with_resources 2 "${bad_memory}" >/dev/null 2>&1; then
     fail "invalid OPENSHELL_SANDBOX_MEMORY accepted: ${bad_memory}"
   fi
@@ -98,7 +98,7 @@ for good_cpu in 1 2 0.5 500m; do
   validate_with_resources "${good_cpu}" 4Gi >/dev/null 2>&1 \
     || fail "valid OPENSHELL_SANDBOX_CPU rejected: ${good_cpu}"
 done
-for good_memory in 512Mi 4Gi 8G 1024B; do
+for good_memory in 512Mi 4Gi 8G 1024; do
   validate_with_resources 2 "${good_memory}" >/dev/null 2>&1 \
     || fail "valid OPENSHELL_SANDBOX_MEMORY rejected: ${good_memory}"
 done
@@ -124,6 +124,7 @@ fi
 
 python3 "${OS_DIR}/tests/regressions.py"
 python3 "${OS_DIR}/tests/cleanup.py"
+python3 "${OS_DIR}/tests/templates.py"
 python3 "${OS_DIR}/tests/gateway.py"
 python3 "${OS_DIR}/tests/policy-boundary.py"
 printf 'openshell-static: OK\n'

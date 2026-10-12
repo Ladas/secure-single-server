@@ -17,7 +17,7 @@ cp -R "${ROOT}/openshell" "${ROOT}/scripts" "${ROOT}/configs" "${ROOT}/tests" "$
 # shellcheck disable=SC2016
 runuser -u "${owner}" -- env HOME="/var/lib/${owner}" XDG_RUNTIME_DIR="/run/user/${uid}" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
-  bash -ec 'cd /; bash "$1/openshell/tests/openshell-image.sh"; python3 "$1/openshell/tests/schema.py"; bash "$1/openshell/tests/credentials.sh"; bash "$1/openshell/tests/openshell-policy.sh"' -- "${td}"
+  bash -ec 'cd /; bash "$1/openshell/tests/openshell-image.sh"; python3 "$1/openshell/tests/schema.py"; bash "$1/openshell/tests/templates-runtime.sh"; bash "$1/openshell/tests/credentials.sh"; bash "$1/openshell/tests/openshell-policy.sh"' -- "${td}"
 OPENSHELL_TEST_OWNER="${owner}" bash "${td}/tests/openshell-praxis/openclaw-runtime.sh"
 OPENSHELL_TEST_OWNER="${owner}" bash "${td}/tests/openshell-praxis/opencode-runtime.sh"
 rm -rf "${td}"

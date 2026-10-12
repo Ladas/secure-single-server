@@ -4,4 +4,5 @@ ARG HARNESS
 # Build helper validates the name; the file selection also fails closed.
 COPY bootc/harnesses/${HARNESS} /usr/share/secure-single-server/bootc/harness
 COPY openshell/harnesses/${HARNESS} /usr/share/secure-single-server/openshell/harnesses/${HARNESS}
+COPY configs/templates/${HARNESS}.json /usr/share/secure-single-server/configs/templates/${HARNESS}.json
 RUN test -s /usr/share/secure-single-server/bootc/harness && bootc container lint

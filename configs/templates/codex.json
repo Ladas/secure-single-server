@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "harness": "codex",
+      "profile": "review",
+      "backend": "standalone",
+      "image_variable": "ODH_CODEX_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/codex/profiles/review/policy.yaml"
+    },
+    {
+      "harness": "codex",
+      "profile": "dev",
+      "backend": "standalone",
+      "image_variable": "ODH_CODEX_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/codex/profiles/dev/policy.yaml"
+    },
+    {
+      "harness": "codex",
+      "profile": "automation",
+      "backend": "standalone",
+      "image_variable": "ODH_CODEX_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/codex/profiles/automation/policy.yaml"
+    },
+    {
+      "harness": "codex",
+      "profile": "interactive",
+      "backend": "standalone",
+      "image_variable": "ODH_CODEX_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/codex/profiles/interactive/policy.yaml"
+    }
+  ]
+}

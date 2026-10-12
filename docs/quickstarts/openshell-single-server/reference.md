@@ -103,3 +103,5 @@ OpenCode's `review` profile currently denies its CLI runtime-state directory;
 a Ready sandbox does not prove the CLI can run. OpenClaw's `--backend` option
 is unsupported. Its browser workflow and retained service sessions are not
 qualified. Keep management and browser ports private.
+
+See [workload templates](../../development/workload-templates.md) for catalog profiles, idempotent sync, and labelled inventory.

@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "harness": "openclaw",
+      "profile": "review",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCLAW_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/openclaw/profiles/review/policy.yaml"
+    },
+    {
+      "harness": "openclaw",
+      "profile": "dev",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCLAW_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/openclaw/profiles/dev/policy.yaml"
+    },
+    {
+      "harness": "openclaw",
+      "profile": "automation",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCLAW_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/openclaw/profiles/automation/policy.yaml"
+    },
+    {
+      "harness": "openclaw",
+      "profile": "interactive",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCLAW_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/openclaw/profiles/interactive/policy.yaml"
+    },
+    {
+      "harness": "openclaw",
+      "profile": "dev",
+      "backend": "cloud",
+      "image_variable": "ODH_OPENCLAW_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/openshell-praxis/openclaw"
+    },
+    {
+      "harness": "openclaw",
+      "profile": "dev",
+      "backend": "vllm",
+      "image_variable": "ODH_OPENCLAW_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/vllm/openclaw",
+      "model_id": "Qwen/Qwen3-8B"
+    },
+    {
+      "harness": "openclaw",
+      "profile": "dev",
+      "backend": "remote-vllm",
+      "image_variable": "ODH_OPENCLAW_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/vllm/openclaw",
+      "model_id": "Qwen/Qwen3-8B"
+    }
+  ]
+}

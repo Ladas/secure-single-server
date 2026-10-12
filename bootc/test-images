@@ -84,12 +84,15 @@ for variant in "${variants[@]}"; do
       test -f /usr/share/secure-single-server/configs/vllm/images.env
       test "$(cat "$root/bootc/harness")" = "$1"
       test -x "$root/openshell/harnesses/$1/create.sh"
+      test -x "$root/openshell/scripts/template.sh"
+      test -s "$root/configs/templates/$1.json"
+      test "$(find "$root/configs/templates" -name '*.json' | wc -l)" = 1
       test "$(find "$root/openshell/harnesses" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 1
       # Argument parsing must reach validation (catch shared-library readonly collisions).
       if "$root/openshell/harnesses/$1/create.sh" --profile invalid >/tmp/harness-check 2>&1; then
         exit 1
       fi
-      grep -q "no such profile: invalid" /tmp/harness-check
+      grep -q "no template for .*invalid" /tmp/harness-check
     fi
     if [[ "$1" == praxis ]]; then
       sss-praxis help

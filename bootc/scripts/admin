@@ -15,6 +15,7 @@ Usage (run as root except help):
   sss-bootc secret openai|anthropic VERSION       Read secret from stdin
   sss-bootc activate OPENAI_SECRET ANTHROPIC_SECRET
   sss-bootc openshell ARGS...                    CLI as openshell-svc
+  sss-bootc harness template sync               Synchronize workload catalog
   sss-bootc harness create|connect|run ARGS...        Selected harness scripts
 Activation uses the memory quota profile. No provider credentials enter the OS image.
 EOF
@@ -102,6 +103,11 @@ EOF
     harness="$(selected_harness)"
     [[ "${harness}" != base ]] || die 'select a harness bootc image first'
     action="${2:-}"
+    if [[ "${action}" == template ]]; then
+      [[ "$#" == 3 && "$3" == sync ]] || die 'expected harness template sync'
+      as_openshell "${ROOT}/openshell/scripts/template.sh" sync
+      exit 0
+    fi
     case "${action}" in
       create|connect) ;;
       run) [[ "${harness}" == openclaw ]] || die 'harness run supports OpenClaw only' ;;
@@ -109,16 +115,9 @@ EOF
     esac
     shift 2
     backend="$(inference_backend)"
-    if [[ "${action}" == create && "${backend}" =~ ^(vllm|remote-vllm)$ ]]; then
-      [[ "${harness}" == opencode || "${harness}" == openclaw ]] || die 'Praxis vLLM integration supports OpenCode and OpenClaw only'
-      for argument in "$@"; do
-        case "${argument}" in --provider|--config|--provider=*|--config=*) die 'Praxis vLLM integration owns provider configuration; omit --provider and --config' ;; esac
-      done
-      config_dir="${ROOT}/configs/vllm/harness"
-      [[ "${harness}" != openclaw ]] || config_dir="${ROOT}/configs/vllm/openclaw"
-      as_openshell env OPENSHELL_MODEL_ID=Qwen/Qwen3-8B PRAXIS_PORT=8080 \
-        "${ROOT}/openshell/harnesses/${harness}/${action}.sh" \
-        --config "${config_dir}" "$@"
+    if [[ "${action}" == create ]]; then
+      as_openshell env OPENSHELL_BOOTC_BACKEND="${backend}" \
+        "${ROOT}/openshell/harnesses/${harness}/${action}.sh" "$@"
     else
       as_openshell "${ROOT}/openshell/harnesses/${harness}/${action}.sh" "$@"
     fi

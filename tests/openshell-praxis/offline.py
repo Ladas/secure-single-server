@@ -83,6 +83,27 @@ class HarnessTest(unittest.TestCase):
             "openshell": '''#!/usr/bin/env python3
 import json, os, pathlib, sys
 args = sys.argv[1:]
+
+if args[:3] == ["sandbox", "template", "list"]:
+    state = pathlib.Path(os.environ["CAPTURE"] + ".templates")
+    data = json.loads(state.read_text()) if state.exists() else {}
+    print(json.dumps({"templates":list(data.values()), "next_page_token":""}))
+    sys.exit()
+if args[:3] == ["sandbox", "template", "create"]:
+    state = pathlib.Path(os.environ["CAPTURE"] + ".templates")
+    data = json.loads(state.read_text()) if state.exists() else {}
+    name = args[3]
+    record = {"name":name,"image":args[args.index("--image")+1],
+              "resources":{"cpu":args[args.index("--cpu")+1],"memory":args[args.index("--memory")+1]},
+              "environment":{},"labels":{}}
+    for flag,key in [("--label","labels"),("--env","environment")]:
+        for index,argument in enumerate(args):
+            if argument == flag:
+                k,v=args[index+1].split("=",1);record[key][k]=v
+    data[name]=record;state.write_text(json.dumps(data));sys.exit()
+if args[:3] == ["sandbox", "template", "get"]:
+    print(json.dumps(json.loads(pathlib.Path(os.environ["CAPTURE"] + ".templates").read_text())[args[3]]))
+    sys.exit()
 if args[:2] == ["sandbox", "create"]:
     pathlib.Path(os.environ["CAPTURE"] + ".args").write_text(json.dumps(args))
     p = pathlib.Path(args[args.index("--policy") + 1])
@@ -175,8 +196,12 @@ if args[:2] == ["sandbox", "list"]:
             for harness in ("opencode", "codex", "openclaw"):
                 self.create(harness, "dev")
                 args = json.loads((self.work / "capture.args").read_text())
-                self.assertEqual(args[args.index("--cpu") + 1], cpu)
-                self.assertEqual(args[args.index("--memory") + 1], memory)
+                self.assertIn("--template", args)
+                for flag in ("--from", "--cpu", "--memory", "--env", "--gpu"):
+                    self.assertNotIn(flag,args)
+                template=json.loads((self.work / "capture.templates").read_text())[args[args.index("--template")+1]]
+                self.assertEqual(template["resources"],{"cpu":cpu,"memory":memory})
+                self.assertIn("managed-by=secure-single-server",args)
                 self.assertIn("--no-auto-providers", args)
 
     def test_arbitrary_api_prefix_is_rejected_before_creation(self):
@@ -254,6 +279,43 @@ if args[:2] == ["sandbox", "list"]:
                 policy = yaml.safe_load(source.read_text().replace("@@PRAXIS_PORT@@", "18080"))
                 port = policy["network_policies"]["praxis_gateway"]["endpoints"][0]["port"]
                 self.assertIs(type(port), int, "OpenShell schema requires an unsigned integer")
+
+    def test_bootc_local_backend_owns_model_and_port_from_catalog(self):
+        for backend in ("vllm", "remote-vllm"):
+            self.env["OPENSHELL_BOOTC_BACKEND"] = backend
+            for harness in ("opencode", "openclaw"):
+                self.create(harness, "dev")
+                config = json.loads((self.work / "capture.provider").read_text())
+                if harness == "opencode":
+                    provider = config["provider"]["praxis"]
+                    self.assertEqual(config["model"], "praxis/Qwen/Qwen3-8B")
+                    self.assertEqual(provider["options"]["baseURL"], "http://host.openshell.internal:8080/v1")
+                else:
+                    self.assertEqual(config["agents"]["defaults"]["model"]["primary"], "praxis/Qwen/Qwen3-8B")
+                    self.assertEqual(config["models"]["providers"]["praxis"]["baseUrl"], "http://host.openshell.internal:8080/v1")
+                args = json.loads((self.work / "capture.args").read_text())
+                self.assertIn("backend=" + backend, args)
+                self.assertNotIn("--provider", args)
+                for forbidden in ("--provider", "--config"):
+                    self.create(harness, "dev", success=False,
+                                provider="direct" if forbidden == "--provider" else None,
+                                integrated=forbidden == "--config")
+
+    def test_catalog_only_profile_reaches_existing_entry_point(self):
+        catalog = self.work / "catalog"
+        catalog.mkdir()
+        data = json.loads((ROOT / "configs/templates/opencode.json").read_text())
+        entry = next(item.copy() for item in data["templates"] if item["backend"] == "standalone")
+        entry.update(profile="tiny", cpu="500m", memory="512Mi")
+        (catalog / "opencode.json").write_text(json.dumps({"version":1,"templates":[entry]}))
+        self.env["OPENSHELL_TEMPLATE_DIR"] = str(catalog)
+        self.env.pop("OPENSHELL_SANDBOX_CPU")
+        self.env.pop("OPENSHELL_SANDBOX_MEMORY")
+        self.create("opencode", "tiny")
+        args = json.loads((self.work / "capture.args").read_text())
+        template = json.loads((self.work / "capture.templates").read_text())[args[args.index("--template")+1]]
+        self.assertEqual(template["resources"], {"cpu":"500m","memory":"512Mi"})
+        self.assertIn("profile=tiny", args)
 
     def test_all_connect_entry_points_propagate_ssh_failure(self):
         # A missing executable or failed SSH session must not look successful.

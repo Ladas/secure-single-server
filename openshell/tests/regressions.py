@@ -21,6 +21,27 @@ class HarnessTests(unittest.TestCase):
         mock.write_text('''#!/usr/bin/env python3
 import json,os,pathlib,sys
 a=sys.argv[1:]
+
+if a[:3] == ["sandbox", "template", "list"]:
+    state = pathlib.Path(os.environ['MOCK_LOG'] + '.templates')
+    data = json.loads(state.read_text()) if state.exists() else {}
+    print(json.dumps({"templates":list(data.values()), "next_page_token":""}))
+    sys.exit()
+if a[:3] == ["sandbox", "template", "create"]:
+    state = pathlib.Path(os.environ['MOCK_LOG'] + '.templates')
+    data = json.loads(state.read_text()) if state.exists() else {}
+    name = a[3]
+    record = {"name":name,"image":a[a.index("--image")+1],
+              "resources":{"cpu":a[a.index("--cpu")+1],"memory":a[a.index("--memory")+1]},
+              "environment":{},"labels":{}}
+    for flag,key in [("--label","labels"),("--env","environment")]:
+        for index,argument in enumerate(a):
+            if argument == flag:
+                k,v=a[index+1].split("=",1);record[key][k]=v
+    data[name]=record;state.write_text(json.dumps(data));sys.exit()
+if a[:3] == ["sandbox", "template", "get"]:
+    print(json.dumps(json.loads(pathlib.Path(os.environ['MOCK_LOG'] + '.templates').read_text())[a[3]]))
+    sys.exit()
 with open(os.environ['MOCK_LOG'],'a') as f: f.write(json.dumps(a)+'\\n')
 if a[:2]==['sandbox','list']:
  print(json.dumps({'sandboxes':[{'name':os.environ['MOCK_NAME'],'phase':'Ready'}]}))
@@ -106,7 +127,7 @@ sys.stdin.read()
         r=self.create('opencode','--profile','dev','--config',config)
         self.assertEqual(r.returncode,0,r.stderr)
         calls=[json.loads(s) for s in self.log.read_text().splitlines()]
-        self.assertNotIn('--provider',calls[0])
+        self.assertNotIn('--provider',next(call for call in calls if call[:2]==['sandbox','create']))
         ssh=calls[-1]
         self.assertIn('/dev/null',ssh)
         self.assertFalse(any('SendEnv' in x or 'API_KEY' in x for x in ssh))

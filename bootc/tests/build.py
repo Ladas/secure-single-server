@@ -71,6 +71,9 @@ elif args[0] == 'build':
     elif args[file_index].endswith('/bootc/Containerfile.harness'):
         assert (context / 'bootc/harnesses').is_dir()
         assert (context / 'openshell/harnesses').is_dir()
+        catalog = list((context / 'configs/templates').glob('*.json'))
+        assert len(catalog) == 1
+        assert json.loads(catalog[0].read_text())['templates']
         assert not list((context / 'openshell/harnesses/codex').glob('.test-secret.*.secret'))
         assert not (context / 'openshell/configs').exists()
     else:
@@ -234,7 +237,7 @@ class HarnessScriptTests(unittest.TestCase):
                     ['bash', str(ROOT / 'openshell/harnesses' / harness / 'create.sh'),
                      '--profile', 'invalid'], capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('no such profile: invalid', result.stderr)
+                self.assertIn(f'no template for {harness}/invalid/standalone', result.stderr)
                 self.assertNotIn('readonly variable', result.stderr)
 
 

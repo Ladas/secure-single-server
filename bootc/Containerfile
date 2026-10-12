@@ -32,6 +32,8 @@ RUN --mount=type=secret,id=rhsm_org,target=/run/secrets/rhsm_org \
 COPY bootc/openshell /usr/bin/openshell
 COPY scripts/common /usr/share/secure-single-server/scripts/common
 COPY configs /usr/share/secure-single-server/configs
+# Harness policy files and catalogs are installed together by the variant.
+RUN rm -rf /usr/share/secure-single-server/configs/templates
 COPY openshell/configs /usr/share/secure-single-server/openshell/configs
 COPY openshell/scripts /usr/share/secure-single-server/openshell/scripts
 COPY bootc/scripts /usr/share/secure-single-server/bootc/scripts

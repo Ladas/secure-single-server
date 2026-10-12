@@ -44,7 +44,7 @@ validate_sandbox_resources() {
   # cores/millicores and positive byte quantities.
   [[ "${OPENSHELL_SANDBOX_CPU}" =~ ^([1-9][0-9]*([.][0-9]+)?|0[.][0-9]*[1-9][0-9]*|[1-9][0-9]*m)$ ]] \
     || die 'OPENSHELL_SANDBOX_CPU must be positive cores or millicores (for example 2, 0.5, or 500m)'
-  [[ "${OPENSHELL_SANDBOX_MEMORY}" =~ ^[1-9][0-9]*(Ki|Mi|Gi|Ti|K|M|G|T|B)?$ ]] \
+  [[ "${OPENSHELL_SANDBOX_MEMORY}" =~ ^[1-9][0-9]*(Ki|Mi|Gi|Ti|Pi|Ei|K|M|G|T|P|E)?$ ]] \
     || die 'OPENSHELL_SANDBOX_MEMORY must be positive bytes or a quantity (for example 512Mi, 4Gi, or 8G)'
 }
 
@@ -83,8 +83,8 @@ harness_wait_policy_advisor() {  # <sandbox>
 }
 
 # Single-phase create: harness is pre-installed in <image_ref>.
-harness_create() {  # <name> <image_ref> <policy_file> [provider] [policy_advisor]
-  local name="$1" image="$2" policy="$3" provider="${4:-}" policy_advisor="${5:-no}"
+harness_create() {  # <name> <image_ref> <policy_file> [provider] [policy_advisor] [template]
+  local name="$1" image="$2" policy="$3" provider="${4:-}" policy_advisor="${5:-no}" template="${6:-}"
   if [[ -n "${provider}" ]]; then
     [[ "${provider}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || die "invalid provider name"
   fi
@@ -95,8 +95,14 @@ harness_create() {  # <name> <image_ref> <policy_file> [provider] [policy_adviso
   validate_sandbox_resources
   note "Creating sandbox ${name} from ${image##*/}"
   # Keep the array nonempty for Bash 3.2 with nounset enabled.
-  local -a create_args=(--detach --no-auto-providers --name "${name}" --from "${image}" --policy "${policy}"
-    --cpu "${OPENSHELL_SANDBOX_CPU}" --memory "${OPENSHELL_SANDBOX_MEMORY}")
+  local -a create_args=(--detach --no-auto-providers --name "${name}" --policy "${policy}")
+  if [[ -n "${template}" ]]; then
+    create_args+=(--template "${template}" --label managed-by=secure-single-server
+      --label "harness=${HARNESS_KIND}" --label "profile=${PROFILE}" --label "backend=${TEMPLATE_BACKEND}")
+  else
+    # Low-level policy/credential probes may still supply an explicit workload.
+    create_args+=(--from "${image}" --cpu "${OPENSHELL_SANDBOX_CPU}" --memory "${OPENSHELL_SANDBOX_MEMORY}")
+  fi
   if [[ -n "${provider}" ]]; then
     create_args+=(--provider "${provider}")
   fi

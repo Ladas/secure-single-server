@@ -122,11 +122,19 @@ esac
         created = subprocess.run(['bash', '-c', script, 'admin', 'harness', 'create',
                                   '--profile', 'dev', '--name', 'claw-dev'], text=True, capture_output=True)
         self.assertEqual(created.returncode, 0, created.stderr)
-        self.assertIn('/fixture/configs/vllm/openclaw', created.stdout)
-        self.assertIn('OPENSHELL_MODEL_ID=Qwen/Qwen3-8B', created.stdout)
+        self.assertIn('/fixture/openshell/harnesses/openclaw/create.sh', created.stdout)
+        self.assertIn('OPENSHELL_BOOTC_BACKEND=remote-vllm', created.stdout)
         invalid = subprocess.run(['bash', '-c', script, 'admin', 'harness', 'create',
                                   '--provider', 'direct'], text=True, capture_output=True)
-        self.assertNotEqual(invalid.returncode, 0)
+        # Argument rejection now belongs to the shared catalog-based creator.
+        self.assertIn('--provider', invalid.stdout)
+        synced = subprocess.run(['bash', '-c', script, 'admin', 'harness', 'template', 'sync'],
+                                text=True, capture_output=True)
+        self.assertEqual(synced.returncode,0,synced.stderr)
+        self.assertIn('/fixture/openshell/scripts/template.sh',synced.stdout)
+        typo = subprocess.run(['bash', '-c', script, 'admin', 'harness', 'template', 'delete'],
+                              text=True,capture_output=True)
+        self.assertNotEqual(typo.returncode,0)
         launched = subprocess.run(['bash', '-c', script, 'admin', 'harness', 'run',
                                    '--name', 'claw-dev', '--message', 'hello'], text=True, capture_output=True)
         self.assertEqual(launched.returncode, 0, launched.stderr)
@@ -199,8 +207,7 @@ as_openshell() {
 
     def test_harness_renderer_preserves_local_token_limits(self):
         import tempfile
-        source = (ROOT / 'openshell/harnesses/opencode/create.sh').read_text()
-        renderer = source.split("<<'RENDER'\n", 1)[1].split('\nRENDER', 1)[0]
+        renderer = (ROOT / 'openshell/scripts/render-opencode.py').read_text()
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'provider.json'
             # Bootc uses an empty API prefix; mutable RHEL Qwen uses /vllm.

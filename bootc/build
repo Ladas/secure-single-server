@@ -126,7 +126,7 @@ make_harness_context() {
     --exclude='auth.json' --exclude='*.pem' --exclude='*.key' \
     --exclude='__pycache__' --exclude='._*' \
     -cf - bootc/Containerfile.harness \
-    "bootc/harnesses/${harness}" "openshell/harnesses/${harness}" |
+    "bootc/harnesses/${harness}" "openshell/harnesses/${harness}" "configs/templates/${harness}.json" |
     tar -C "${context}" -xf -
 }
 

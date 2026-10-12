@@ -153,15 +153,21 @@ sudo sss-bootc harness create --profile dev --name demo-dev
 sudo sss-bootc harness connect --name demo-dev
 ```
 
-These commands run the existing harness scripts as `openshell-svc`. Their
-standalone policies permit provider endpoints. The
-[Praxis integration workflow](../docs/quickstarts/openshell-praxis/README.md)
-is separate and experimental. OpenClaw rejects `--config`; OpenCode
-supports the dedicated Praxis vLLM route described below. The historical cloud
-integration results are separate from the Qwen qualification.
-No SSH helper forwards provider keys. Standalone bindings must be explicit with
-`--provider NAME`; integrated mode rejects them. Successful boot checks do not
-prove a real model task works or that direct provider access is denied.
+These commands run as `openshell-svc` and automatically ensure the selected
+[workload template](../docs/development/workload-templates.md). To preload its
+catalog, run `sudo sss-bootc harness template sync`. Template settings include
+image and resources; policy, provider bindings, and policy-advisor settings stay
+per sandbox.
+
+Standalone policies permit provider endpoints. Attach direct providers explicitly
+with `--provider NAME`; no SSH helper forwards keys. OpenCode and OpenClaw `dev`
+also support the dedicated [Praxis integration workflow](../docs/quickstarts/openshell-praxis/README.md)
+using `--config`, which rejects direct provider bindings. Local and remote vLLM
+backend selection chooses the catalog's integrated configuration automatically.
+OpenClaw's qualified model tools are read/write; automatic command execution
+remains disabled. See the [real-model qualification](../docs/testing/upgrade-0.1.3-e2e.md)
+for the cloud tests and the separate historical Qwen scope. A boot check alone
+does not prove a model task or its access policy works.
 
 Start with `dev` for the CLI smoke test. OpenCode currently attempts to write
 runtime state under `/sandbox/.local/share`, which the shipped read-only
