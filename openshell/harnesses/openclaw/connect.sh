@@ -6,9 +6,11 @@ H_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${H_DIR}/../../scripts/harness-lib.sh"
 NAME="openclaw-dev"
 if [[ $# -gt 0 ]]; then
-  [[ $# -ge 2 && "$1" == "--name" ]] || die 'usage: connect.sh [--name NAME] [COMMAND...]'
-  NAME="$2"
-  shift 2
+  if [[ "$1" == "--name" ]]; then
+    [[ $# -ge 2 ]] || die 'usage: connect.sh [--name NAME] [COMMAND...]'
+    NAME="$2"
+    shift 2
+  fi
 fi
 # Service command and authentication are not qualified for this pinned image.
 if [[ $# -eq 0 ]]; then

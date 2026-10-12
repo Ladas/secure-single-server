@@ -330,15 +330,18 @@ if args[:2] == ["sandbox", "list"]:
                 self.assertEqual(result.returncode, 255, result.stderr)
 
     def test_connect_entry_points_accept_remote_command(self):
-        for harness in ("opencode", "codex", "openclaw"):
-            with self.subTest(harness=harness):
-                result = subprocess.run(
-                    ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"),
-                     "--name", "test", "bash"],
-                    env=self.env, capture_output=True, text=True, timeout=10)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                arguments = (self.work / "capture.ssh").read_text().splitlines()
-                self.assertEqual(arguments[-2:], ["sandbox@test", "bash"])
+        for harness, default_name in (("opencode", "opencode-dev"), ("codex", "codex-dev"),
+                                      ("openclaw", "openclaw-dev")):
+            for arguments, sandbox in ((["bash"], default_name),
+                                       (["--name", "test", "bash"], "test")):
+                with self.subTest(harness=harness, arguments=arguments):
+                    result = subprocess.run(
+                        ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"),
+                         *arguments],
+                        env=self.env, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    ssh_arguments = (self.work / "capture.ssh").read_text().splitlines()
+                    self.assertEqual(ssh_arguments[-2:], [f"sandbox@{sandbox}", "bash"])
 
     def test_openclaw_waits_for_initial_policy_before_uploading_config(self):
         cli = self.work / "openshell"
