@@ -28,9 +28,9 @@ removal and test any retained-task/session requirement separately. Detached
 creation retains a sandbox main process, not necessarily a harness launched later
 through an SSH session. Admission and resource ceilings require deployment work.
 
-The dev policy limits GitHub API methods but does not impose read-only semantics
-on Git-over-HTTPS to github.com. Allowed endpoints can receive data from a malicious
-harness; allowlists do not inspect model prompts or guarantee trustworthy code.
+The dev policy limits GitHub API methods and permits Git Smart HTTP clone/fetch
+without push. Allowed endpoints can receive data from a malicious harness;
+allowlists do not inspect model prompts or guarantee trustworthy code.
 
 Images are digest-pinned for repeatability, not a claim of audited contents.
 Harness CLIs are preinstalled; profiles permitting package registries still permit

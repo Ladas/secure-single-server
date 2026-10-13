@@ -60,11 +60,9 @@ PY
     method="${request%% *}"
     path="${request#* }"
     before="$(wc -l <"${td}/requests")"
-    if harness_ssh "${current}" \
+    harness_ssh "${current}" \
       "node /tmp/probe.mjs http://host.openshell.internal:18080${path} ${method}" \
-      >"${td}/denied.json"; then
-      die "${label}: forbidden ${method} ${path} unexpectedly succeeded"
-    fi
+      >"${td}/denied.json"
     python3 - "${td}/denied.json" <<'PY'
 import json, sys
 result = json.load(open(sys.argv[1]))

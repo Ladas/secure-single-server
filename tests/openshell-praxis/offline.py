@@ -211,6 +211,33 @@ if args[:2] == ["sandbox", "list"]:
                 self.assertNotIn("access", endpoint)
                 self.assertEqual([rule["allow"] for rule in endpoint["rules"]], expected)
 
+    def test_github_git_rules_permit_clone_fetch_and_deny_push(self):
+        sources = list(ROOT.glob("openshell/harnesses/*/profiles/*/policy.yaml"))
+        sources += list(ROOT.glob("configs/openshell-praxis/*/profiles/*/policy.yaml"))
+        sources += list(ROOT.glob("configs/openshell-praxis/profiles/*/policy.yaml"))
+        expected = [{"method": "GET", "path": "**"},
+                    {"method": "HEAD", "path": "**"},
+                    {"method": "OPTIONS", "path": "**"},
+                    {"method": "POST", "path": "/**/git-upload-pack"}]
+        checked = 0
+        for source in sorted(sources):
+            policy = yaml.safe_load(source.read_text()
+                                    .replace("@@PRAXIS_PORT@@", "18080")
+                                    .replace("@@PRAXIS_API_PREFIX@@", ""))
+            rule = policy.get("network_policies", {}).get("github_git")
+            if rule is None:
+                continue
+            checked += 1
+            with self.subTest(source=source.relative_to(ROOT)):
+                endpoint = rule["endpoints"][0]
+                self.assertEqual(endpoint["host"], "github.com")
+                self.assertEqual(endpoint["port"], 443)
+                self.assertEqual(endpoint["protocol"], "rest")
+                self.assertEqual(endpoint["enforcement"], "enforce")
+                self.assertNotIn("access", endpoint)
+                self.assertEqual([item["allow"] for item in endpoint["rules"]], expected)
+        self.assertGreaterEqual(checked, 9)
+
     def test_resource_limits_reach_every_harness_create(self):
         for cpu, memory in (("2", "4Gi"), ("500m", "512Mi")):
             self.env.update(OPENSHELL_SANDBOX_CPU=cpu, OPENSHELL_SANDBOX_MEMORY=memory)

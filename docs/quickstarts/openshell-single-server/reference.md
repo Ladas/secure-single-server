@@ -82,9 +82,9 @@ Important limits:
 - The installer rejects a host without Landlock ABI 3 or newer, but
   `landlock.compatibility` remains `best_effort`; record actual runtime
   filesystem enforcement.
-- GitHub API access is method-restricted, but Git-over-HTTPS to `github.com` is
-  not read-only. An allowed endpoint can still receive data from a malicious
-  harness or tool.
+- GitHub API access is method-restricted. Git Smart HTTP permits clone and
+  fetch operations on `github.com`, while push remains denied. An allowed
+  endpoint can still receive data from a malicious harness or tool.
 - A policy parsing or sandbox Ready result does not prove enforcement. Use a
   successful positive control plus an explicit denial when qualifying a host.
 - Deleting a sandbox can destroy work. Export anything you need first.

@@ -21,7 +21,16 @@ network_policies:
     binaries: [{path: /usr/sbin/node}, {path: /usr/sbin/git}]
   github_git:
     name: github-git
-    endpoints: [{host: github.com, port: 443}]
+    endpoints:
+      - host: github.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: {method: GET, path: "**"}
+          - allow: {method: HEAD, path: "**"}
+          - allow: {method: OPTIONS, path: "**"}
+          - allow: {method: POST, path: "/**/git-upload-pack"}
     binaries: [{path: /usr/sbin/git}]
   npm_registry:
     name: npm-registry

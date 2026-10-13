@@ -42,8 +42,9 @@ The policies limit Praxis traffic to `GET /v1/models` and
 `POST /v1/chat/completions` on `host.openshell.internal`, with the configured
 route prefix such as `/vllm` prepended to both paths. Dev, automation, and
 interactive also permit development endpoints. GitHub API access is read-only,
-but Git-over-HTTPS is not. Filesystem permissions do not establish workspace
-mounts, retention after deletion, or disconnected task persistence.
+and Git Smart HTTP permits clone/fetch but not push. Filesystem permissions do
+not establish workspace mounts, retention after deletion, or disconnected task
+persistence.
 
 A timeout, SSH failure, or HTTP 401 does not prove a policy denial.
 Delete test sandboxes with `openshell sandbox delete NAME`; do not source libraries

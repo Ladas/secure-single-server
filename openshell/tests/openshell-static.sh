@@ -122,6 +122,13 @@ for name, policy in d["network_policies"].items():
                         {"method": "POST", "path": "/v1/chat/completions"}]
             assert [rule.get("allow") for rule in endpoint.get("rules", [])] == expected, \
                 f"{name}: REST endpoint requires exact Praxis method/path rules"
+        if name == "github_git":
+            expected = [{"method": "GET", "path": "**"},
+                        {"method": "HEAD", "path": "**"},
+                        {"method": "OPTIONS", "path": "**"},
+                        {"method": "POST", "path": "/**/git-upload-pack"}]
+            assert [rule.get("allow") for rule in endpoint.get("rules", [])] == expected, \
+                f"{name}: Git endpoint must permit clone/fetch and deny push"
 PY
   done < <(find "${OS_DIR}" "${ROOT}/configs/openshell-praxis" "${ROOT}/configs/vllm/harness" "${ROOT}/configs/vllm/openclaw" -path '*/profiles/*/policy.yaml')
 fi
