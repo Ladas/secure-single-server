@@ -159,6 +159,10 @@ if args[:2] == ["sandbox", "list"]:
             endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
             self.assertIs(type(endpoint["port"]), int)
             self.assertEqual(endpoint["port"], 18080)
+            self.assertNotIn("access", endpoint)
+            self.assertEqual([rule["allow"] for rule in endpoint["rules"]],
+                             [{"method": "GET", "path": "/v1/models"},
+                              {"method": "POST", "path": "/v1/chat/completions"}])
             self.assertEqual({b["path"] for b in policy["network_policies"]["praxis_gateway"]["binaries"]},
                              {"/usr/bin/node-26", "/usr/local/bin/opencode"})
             config = json.loads((self.work / "capture.provider").read_text())
@@ -189,6 +193,23 @@ if args[:2] == ["sandbox", "list"]:
         endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
         self.assertEqual(endpoint["host"], "host.openshell.internal")
         self.assertEqual(endpoint["port"], 18080)
+        self.assertEqual([rule["allow"]["path"] for rule in endpoint["rules"]],
+                         ["/vllm/v1/models", "/vllm/v1/chat/completions"])
+
+    def test_every_praxis_profile_has_explicit_rest_rules(self):
+        sources = list((ROOT / "configs/openshell-praxis/profiles").glob("*/policy.yaml"))
+        sources += [ROOT / "configs/openshell-praxis/openclaw/profiles/dev/policy.yaml"]
+        sources += [ROOT / "configs/vllm/harness/profiles/dev/policy.yaml"]
+        sources += [ROOT / "configs/vllm/openclaw/profiles/dev/policy.yaml"]
+        expected = [{"method": "GET", "path": "/v1/models"},
+                    {"method": "POST", "path": "/v1/chat/completions"}]
+        for source in sorted(sources):
+            with self.subTest(source=source.relative_to(ROOT)):
+                policy = yaml.safe_load(source.read_text().replace("@@PRAXIS_PORT@@", "18080")
+                                        .replace("@@PRAXIS_API_PREFIX@@", ""))
+                endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
+                self.assertNotIn("access", endpoint)
+                self.assertEqual([rule["allow"] for rule in endpoint["rules"]], expected)
 
     def test_resource_limits_reach_every_harness_create(self):
         for cpu, memory in (("2", "4Gi"), ("500m", "512Mi")):
@@ -247,6 +268,8 @@ if args[:2] == ["sandbox", "list"]:
                 self.assertNotIn("--provider", args)
                 rule = policy["network_policies"]["praxis_gateway"]
                 self.assertEqual(rule["endpoints"][0]["port"], 18080)
+                self.assertEqual([item["allow"]["path"] for item in rule["endpoints"][0]["rules"]],
+                                 [f"{prefix}/v1/models", f"{prefix}/v1/chat/completions"])
                 self.assertEqual({b["path"] for b in rule["binaries"]},
                                  {"/usr/local/bin/node", "/usr/local/bin/openclaw"})
                 hosts = {e["host"] for r in policy["network_policies"].values() for e in r["endpoints"]}

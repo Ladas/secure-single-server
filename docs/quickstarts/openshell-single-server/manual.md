@@ -35,9 +35,11 @@ sudo ./openshell/scripts/install.sh --owner openshell-svc
 The installer creates the locked `openshell-svc` account, enables lingering so
 the gateway remains available after logout, and starts the loopback-only
 OpenShell gateway with TLS/mTLS for the service operator.
-It pre-pulls every pinned supported harness image; the selected harness is
-chosen when its sandbox is created. If it reports that cgroup delegation needs
-a host reboot, reboot and rerun the same installer.
+It first verifies Landlock ABI 3 or newer, then pre-pulls every pinned supported
+harness image; the selected harness is chosen when its sandbox is created. If
+Landlock is unavailable or too old, installation stops with that kernel
+diagnostic instead of a later `ContainerExited` sandbox failure. If it reports
+that cgroup delegation needs a host reboot, reboot and rerun the same installer.
 
 ## 2. Set up the service-owner shell helper
 

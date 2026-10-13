@@ -38,10 +38,12 @@ binary paths, alias route, tools and streaming must pass native qualification
 before use with real credentials. A successful config upload is not inference.
 Integrated mode rejects `--provider` and SSH helpers never forward provider keys.
 
-The policies intend to limit model traffic to `host.openshell.internal`; dev,
-automation and interactive also permit development endpoints. GitHub API access
-is read-only, but Git-over-HTTPS is not. Filesystem permissions do not establish
-workspace mounts, retention after deletion, or disconnected task persistence.
+The policies limit Praxis traffic to `GET /v1/models` and
+`POST /v1/chat/completions` on `host.openshell.internal`, with the configured
+route prefix such as `/vllm` prepended to both paths. Dev, automation, and
+interactive also permit development endpoints. GitHub API access is read-only,
+but Git-over-HTTPS is not. Filesystem permissions do not establish workspace
+mounts, retention after deletion, or disconnected task persistence.
 
 A timeout, SSH failure, or HTTP 401 does not prove a policy denial.
 Delete test sandboxes with `openshell sandbox delete NAME`; do not source libraries

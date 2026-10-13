@@ -79,8 +79,9 @@ a reviewed policy change with fresh positive and negative network tests.
 
 Important limits:
 
-- `landlock.compatibility` is `best_effort`; filesystem protection can degrade
-  on an unqualified kernel. Record actual runtime enforcement.
+- The installer rejects a host without Landlock ABI 3 or newer, but
+  `landlock.compatibility` remains `best_effort`; record actual runtime
+  filesystem enforcement.
 - GitHub API access is method-restricted, but Git-over-HTTPS to `github.com` is
   not read-only. An allowed endpoint can still receive data from a malicious
   harness or tool.

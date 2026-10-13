@@ -75,8 +75,9 @@ and [Praxis installation walkthrough](docs/quickstarts/openshell-praxis/install.
 
 The manual guide installs Git and Podman, clones the reviewed revision to the
 service-readable `/opt/secure-single-server` path, and runs the installer from
-that checkout. After the guide's `repo` and `os_run` definitions are active,
-connect to an OpenCode sandbox with:
+that checkout. The installer verifies that the host provides Landlock ABI 3 or
+newer before creating sandboxes. After the guide's `repo` and `os_run`
+definitions are active, connect to an OpenCode sandbox with:
 
 ```bash
 os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev

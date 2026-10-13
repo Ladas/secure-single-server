@@ -76,7 +76,8 @@ if [[ -n "${HARNESS_CONFIG_DIR}" ]]; then
   # shellcheck disable=SC2329,SC2317 # cleanup is invoked by the EXIT trap
   cleanup() { rm -f "${POL}" "${PROV}"; }
   trap cleanup EXIT
-  sed "s#@@PRAXIS_PORT@@#${PRAXIS_PORT}#g" "${POLICY_SRC}" >"${POL}"
+  sed -e "s#@@PRAXIS_PORT@@#${PRAXIS_PORT}#g" \
+    -e "s#@@PRAXIS_API_PREFIX@@#${PRAXIS_API_PREFIX}#g" "${POLICY_SRC}" >"${POL}"
   python3 "${C_DIR}/render-${HARNESS_KIND}.py" \
     "${PROVIDER_SRC}" "${PROV}" "${PRAXIS_PORT}" "${OPENSHELL_MODEL_ID}" "${PRAXIS_API_PREFIX}"
   harness_create "${NAME}" "${IMAGE}" "${POL}" "" "${POLICY_ADVISOR}" "${TEMPLATE}"

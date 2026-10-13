@@ -108,16 +108,20 @@ if command -v python3 >/dev/null 2>&1; then
   while IFS= read -r p; do
     python3 - "$p" <<'PY' || fail "invalid policy: $p"
 import sys, yaml
-d = yaml.safe_load(open(sys.argv[1]).read().replace("@@PRAXIS_PORT@@", "8080"))
+d = yaml.safe_load(open(sys.argv[1]).read()
+                  .replace("@@PRAXIS_PORT@@", "8080")
+                  .replace("@@PRAXIS_API_PREFIX@@", ""))
 assert d.get("version") == 1, "version"
 assert "network_policies" in d, "network_policies"
 assert "filesystem_policy" in d, "filesystem_policy"
 for name, policy in d["network_policies"].items():
     for endpoint in policy.get("endpoints", []):
         assert type(endpoint["port"]) is int and 1 <= endpoint["port"] <= 65535
-        if endpoint.get("protocol") == "rest":
-            assert endpoint.get("access") or endpoint.get("rules"), \
-                f"{name}: REST endpoint requires access or rules"
+        if name == "praxis_gateway" and endpoint.get("protocol") == "rest":
+            expected = [{"method": "GET", "path": "/v1/models"},
+                        {"method": "POST", "path": "/v1/chat/completions"}]
+            assert [rule.get("allow") for rule in endpoint.get("rules", [])] == expected, \
+                f"{name}: REST endpoint requires exact Praxis method/path rules"
 PY
   done < <(find "${OS_DIR}" "${ROOT}/configs/openshell-praxis" "${ROOT}/configs/vllm/harness" "${ROOT}/configs/vllm/openclaw" -path '*/profiles/*/policy.yaml')
 fi
