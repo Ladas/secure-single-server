@@ -39,7 +39,7 @@ profiles=(
 
 for profile in "${profiles[@]}"; do
   IFS='|' read -r label image source <<<"${profile}"
-  current="praxis-rest-${label}-$$"
+  current="praxis-rest-$$"
   policy="${td}/${label}.yaml"
   sed -e 's#@@PRAXIS_PORT@@#18080#g' -e 's#@@PRAXIS_API_PREFIX@@##g' \
     "${source}" >"${policy}"
