@@ -63,10 +63,15 @@ PY
     harness_ssh "${current}" \
       "node /tmp/probe.mjs http://host.openshell.internal:18080${path} ${method}" \
       >"${td}/denied.json"
-    python3 - "${td}/denied.json" <<'PY'
+    python3 - "${td}/denied.json" "${method}" "${path}" <<'PY'
 import json, sys
 result = json.load(open(sys.argv[1]))
-assert result == {'kind': 'transport-error', 'code': 'EACCES'}, result
+assert result['kind'] == 'http' and result['status'] == 403, result
+denial = json.loads(result['body'])
+assert denial['error'] == 'policy_denied', denial
+assert denial['policy'] == 'praxis_gateway', denial
+assert denial['method'] == sys.argv[2], denial
+assert denial['path'] == sys.argv[3], denial
 PY
     [[ "$(wc -l <"${td}/requests")" == "${before}" ]] || die "${label}: forbidden request reached fixture"
   done
