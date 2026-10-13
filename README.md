@@ -46,15 +46,12 @@ model call, use the [Podman quickstart](docs/quickstarts/podman/README.md).
 
 Before starting, have:
 
-- A disposable RHEL 9 x86_64 host and a Bash shell.
-- A bootc-managed host for the bootc route, or Podman already running for the
-  Podman route.
+- Podman or a bootc enabled server
 - A valid OpenAI API key and the exact ID of a model your account can access.
-- The required images already cached for the under-five-minute target.
 
 With these prerequisites, target a first model response in under five minutes.
-Initial image downloads, bootc OS installation and reboot, and local-model
-loading add time.
+Initial image downloads, bootc OS deployment, and local-model
+loading add time(optional).
 
 The published-image quickstart uses OpenCode. For OpenClaw, use the
 [model and tool walkthrough](docs/quickstarts/openshell-praxis/openclaw.md) with
