@@ -29,6 +29,11 @@ harness_ssh() {  # <sandbox> <cmd...>
 
 harness_connect_tty() {  # <sandbox> [cmd...]
   local name="$1"; shift || true
+  local remote_command
+  if (($#)); then
+    printf -v remote_command '%q ' "$@"
+    set -- "${remote_command% }"
+  fi
   # Provider credentials must use explicit gateway bindings, never SSH forwarding.
   ssh -F /dev/null -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o "ProxyCommand=$(_proxy_cmd "${name}")" \

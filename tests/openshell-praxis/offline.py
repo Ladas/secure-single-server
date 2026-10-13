@@ -343,6 +343,16 @@ if args[:2] == ["sandbox", "list"]:
                     ssh_arguments = (self.work / "capture.ssh").read_text().splitlines()
                     self.assertEqual(ssh_arguments[-2:], [f"sandbox@{sandbox}", "bash"])
 
+    def test_connect_remote_command_preserves_argument_boundaries(self):
+        (self.work / "ssh").write_text(
+            '#!/bin/sh\ncommand=\nfor argument do\n  command=$argument\ndone\nexec sh -c "$command"\n')
+        result = subprocess.run(
+            ["bash", str(ROOT / "openshell/harnesses/opencode/connect.sh"),
+             "--name", "test", "printf", "%s\\n", "a b"],
+            env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "a b\n")
+
     def test_openclaw_waits_for_initial_policy_before_uploading_config(self):
         cli = self.work / "openshell"
         source = cli.read_text().replace('print("Acknowledged initial policy revision as loaded")',
