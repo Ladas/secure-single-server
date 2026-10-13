@@ -16,3 +16,7 @@ access. In standalone OpenShell mode, selected model endpoints remain governed
 by the harness policy.
 
 The preinstalled harness image is digest-pinned in `openshell/configs/images.env`.
+
+The `review-github` profile adds delegated PR review: `review.sh` sends a
+batch of PRs as one bounded agent turn and `collect.sh` retrieves the report
+artifacts. See the [review service guide](../../../docs/development/review-service.md).

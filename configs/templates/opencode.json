@@ -43,6 +43,16 @@
     },
     {
       "harness": "opencode",
+      "profile": "review-github",
+      "backend": "standalone",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "policy": "openshell/harnesses/opencode/profiles/review-github/policy.yaml"
+    },
+    {
+      "harness": "opencode",
       "profile": "review",
       "backend": "cloud",
       "image_variable": "ODH_OPENCODE_IMAGE",
@@ -74,6 +84,16 @@
     {
       "harness": "opencode",
       "profile": "interactive",
+      "backend": "cloud",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/openshell-praxis"
+    },
+    {
+      "harness": "opencode",
+      "profile": "review-github",
       "backend": "cloud",
       "image_variable": "ODH_OPENCODE_IMAGE",
       "cpu": "2",

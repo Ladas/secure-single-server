@@ -1,0 +1,21 @@
+version: 1
+filesystem_policy:
+  include_workdir: false
+  read_only: [/usr, /lib, /lib64, /etc, /proc, /dev/urandom, /opt, /sandbox]
+  read_write: [/tmp, /dev/null, /home]
+landlock: {compatibility: best_effort}
+network_policies:
+  model_api:
+    name: model-api
+    endpoints:
+      - {host: api.anthropic.com, port: 443, protocol: rest, access: read-write, enforcement: enforce}
+      - {host: api.openai.com, port: 443, protocol: rest, access: read-write, enforcement: enforce}
+    binaries: [{path: /usr/sbin/node}, {path: /usr/local/sbin/opencode}]
+  github_api:
+    name: github-api
+    endpoints: [{host: api.github.com, port: 443, protocol: rest, enforcement: enforce, access: read-only}]
+    binaries: [{path: /usr/sbin/node}, {path: /usr/sbin/git}]
+  github_git:
+    name: github-git
+    endpoints: [{host: github.com, port: 443}]
+    binaries: [{path: /usr/sbin/git}]

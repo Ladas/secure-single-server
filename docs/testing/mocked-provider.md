@@ -36,7 +36,7 @@ and a manual disposable-RHEL runtime fixture. This change reuses those checks.
 
 | Area | Existing coverage at PR #4 | Added here |
 | --- | --- | --- |
-| Gateway requests | Remote memory/Valkey checks using static responses inside Praxis; all-in-one image startup | One observable provider fixture across all four profiles; JSON/SSE, tools, provider counters and controlled failures |
+| Gateway requests | Remote memory/Valkey checks using static responses inside Praxis; all-in-one image startup | One observable provider fixture across all four runtime profiles; JSON/SSE, tools, provider counters and controlled failures |
 | Quotas and credentials | Remote JSON usage, independent API allowances, TLS/JWT and provider-key checks, Valkey restart/outage checks | Equivalent all-in-one coverage; streaming settlement, first-match checks, missing/partial usage, unchanged provider counts on denial, shared allowance across JWT users and Valkey recovery |
 | OpenShell entry points | Six harness/gateway unit tests and the HTTP reachability regression | Seven additional unit tests covering every standalone profile, integrated rendering/rejection, invalid ports and connect failures |
 | Policy schemas | Sixteen profiles and a native CLI test that can fail on connection before parsing | Parsing controls shared by native/container runners and a hosted pinned-CLI check for every profile |
@@ -127,7 +127,7 @@ python3 tests/mocked-provider.py --suite openshell --engine podman
 ```
 
 The offline tests execute the real create/connect entry points with fake
-CLI/SSH commands. They cover all three standalone harnesses and four profiles,
+CLI/SSH commands. They cover all three standalone harnesses and every standalone profile,
 invalid arguments, integrated OpenCode port/model rendering and rejection of
 integrated OpenClaw configuration. They reuse the merged regressions for
 explicit provider bindings, readiness, gateway setup and SSH credential

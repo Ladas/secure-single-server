@@ -143,8 +143,13 @@ if args[:2] == ["sandbox", "list"]:
         return result.stderr
 
     def test_every_standalone_create_entry_point_and_profile(self):
-        for harness in ("opencode", "codex", "openclaw"):
-            for profile in ("review", "dev", "automation", "interactive"):
+        profiles = {
+            "opencode": ("review", "dev", "automation", "interactive", "review-github"),
+            "codex": ("review", "dev", "automation", "interactive"),
+            "openclaw": ("review", "dev", "automation", "interactive"),
+        }
+        for harness, harness_profiles in profiles.items():
+            for profile in harness_profiles:
                 with self.subTest(harness=harness, profile=profile):
                     policy = self.create(harness, profile)
                     source = ROOT / f"openshell/harnesses/{harness}/profiles/{profile}/policy.yaml"
@@ -154,7 +159,7 @@ if args[:2] == ["sandbox", "list"]:
                             self.assertIs(type(endpoint["port"]), int)
 
     def test_integrated_policy_has_numeric_port_and_provider_json_escapes_model(self):
-        for profile in ("review", "dev", "automation", "interactive"):
+        for profile in ("review", "dev", "automation", "interactive", "review-github"):
             policy = self.create("opencode", profile, integrated=True)
             endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
             self.assertIs(type(endpoint["port"]), int)

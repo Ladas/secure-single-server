@@ -1,0 +1,96 @@
+# Review as a service
+
+Delegated pull-request review inside a restricted OpenCode sandbox. The agent
+clones the repository, reads PR metadata, and writes one Markdown report per
+PR; it has no credentials and no write access to GitHub. Reports are
+collected to the operator's machine over the same SSH channel that installed
+the harness configuration — no `podman cp` or host login required.
+
+Design rationale: [sandbox use-case analysis](sandbox-use-case-analysis.md).
+
+## Security model
+
+The `review-github` profile grants exactly three network capabilities, each
+scoped per binary:
+
+| Binary | May reach | Access |
+|---|---|---|
+| `opencode`, `node` | model API (or the Praxis gateway on the bootc/Praxis shape) | read-write |
+| `node`, `git` | `api.github.com` | REST, read-only (L7-enforced) |
+| `git` | `github.com:443` | git transport (clone/fetch) |
+
+The agent cannot push, comment, open or close issues or PRs (denied by the
+L7 policy before reaching GitHub, regardless of credentials), cannot reach
+any other host, and works inside landlock-enforced filesystem policy with a
+read-only `/usr`. The profile stays within the reviewed
+[opencode boundary](../../tests/policy-boundary/opencode.yaml); OpenShell's
+audit log records every denied attempt.
+
+Output is deliberately artifact-based. Reports land in `~/reports` inside the
+sandbox and leave only through `collect.sh` run by the operator. Posting
+reports as PR comments is a planned phase-2 host-side step so the GitHub
+token never enters the sandbox.
+
+## Setup
+
+Create the sandbox once (administrator action, on the host that runs the
+OpenShell CLI):
+
+```bash
+openshell/harnesses/opencode/create.sh --profile review-github
+```
+
+On the bootc/Praxis shape, `sudo sss-bootc harness create` selects the same
+profile through the catalog. The instructions the agent follows
+([review-agents.md](../../openshell/harnesses/opencode/review-agents.md))
+are pushed into the sandbox on every review turn, so updating them in the
+repository is enough — no sandbox recreation.
+
+## Usage
+
+End-of-day batch:
+
+```bash
+openshell/harnesses/opencode/review.sh \
+  --repo redhat-et/secure-single-server --pr 74 --pr 78 --pr 88 \
+  [--message "focus on the upgrade cleanup"] [--timeout 7200]
+```
+
+The driver pushes the task and agent instructions over SSH stdin, runs one
+bounded non-interactive `opencode run` turn (default timeout 1 h, maximum
+4 h), and prints the agent's final JSON response. Next morning:
+
+```bash
+openshell/harnesses/opencode/collect.sh            # into ./opencode-review-github-reports/
+openshell/harnesses/opencode/collect.sh --dest ~/reviews-2026-10-14/
+```
+
+`collect.sh` copies every file under the sandbox's `~/reports` to the local
+directory and fails if no reports exist (a review turn that produced nothing
+is a failure, not an empty success).
+
+## Report contract
+
+One file per PR, `~/reports/pr-N.md`, always written — including a failure
+report when a step (clone, rate limit, unfetchable ref) goes wrong. Verdict
+is one of `approve`, `comment`, `request-changes`; every finding carries
+file, line, severity, and a suggested fix. The full contract lives in
+[review-agents.md](../../openshell/harnesses/opencode/review-agents.md).
+
+## Limitations
+
+- Public repositories only: `git` and `api.github.com` run unauthenticated,
+  and introducing a GitHub token into the sandbox would be a new credential
+  surface (see phase 2 below).
+- Unauthenticated `api.github.com` is rate-limited (60 requests/hour per
+  IP); the instructions tell the agent to fetch each PR's metadata once.
+- One `review.sh` invocation runs sequentially in one sandbox; a large batch
+  may exceed the 4 h timeout — split it into multiple invocations.
+
+## Phase 2 (not built yet)
+
+A host-side poster that takes the collected reports and adds them as PR
+comments using a host-held `GH_TOKEN` (scoped to the target repositories).
+The token stays outside the sandbox; the agent remains read-only. This gives
+the "human leaves comments in the PRs" experience without extending the
+sandbox's write boundary.
