@@ -215,9 +215,9 @@ if args[:2] == ["sandbox", "list"]:
         sources = list(ROOT.glob("openshell/harnesses/*/profiles/*/policy.yaml"))
         sources += list(ROOT.glob("configs/openshell-praxis/*/profiles/*/policy.yaml"))
         sources += list(ROOT.glob("configs/openshell-praxis/profiles/*/policy.yaml"))
-        expected = [{"method": "GET", "path": "**"},
-                    {"method": "HEAD", "path": "**"},
-                    {"method": "OPTIONS", "path": "**"},
+        expected = [{"method": "GET", "path": "/**"},
+                    {"method": "HEAD", "path": "/**"},
+                    {"method": "OPTIONS", "path": "/**"},
                     {"method": "POST", "path": "/**/git-upload-pack"}]
         checked = 0
         for source in sorted(sources):

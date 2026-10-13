@@ -191,11 +191,14 @@ as_openshell() {
 
     def test_harness_has_only_praxis_egress(self):
         policy = yaml.safe_load((ROOT / 'configs/vllm/harness/profiles/dev/policy.yaml')
-                                .read_text().replace('@@PRAXIS_PORT@@', '8080'))
+                                .read_text().replace('@@PRAXIS_PORT@@', '8080')
+                                .replace('@@PRAXIS_API_PREFIX@@', ''))
         self.assertEqual(list(policy['network_policies']), ['praxis_gateway'])
         self.assertEqual(policy['network_policies']['praxis_gateway']['endpoints'], [
             {'host': 'host.openshell.internal', 'port': 8080, 'protocol': 'rest',
-             'access': 'read-write', 'enforcement': 'enforce'}])
+             'enforcement': 'enforce', 'rules': [
+                 {'allow': {'method': 'GET', 'path': '/v1/models'}},
+                 {'allow': {'method': 'POST', 'path': '/v1/chat/completions'}}]}])
         self.assertIn({'path': '/usr/local/bin/opencode'},
                       policy['network_policies']['praxis_gateway']['binaries'])
         config = json.loads((ROOT / 'configs/vllm/harness/harness-provider.json.in').read_text())

@@ -32,9 +32,9 @@ network_policies:
         protocol: rest
         enforcement: enforce
         rules:
-          - allow: {method: GET, path: "**"}
-          - allow: {method: HEAD, path: "**"}
-          - allow: {method: OPTIONS, path: "**"}
+          - allow: {method: GET, path: "/**"}
+          - allow: {method: HEAD, path: "/**"}
+          - allow: {method: OPTIONS, path: "/**"}
           - allow: {method: POST, path: "/**/git-upload-pack"}
     binaries: [{path: /usr/bin/git}]
   npm_registry:
