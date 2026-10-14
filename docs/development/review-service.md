@@ -71,10 +71,14 @@ sudo sss-bootc harness review --repo OWNER/REPO --pr 74 --pr 78
 sudo sss-bootc harness collect --name opencode-pr-review
 ```
 
-To pilot from a checkout that predates the running image, stage it where
-`openshell-svc` can read it (`sudo chmod -R a+rX` on a copy under
-`/var/tmp`, following the controlled-policy-qualification convention) and use
-the same `runuser` wrapper the quickstart documents:
+To pilot from a checkout that predates the running image, sync the branch to
+the host with
+[`scripts/dev/sync-branch.sh`](../../scripts/dev/sync-branch.sh)
+(per-file `scp -p` with add/modify/delete handling — the bootc host ships no
+rsync), stage the checkout where `openshell-svc` can read it
+(`sudo chmod -R a+rX` on a copy under `/var/tmp`, following the
+controlled-policy-qualification convention), and use the same `runuser`
+wrapper the quickstart documents:
 
 ```bash
 uid="$(id -u openshell-svc)"
