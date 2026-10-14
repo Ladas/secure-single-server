@@ -149,17 +149,28 @@ file, line, severity, and a suggested fix. The full contract lives in
 
 ## Limitations
 
+- Stopping `review.sh` (Ctrl-C) kills only the local ssh connection — the
+  in-sandbox `opencode` process keeps running and will continue consuming
+  quota on retry backoffs. The `--timeout` bound is the reliable way to end
+  a turn; to stop one manually, open `connect_bash.sh` and `kill` the
+  opencode process. Zombie turns from interrupted runs hold gateway
+  reservations and rate-limit slots, which can starve subsequent runs.
 - Gateway quota: review turns are token-heavy (each model turn carries the
   instruction file, PR metadata, and repo context), and the shared gateway
   enforces a 24h sliding-window token quota (1M tokens on the bootc
-  memory-backend shape; `curl -s http://127.0.0.1:9901/metrics | grep
-  token_rate_limit` shows the balance). A batch that exhausts it presents as
-  a silent hang: `opencode run --format json` retries 429 responses without
-  terminal output. Size nightly batches accordingly, and treat a long run
-  with no filesystem progress in `~/review/` or `~/reports/` as a possible
-  quota condition — check the gateway metrics before assuming the agent is
-  slow. On the memory backend, restarting Praxis clears the ledger (test
-  environments only).
+  memory-backend shape) plus per-request reservations of 10,000 tokens held
+  for up to 300 s. A retry storm can exhaust capacity through reservations
+  alone; that condition self-heals roughly five minutes after requests
+  stop, while exhaustion through settled usage does not. Sustained 429s
+  present as a silent hang: `opencode run --format json` retries without
+  terminal output. Check `sudo journalctl _SYSTEMD_USER_UNIT=praxis.service`
+  for `status=429` access-log lines before assuming the agent is slow. On
+  the memory backend, restarting the `praxis.service` user unit clears the
+  ledger (test environments only); the container healthcheck
+  (`sudo -u praxis-svc podman inspect praxis-shared-gateway
+  --format '{{.State.Health.Status}}'`) reports container health but says
+  nothing about quota — and probing `/v1/models` costs a reservation, so
+  prefer the healthcheck.
 
 - Model compatibility: the rendered config uses the native `@ai-sdk/openai`
   adapter with `forceReasoning` so current OpenAI model families (gpt-5/6),
