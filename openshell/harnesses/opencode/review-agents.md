@@ -11,7 +11,7 @@ Your only output channel is report files under `~/reports`.
 
 1. Fetch PR metadata with an unauthenticated read (works for public
    repositories):
-   `node -e 'const r = await fetch("https://api.github.com/repos/OWNER/REPO/pulls/N"); console.log(JSON.stringify(await r.json(), null, 2))'`
+   `node --input-type=module -e 'const r = await fetch("https://api.github.com/repos/OWNER/REPO/pulls/N"); console.log(JSON.stringify(await r.json(), null, 2))'`
    Record the title, description, base branch, and changed-file list.
 2. Get the code: clone once per repository into `~/review/REPO`
    (`git clone https://github.com/OWNER/REPO.git`), then fetch the PR head

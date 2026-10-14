@@ -131,6 +131,13 @@ file, line, severity, and a suggested fix. The full contract lives in
 
 ## Limitations
 
+- Model compatibility: the rendered config uses the native `@ai-sdk/openai`
+  adapter with `forceReasoning` so current OpenAI model families (gpt-5/6),
+  which reject the classic `max_tokens` parameter, work through Praxis. A
+  model that fails with `Unsupported parameter: 'max_tokens'` in a sandbox
+  predating this fix can be switched in place by editing
+  `~/.config/opencode/opencode.json` (no sandbox recreation).
+
 - Public repositories only: `git` and `api.github.com` run unauthenticated,
   and introducing a GitHub token into the sandbox would be a new credential
   surface (see phase 2 below).

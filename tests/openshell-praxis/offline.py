@@ -217,6 +217,10 @@ if args[:2] == ["sandbox", "list"]:
             provider = config["provider"]["praxis"]
             self.assertEqual(set(provider["models"]), {model})
             self.assertEqual(provider["options"]["baseURL"], "http://host.openshell.internal:18080/v1")
+            # Current OpenAI model families reject max_tokens; the native
+            # adapter with forceReasoning sends max_completion_tokens.
+            self.assertEqual(provider["npm"], "@ai-sdk/openai")
+            self.assertEqual(provider["models"][model]["options"], {"forceReasoning": True})
 
     def test_invalid_ports_fail_before_sandbox_creation(self):
         for port in ("0", "65536", "abc", "8080\nfoo: bar"):
@@ -236,6 +240,9 @@ if args[:2] == ["sandbox", "list"]:
         model = config["provider"]["praxis"]["models"][self.env["OPENSHELL_MODEL_ID"]]
         self.assertTrue(model["reasoning"])
         self.assertEqual(model["interleaved"], {"field": "reasoning"})
+        # The vLLM path keeps the classic adapter and parameter surface.
+        self.assertEqual(config["provider"]["praxis"]["npm"], "@ai-sdk/openai-compatible")
+        self.assertNotIn("options", model)
         endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
         self.assertEqual(endpoint["host"], "host.openshell.internal")
         self.assertEqual(endpoint["port"], 18080)
