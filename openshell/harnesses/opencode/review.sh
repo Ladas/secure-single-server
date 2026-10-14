@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# One bounded PR-review turn inside an existing review-github sandbox.
+# One bounded PR-review turn inside an existing pr-review sandbox.
 set -euo pipefail
 H_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../scripts/harness-lib.sh
 # shellcheck disable=SC1091
 source "${H_DIR}/../../scripts/harness-lib.sh"
-NAME="opencode-review-github"
+NAME="opencode-pr-review"
 REPO=""
 MESSAGE=""
 TIMEOUT=3600

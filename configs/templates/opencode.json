@@ -43,13 +43,13 @@
     },
     {
       "harness": "opencode",
-      "profile": "review-github",
+      "profile": "pr-review",
       "backend": "standalone",
       "image_variable": "ODH_OPENCODE_IMAGE",
       "cpu": "2",
       "memory": "4Gi",
       "environment": {},
-      "policy": "openshell/harnesses/opencode/profiles/review-github/policy.yaml"
+      "policy": "openshell/harnesses/opencode/profiles/pr-review/policy.yaml"
     },
     {
       "harness": "opencode",
@@ -93,7 +93,7 @@
     },
     {
       "harness": "opencode",
-      "profile": "review-github",
+      "profile": "pr-review",
       "backend": "cloud",
       "image_variable": "ODH_OPENCODE_IMAGE",
       "cpu": "2",

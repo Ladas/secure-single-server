@@ -5,7 +5,7 @@ H_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../scripts/harness-lib.sh
 # shellcheck disable=SC1091
 source "${H_DIR}/../../scripts/harness-lib.sh"
-NAME="opencode-review-github"
+NAME="opencode-pr-review"
 DEST=""
 while [[ $# -gt 0 ]]; do
   [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || die "missing value for $1"

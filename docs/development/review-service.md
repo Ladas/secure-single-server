@@ -10,7 +10,7 @@ Design rationale: [sandbox use-case analysis](sandbox-use-case-analysis.md).
 
 ## Security model
 
-The `review-github` profile grants exactly three network capabilities, each
+The `pr-review` profile grants exactly three network capabilities, each
 scoped per binary:
 
 | Binary | May reach | Access |
@@ -26,6 +26,16 @@ read-only `/usr`. The profile stays within the reviewed
 [opencode boundary](../../tests/policy-boundary/opencode.yaml); OpenShell's
 audit log records every denied attempt.
 
+Unlike the `review` profile (whose read-only workdir expects code pushed in
+from outside), `pr-review` clones the repository itself, so its workspace —
+`/sandbox`, which is the sandbox user's home in the workload image — is
+writable like `dev`. Reports live under `~/reports` (that is,
+`/sandbox/reports`).
+
+OpenShell 0.1.3 caps sandbox names at 19 characters; the profile is named
+`pr-review` so the derived default name `opencode-pr-review` (18 characters)
+fits without an explicit `--name`.
+
 Output is deliberately artifact-based. Reports land in `~/reports` inside the
 sandbox and leave only through `collect.sh` run by the operator. Posting
 reports as PR comments is a planned phase-2 host-side step so the GitHub
@@ -37,7 +47,7 @@ Create the sandbox once (administrator action, on the host that runs the
 OpenShell CLI):
 
 ```bash
-openshell/harnesses/opencode/create.sh --profile review-github
+openshell/harnesses/opencode/create.sh --profile pr-review
 ```
 
 ### Running on the bootc host
@@ -56,9 +66,9 @@ After the harness image is rebuilt with this branch, the wrapped commands
 work directly:
 
 ```bash
-sudo sss-bootc harness create --profile review-github --name opencode-review-github
+sudo sss-bootc harness create --profile pr-review
 sudo sss-bootc harness review --repo OWNER/REPO --pr 74 --pr 78
-sudo sss-bootc harness collect --name opencode-review-github
+sudo sss-bootc harness collect --name opencode-pr-review
 ```
 
 To pilot from a checkout that predates the running image, stage it where
@@ -73,7 +83,7 @@ sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$uid"/bus \
   OPENSHELL_BIN=/usr/bin/openshell OPENSHELL_MODEL_ID="$model_id" \
   /var/tmp/secure-single-server/openshell/harnesses/opencode/create.sh \
-  --profile review-github --name opencode-review-github \
+  --profile pr-review \
   --config /var/tmp/secure-single-server/configs/openshell-praxis
 ```
 

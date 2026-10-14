@@ -144,7 +144,7 @@ if args[:2] == ["sandbox", "list"]:
 
     def test_every_standalone_create_entry_point_and_profile(self):
         profiles = {
-            "opencode": ("review", "dev", "automation", "interactive", "review-github"),
+            "opencode": ("review", "dev", "automation", "interactive", "pr-review"),
             "codex": ("review", "dev", "automation", "interactive"),
             "openclaw": ("review", "dev", "automation", "interactive"),
         }
@@ -159,7 +159,7 @@ if args[:2] == ["sandbox", "list"]:
                             self.assertIs(type(endpoint["port"]), int)
 
     def test_integrated_policy_has_numeric_port_and_provider_json_escapes_model(self):
-        for profile in ("review", "dev", "automation", "interactive", "review-github"):
+        for profile in ("review", "dev", "automation", "interactive", "pr-review"):
             policy = self.create("opencode", profile, integrated=True)
             endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
             self.assertIs(type(endpoint["port"]), int)

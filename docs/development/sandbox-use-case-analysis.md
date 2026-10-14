@@ -95,7 +95,7 @@ Prototype the top use cases as workload templates plus host-side drivers,
 turning "restrictions we documented" into "delegated task patterns we
 validated":
 
-1. Review as a service — `review-github` profile, task driver, report
+1. Review as a service — `pr-review` profile, task driver, report
    collector ([review service design](review-service.md)).
 2. Issue digest automation on the `automation` profile.
 3. Codemod patch loop on the `dev` profile.
