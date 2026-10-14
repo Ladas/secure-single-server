@@ -142,7 +142,7 @@ if args[:2] == ["sandbox", "list"]:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("No such file or directory", result.stderr)
         log = (self.work / "capture.sshlog").read_text()
-        self.assertIn("mkdir -p ~/review ~/reports", log)
+        self.assertIn("rm -rf ~/review && mkdir -p ~/review ~/reports", log)
         self.assertIn("cat > ~/review/AGENTS.md", log)
         self.assertIn("cat > ~/review/task.md", log)
         self.assertIn('cd ~/review && opencode run --format json "$(cat task.md)"', log)

@@ -29,7 +29,9 @@ if [[ ! "${TIMEOUT}" =~ ^[1-9][0-9]{0,4}$ ]] || (( TIMEOUT > 14400 )); then
   die 'timeout must be 1..14400 seconds'
 fi
 # Instructions and the task travel through stdin, not interpolated commands.
-harness_ssh "${NAME}" 'mkdir -p ~/review ~/reports'
+# Each turn starts from a clean workspace: stale metadata, branches, or clones
+# from earlier runs would mislead the agent (and reports stay untouched).
+harness_ssh "${NAME}" 'rm -rf ~/review && mkdir -p ~/review ~/reports'
 harness_ssh "${NAME}" 'cat > ~/review/AGENTS.md' <"${H_DIR}/review-agents.md"
 {
   printf 'Review pull requests %s of the GitHub repository %s.\n' \
