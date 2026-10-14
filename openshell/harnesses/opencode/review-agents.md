@@ -16,7 +16,11 @@ Your only output channel is report files under `~/reports`.
 2. Get the code: clone once per repository into `~/review/REPO`
    (`git clone https://github.com/OWNER/REPO.git`), then fetch the PR head
    (`git fetch origin pull/N/head:pr-N`) and diff it against the PR's base
-   branch (`git diff origin/BASE...pr-N`).
+   branch (`git diff origin/BASE...pr-N`). If that diff is empty, the PR is
+   already merged into the base: use the `merge_commit_sha` field from the
+   metadata and diff the merge against its first parent instead
+   (`git diff MERGE_SHA^1 MERGE_SHA`), which reproduces the PR's changes.
+   Never report "no changes" for a PR whose metadata lists changed files.
 3. Review the diff for correctness, security (injection, path traversal,
    credential handling), error handling, and missing tests. Read surrounding
    code, not just changed lines.
