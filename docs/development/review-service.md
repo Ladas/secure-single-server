@@ -125,6 +125,20 @@ openshell/harnesses/opencode/collect.sh --dest ~/reviews-2026-10-14/
 directory and fails if no reports exist (a review turn that produced nothing
 is a failure, not an empty success).
 
+## Known startup noise
+
+Two lines always appear in the sandbox's
+`~/.local/share/opencode/log/opencode.log` at startup and are **not**
+failures — both endpoints are denied by policy in every profile, OpenCode
+logs them and continues:
+
+- `ERROR ... "Failed to fetch models.dev"` (the `models.opencode.ai` catalog)
+- `WARN ... "background dependency install failed"` (the npm plugin
+  self-check, ~70 s after start)
+
+The log records only startup and errors, not agent activity — a quiet log
+after these lines is normal. Watch `~/review/` and `~/reports/` for progress.
+
 ## Report contract
 
 One file per PR, `~/reports/pr-N.md`, always written — including a failure
