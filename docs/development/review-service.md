@@ -40,8 +40,50 @@ OpenShell CLI):
 openshell/harnesses/opencode/create.sh --profile review-github
 ```
 
-On the bootc/Praxis shape, `sudo sss-bootc harness create` selects the same
-profile through the catalog. The instructions the agent follows
+### Running on the bootc host
+
+Two bootc-specific rules catch every direct-script attempt:
+
+- The OpenShell CLI lives at `/usr/bin/openshell`, not the generic scripts'
+  default `/usr/local/bin/openshell` — set `OPENSHELL_BIN=/usr/bin/openshell`.
+- All harness scripts must run as the `openshell-svc` service account (with
+  its `HOME`, `XDG_RUNTIME_DIR`, and `DBUS_SESSION_BUS_ADDRESS`), because the
+  gateway — and the template inventory `create.sh` reads — belongs to that
+  user's session. Running as `cloud-user` fails at
+  `workload templates: template list failed (exit 1)`.
+
+After the harness image is rebuilt with this branch, the wrapped commands
+work directly:
+
+```bash
+sudo sss-bootc harness create --profile review-github --name opencode-review-github
+sudo sss-bootc harness review --repo OWNER/REPO --pr 74 --pr 78
+sudo sss-bootc harness collect --name opencode-review-github
+```
+
+To pilot from a checkout that predates the running image, stage it where
+`openshell-svc` can read it (`sudo chmod -R a+rX` on a copy under
+`/var/tmp`, following the controlled-policy-qualification convention) and use
+the same `runuser` wrapper the quickstart documents:
+
+```bash
+uid="$(id -u openshell-svc)"
+sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
+  XDG_RUNTIME_DIR=/run/user/"$uid" \
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$uid"/bus \
+  OPENSHELL_BIN=/usr/bin/openshell OPENSHELL_MODEL_ID="$model_id" \
+  /var/tmp/secure-single-server/openshell/harnesses/opencode/create.sh \
+  --profile review-github --name opencode-review-github \
+  --config /var/tmp/secure-single-server/configs/openshell-praxis
+```
+
+`review.sh` and `collect.sh` take the same `runuser` wrapper (without
+`OPENSHELL_MODEL_ID`). On the bootc/Praxis shape the sandbox reaches the
+Praxis gateway, not provider APIs directly, so always pass the
+`--config .../configs/openshell-praxis` recipe and the administrator-approved
+model ID when creating.
+
+The instructions the agent follows
 ([review-agents.md](../../openshell/harnesses/opencode/review-agents.md))
 are pushed into the sandbox on every review turn, so updating them in the
 repository is enough — no sandbox recreation.
