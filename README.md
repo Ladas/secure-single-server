@@ -46,15 +46,12 @@ model call, use the [Podman quickstart](docs/quickstarts/podman/README.md).
 
 Before starting, have:
 
-- A disposable RHEL 9 x86_64 host and a Bash shell.
-- A bootc-managed host for the bootc route, or Podman already running for the
-  Podman route.
+- Podman or a bootc enabled server
 - A valid OpenAI API key and the exact ID of a model your account can access.
-- The required images already cached for the under-five-minute target.
 
 With these prerequisites, target a first model response in under five minutes.
-Initial image downloads, bootc OS installation and reboot, and local-model
-loading add time.
+Initial image downloads, bootc OS deployment, and local-model
+loading add time(optional).
 
 The published-image quickstart uses OpenCode. For OpenClaw, use the
 [model and tool walkthrough](docs/quickstarts/openshell-praxis/openclaw.md) with
@@ -76,12 +73,30 @@ To install OpenShell, harnesses, and Praxis separately on a fresh VM or bare
 metal, follow the [manual single-server guide](docs/quickstarts/openshell-single-server/manual.md)
 and [Praxis installation walkthrough](docs/quickstarts/openshell-praxis/install.md).
 
+The manual guide installs Git and Podman, clones the reviewed revision to the
+service-readable `/opt/secure-single-server` path, and runs the installer from
+that checkout. The installer verifies that the host provides Landlock ABI 3 or
+newer before creating sandboxes. After the guide's `repo` and `os_run`
+definitions are active, connect to an OpenCode sandbox with:
+
+```bash
+os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev
+```
+
+The connect entry point also accepts an optional remote command. For a simple
+Bash session without editing the harness script, use:
+
+```bash
+os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev bash
+```
+
 ## Explore Further
 
 - [Architecture walkthrough](docs/quickstarts/architecture-walkthrough/README.md):
   why each layer exists and what its evidence does not prove.
 - [Manual single-server guide](docs/quickstarts/openshell-single-server/manual.md):
-  OpenShell installation, harness setup, verification, and policy tests.
+  OpenShell installation from a service-readable checkout, harness setup, Bash
+  sandbox access, verification, and policy tests.
 - [OpenShell trust model](openshell/docs/threat-model.md): the execution
   boundary and assumptions behind the current single-operator deployment.
 - [Praxis integration](docs/quickstarts/openshell-praxis/README.md): model

@@ -45,7 +45,9 @@ def boundary_for(policy):
 
 
 def render_policy(source, target):
-    target.write_text(source.read_text().replace("@@PRAXIS_PORT@@", "18080"))
+    target.write_text(source.read_text()
+                      .replace("@@PRAXIS_PORT@@", "18080")
+                      .replace("@@PRAXIS_API_PREFIX@@", ""))
 
 
 def run_prover(prover, candidate, boundary):

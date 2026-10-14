@@ -61,9 +61,11 @@ The runner sends the task through stdin and directs SQLite temporary files to
 policy-permitted `/tmp`. It creates disposable per-call agent state; it does
 not retain a conversation between invocations.
 
-The cloud development policy also permits selected GitHub/npm traffic.
-The vLLM policy permits only the Praxis model endpoint. Neither permits direct
-cloud model access. Do not combine this mode with automatic provider injection.
+The cloud development policy also permits selected GitHub/npm traffic. The vLLM
+policy permits only `GET /vllm/v1/models` and
+`POST /vllm/v1/chat/completions` on the Praxis model endpoint. Neither permits
+direct cloud model access. Do not combine this mode with automatic provider
+injection.
 
 ## Bootc deployment
 
