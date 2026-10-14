@@ -43,7 +43,12 @@ harness_ssh "${NAME}" 'cat > ~/review/AGENTS.md' <"${H_DIR}/review-agents.md"
 # shellcheck disable=SC2016 # the command substitution runs remotely, inside the sandbox
 review_cmd='cd ~/review && opencode run --format json "$(cat task.md)"'
 if command -v timeout >/dev/null 2>&1; then
-  timeout "${TIMEOUT}" harness_ssh "${NAME}" "${review_cmd}"
+  # timeout execs a command, so the harness_ssh shell function must be
+  # re-imported by a child bash; export the function and its variables.
+  export OPENSHELL_BIN OPENSHELL_GATEWAY_NAME OPENSHELL_SANDBOX_USER
+  export -f _os _proxy_cmd harness_ssh
+  # shellcheck disable=SC2016 # $1/$2 are the child bash's positional parameters
+  timeout "${TIMEOUT}" bash -c 'harness_ssh "$1" "$2"' _ "${NAME}" "${review_cmd}"
 else
   harness_ssh "${NAME}" "${review_cmd}"
 fi

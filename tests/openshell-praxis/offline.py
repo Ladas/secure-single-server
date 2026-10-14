@@ -122,6 +122,51 @@ if args[:2] == ["sandbox", "list"]:
             script.write_text(source)
             script.chmod(0o755)
 
+    def test_review_entry_point_pushes_contract_and_task(self):
+        # The fake ssh appends every remote command and stdin payload; a fake
+        # timeout shim forces the child-bash code path on every platform.
+        (self.work / "capture.sshlog").unlink(missing_ok=True)
+        (self.work / "capture.stdin").unlink(missing_ok=True)
+        for name, source in {
+            "ssh": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CAPTURE.sshlog"\ncat >> "$CAPTURE.stdin"\n',
+            "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
+        }.items():
+            script = self.work / name
+            script.write_text(source)
+            script.chmod(0o755)
+        args = ["bash", str(ROOT / "openshell/harnesses/opencode/review.sh"),
+                "--name", "test", "--repo", "owner/repo", "--pr", "53", "--pr", "78",
+                "--timeout", "60"]
+        result = subprocess.run(args, env=self.env, capture_output=True, text=True,
+                                timeout=15, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("No such file or directory", result.stderr)
+        log = (self.work / "capture.sshlog").read_text()
+        self.assertIn("mkdir -p ~/review ~/reports", log)
+        self.assertIn("cat > ~/review/AGENTS.md", log)
+        self.assertIn("cat > ~/review/task.md", log)
+        self.assertIn('cd ~/review && opencode run --format json "$(cat task.md)"', log)
+        stdin = (self.work / "capture.stdin").read_text()
+        self.assertIn("PR review agent instructions", stdin)
+        self.assertIn("Review pull requests #53,#78 of the GitHub repository owner/repo.", stdin)
+
+    def test_collect_entry_point_pulls_reports_over_ssh(self):
+        collected = self.work / "collected"
+        script = self.work / "ssh"
+        script.write_text('#!/bin/sh\n'
+                          'mkdir -p "$CAPTURE.reports"\n'
+                          'printf "# PR #53\\n" > "$CAPTURE.reports/pr-53.md"\n'
+                          'tar cf - -C "$CAPTURE.reports" .\n')
+        script.chmod(0o755)
+        args = ["bash", str(ROOT / "openshell/harnesses/opencode/collect.sh"),
+                "--name", "test", "--dest", str(collected)]
+        result = subprocess.run(args, env=self.env, capture_output=True, text=True,
+                                timeout=15, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = collected / "pr-53.md"
+        self.assertTrue(report.is_file())
+        self.assertIn("# PR #53", report.read_text())
+
     def create(self, harness, profile, integrated=False, success=True, config_dir=None, provider=None):
         # Each invocation must produce fresh evidence, including subtests.
         for name in ("capture", "capture.provider"):
