@@ -145,10 +145,40 @@ if args[:2] == ["sandbox", "list"]:
         self.assertIn("rm -rf ~/review && mkdir -p ~/review ~/reports", log)
         self.assertIn("cat > ~/review/AGENTS.md", log)
         self.assertIn("cat > ~/review/task.md", log)
-        self.assertIn('cd ~/review && opencode run --format json "$(cat task.md)"', log)
+        self.assertIn('cd ~/review && opencode run --format json "$(cat task.md)" </dev/null', log)
         stdin = (self.work / "capture.stdin").read_text()
         self.assertIn("PR review agent instructions", stdin)
         self.assertIn("Review pull requests #53,#78 of the GitHub repository owner/repo.", stdin)
+
+    def test_review_turn_stdin_reaches_eof(self):
+        # `opencode run` drains piped stdin to EOF before submitting its argv
+        # prompt. Over harness_ssh (no PTY) that stdin is the SSH channel,
+        # which never EOFs while review.sh runs from a terminal, so the turn
+        # must close stdin itself or it hangs before creating a session.
+        # The fake ssh executes the remote command with stdin passed through,
+        # like real ssh; the fake opencode blocks until stdin EOFs.
+        self.env["HOME"] = str(self.work)
+        for name, source in {
+            "ssh": '#!/bin/sh\nwhile [ $# -gt 1 ]; do shift; done\nexec sh -c "$1"\n',
+            "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
+            "opencode": '#!/bin/sh\ncat > "$CAPTURE.opencode-stdin"\nprintf "OPENCODE_TURN_DONE\\n"\n',
+        }.items():
+            script = self.work / name
+            script.write_text(source)
+            script.chmod(0o755)
+        read_fd, write_fd = os.pipe()
+        try:
+            args = ["bash", str(ROOT / "openshell/harnesses/opencode/review.sh"),
+                    "--name", "test", "--repo", "owner/repo", "--pr", "53",
+                    "--timeout", "60"]
+            result = subprocess.run(args, env=self.env, capture_output=True, text=True,
+                                    timeout=20, stdin=read_fd)
+        finally:
+            os.close(write_fd)
+            os.close(read_fd)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("OPENCODE_TURN_DONE", result.stdout)
+        self.assertEqual((self.work / "capture.opencode-stdin").read_text(), "")
 
     def test_collect_entry_point_pulls_reports_over_ssh(self):
         collected = self.work / "collected"

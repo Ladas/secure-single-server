@@ -42,8 +42,11 @@ harness_ssh "${NAME}" 'cat > ~/review/AGENTS.md' <"${H_DIR}/review-agents.md"
   fi
 } | harness_ssh "${NAME}" 'cat > ~/review/task.md'
 # The message is read from the file by the remote shell; no local quoting of task text.
+# opencode run drains piped stdin to EOF before submitting its prompt, and the SSH
+# channel's stdin never EOFs while review.sh runs non-interactively, so the turn
+# must close stdin itself or it hangs before creating a session.
 # shellcheck disable=SC2016 # the command substitution runs remotely, inside the sandbox
-review_cmd='cd ~/review && opencode run --format json "$(cat task.md)"'
+review_cmd='cd ~/review && opencode run --format json "$(cat task.md)" </dev/null'
 if command -v timeout >/dev/null 2>&1; then
   # timeout execs a command, so the harness_ssh shell function must be
   # re-imported by a child bash; export the function and its variables.
