@@ -149,6 +149,18 @@ file, line, severity, and a suggested fix. The full contract lives in
 
 ## Limitations
 
+- Gateway quota: review turns are token-heavy (each model turn carries the
+  instruction file, PR metadata, and repo context), and the shared gateway
+  enforces a 24h sliding-window token quota (1M tokens on the bootc
+  memory-backend shape; `curl -s http://127.0.0.1:9901/metrics | grep
+  token_rate_limit` shows the balance). A batch that exhausts it presents as
+  a silent hang: `opencode run --format json` retries 429 responses without
+  terminal output. Size nightly batches accordingly, and treat a long run
+  with no filesystem progress in `~/review/` or `~/reports/` as a possible
+  quota condition — check the gateway metrics before assuming the agent is
+  slow. On the memory backend, restarting Praxis clears the ledger (test
+  environments only).
+
 - Model compatibility: the rendered config uses the native `@ai-sdk/openai`
   adapter with `forceReasoning` so current OpenAI model families (gpt-5/6),
   which reject the classic `max_tokens` parameter, work through Praxis. A
