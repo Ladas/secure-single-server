@@ -5,7 +5,7 @@ C_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${C_DIR}/harness-lib.sh"
 HARNESS_KIND="$1"; shift
 H_DIR="$(cd -- "${C_DIR}/../harnesses/${HARNESS_KIND}" && pwd)"
-PROFILE=""; NAME=""; HARNESS_CONFIG_DIR=""; PROVIDER=""; POLICY_ADVISOR=no
+PROFILE=""; NAME=""; HARNESS_CONFIG_DIR=""; PROVIDER=""; MODEL_ID=""; POLICY_ADVISOR=no
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == --policy-advisor ]]; then POLICY_ADVISOR=yes; shift; continue; fi
   [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || die "missing value for $1"
@@ -14,10 +14,11 @@ while [[ $# -gt 0 ]]; do
     --profile) PROFILE="$2"; shift 2;;
     --name) NAME="$2"; shift 2;;
     --config) HARNESS_CONFIG_DIR="$2"; shift 2;;
+    --model) MODEL_ID="$2"; shift 2;;
     *) die "unknown arg: $1";;
   esac
 done
-[[ -n "${PROFILE}" ]] || die 'usage: create.sh --profile <profile> [--name N] [--config <dir>] [--policy-advisor]'
+[[ -n "${PROFILE}" ]] || die 'usage: create.sh --profile <profile> [--name N] [--config <dir>] [--model ID] [--policy-advisor]'
 [[ "${NAME:-sandbox}" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]] || die 'invalid sandbox name'
 NAME="${NAME:-${HARNESS_KIND}-${PROFILE}}"
 # Select workload and policy from data; no per-harness profile allowlist.
@@ -25,6 +26,8 @@ backend="${OPENSHELL_BOOTC_BACKEND:-}"
 if [[ -n "${backend}" && "${backend}" != cloud && -n "${PROVIDER}" ]]; then
   die 'selected backend owns provider configuration; omit --provider'
 fi
+[[ -z "${MODEL_ID}" || -n "${HARNESS_CONFIG_DIR}" ]] \
+  || die 'model selection requires --config'
 REQUESTED_CONFIG="${HARNESS_CONFIG_DIR}"
 selection="$("${C_DIR}/template.sh" select --harness "${HARNESS_KIND}" --profile "${PROFILE}" \
   --config "${HARNESS_CONFIG_DIR}" --backend "${backend}")"
@@ -40,15 +43,21 @@ TEMPLATE_BACKEND=""; POLICY_SRC=""; DEFAULT_MODEL=""; IMAGE_VARIABLE=""
 IMAGE="${!IMAGE_VARIABLE}"
 if [[ -n "${HARNESS_CONFIG_DIR}" ]]; then
   [[ -z "${PROVIDER}" ]] || die 'integrated mode cannot attach a direct provider'
+  [[ -z "${MODEL_ID}" ]] || validate_model_name "${MODEL_ID}"
   PROVIDER_SRC="${HARNESS_CONFIG_DIR}/harness-provider.json.in"
+  PROFILE_PROVIDER_SRC="${HARNESS_CONFIG_DIR}/${PROFILE}/harness-provider.json.in"
+  if [[ -f "${PROFILE_PROVIDER_SRC}" ]]; then
+    PROVIDER_SRC="${PROFILE_PROVIDER_SRC}"
+  fi
   [[ -f "${PROVIDER_SRC}" ]] || die "provider template not found: ${PROVIDER_SRC}"
   if [[ -n "${backend}" && "${backend}" != cloud ]]; then
     # Preserve bootc's ownership of the local recipe's model and Praxis port.
     # The model comes from catalog data, not a harness-specific shell branch.
+    [[ -z "${MODEL_ID}" ]] || die 'selected backend owns model configuration; omit --model'
     OPENSHELL_MODEL_ID="${DEFAULT_MODEL}"
     PRAXIS_PORT=8080
   else
-    OPENSHELL_MODEL_ID="${OPENSHELL_MODEL_ID:-${DEFAULT_MODEL}}"
+    OPENSHELL_MODEL_ID="${MODEL_ID:-${OPENSHELL_MODEL_ID:-${DEFAULT_MODEL}}}"
   fi
   : "${OPENSHELL_MODEL_ID:?set OPENSHELL_MODEL_ID to the administrator-approved model id}"
   PRAXIS_PORT="${PRAXIS_PORT:-8080}"

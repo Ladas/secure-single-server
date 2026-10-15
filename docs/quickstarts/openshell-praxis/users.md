@@ -14,6 +14,7 @@ copy the operator's keys to user accounts.
 | OpenClaw + Praxis | Experimental dev profile; [bounded read/write workflow](openclaw.md); [current fixture qualification](../../testing/upgrade-0.1.3.md) |
 | Claude Code + Praxis | Sandbox image and recipe are missing |
 | OpenCode + Praxis dev | Experimental; [model, write and bash fixture qualification](../../testing/upgrade-0.1.3.md); qualify each real host/provider/model task |
+| OpenCode + Praxis pr-queue | Experimental [PR-candidate example](../../examples/opencode-pr-queue/README.md); static, schema, and policy-boundary contracts only |
 | OpenCode review | CLI data-directory permission limitation; outside supported recipes |
 
 For OpenClaw, use the [dedicated model and tool walkthrough](openclaw.md).
@@ -38,13 +39,23 @@ binary paths, alias route, tools and streaming must pass native qualification
 before use with real credentials. A successful config upload is not inference.
 Integrated mode rejects `--provider` and SSH helpers never forward provider keys.
 
-The policies limit Praxis traffic to `GET /v1/models` and
-`POST /v1/chat/completions` on `host.openshell.internal`, with the configured
-route prefix such as `/vllm` prepended to both paths. Dev, automation, and
-interactive also permit development endpoints. GitHub API access is read-only,
+The policies limit Praxis traffic to `GET /v1/models`,
+`POST /v1/chat/completions`, and `POST /v1/responses` on
+`host.openshell.internal`, with the configured route prefix such as `/vllm`
+prepended to all three paths. With `/vllm`, for example, the effective paths
+are `/vllm/v1/models`, `/vllm/v1/chat/completions`, and
+`/vllm/v1/responses`. The OpenCode `pr-queue` profile permits the third path
+so it can use OpenCode's built-in provider without npm access. Dev, automation,
+and interactive also permit development endpoints. GitHub API access is read-only,
 and Git Smart HTTP permits clone/fetch but not push. Filesystem permissions do
 not establish workspace mounts, retention after deletion, or disconnected task
 persistence.
+
+The `pr-queue` profile is intentionally narrower: it permits only Praxis,
+read-only GitHub API, and Git clone/fetch traffic. Start with the
+[PR-candidate example](../../examples/opencode-pr-queue/README.md), which also
+maps the profile to its runner, collector, agent instructions, and tests. That
+workflow has not yet received a real-provider runtime qualification.
 
 A timeout, SSH failure, or HTTP 401 does not prove a policy denial.
 Delete test sandboxes with `openshell sandbox delete NAME`; do not source libraries

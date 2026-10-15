@@ -27,6 +27,47 @@ harness_ssh() {  # <sandbox> <cmd...>
     "${OPENSHELL_SANDBOX_USER}@${name}" "$@"
 }
 
+harness_ssh_timeout() {  # <sandbox> <seconds> <cmd...>
+  local name="$1" timeout_seconds="$2"; shift 2
+  local ssh_pid watchdog_pid status timeout_dir timeout_marker
+  timeout_dir="$(mktemp -d)"
+  timeout_marker="${timeout_dir}/timed-out"
+
+  # Provider credentials must use explicit gateway bindings, never SSH forwarding.
+  ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o "ProxyCommand=$(_proxy_cmd "${name}")" \
+    "${OPENSHELL_SANDBOX_USER}@${name}" "$@" <&0 &
+  ssh_pid="$!"
+  (
+    sleep "${timeout_seconds}" &
+    sleep_pid="$!"
+    trap 'if [[ -n "${sleep_pid:-}" ]]; then kill "${sleep_pid}" 2>/dev/null || true; fi; exit' TERM
+    wait "${sleep_pid}"
+    : >"${timeout_marker}"
+    kill -TERM "${ssh_pid}" 2>/dev/null || true
+    kill -KILL "${ssh_pid}" 2>/dev/null || true
+  ) </dev/null >/dev/null 2>&1 &
+  watchdog_pid="$!"
+
+  if wait "${ssh_pid}"; then
+    status=0
+  else
+    status="$?"
+  fi
+  kill "${watchdog_pid}" 2>/dev/null || true
+  wait "${watchdog_pid}" 2>/dev/null || true
+
+  if ((status != 0)); then
+    if [[ -e "${timeout_marker}" ]]; then
+      rm -rf "${timeout_dir}"
+      die "sandbox SSH operation timed out after ${timeout_seconds}s"
+    fi
+    rm -rf "${timeout_dir}"
+    return "${status}"
+  fi
+  rm -rf "${timeout_dir}"
+}
+
 harness_connect_tty() {  # <sandbox> [cmd...]
   local name="$1"; shift || true
   local remote_command

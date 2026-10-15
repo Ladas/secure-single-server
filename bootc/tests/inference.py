@@ -141,6 +141,37 @@ esac
         self.assertIn('/fixture/openshell/harnesses/openclaw/run.sh', launched.stdout)
         self.assertNotIn('--config', launched.stdout)
 
+    def test_opencode_wrapper_exposes_pr_queue_and_collection(self):
+        source = (ROOT / 'bootc/scripts/admin').read_text()
+        block = source[source.index('\n  harness)\n'):source.index('\n  *) die', source.index('\n  harness)\n'))]
+        script = """
+set -euo pipefail
+ROOT=/fixture
+require_root() { :; }
+selected_harness() { echo opencode; }
+inference_backend() { echo cloud; }
+as_openshell() { printf '%s\\n' "$@"; }
+die() { printf '%s\\n' "$*" >&2; exit 1; }
+case "${1:-help}" in
+""" + block + """
+esac
+"""
+        created = subprocess.run(['bash', '-c', script, 'admin', 'harness', 'create',
+                                  '--profile', 'pr-queue', '--name', 'opencode-pr-queue'],
+                                 text=True, capture_output=True)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.assertIn('/fixture/openshell/harnesses/opencode/create.sh', created.stdout)
+        self.assertIn('OPENSHELL_BOOTC_BACKEND=cloud', created.stdout)
+        queued = subprocess.run(['bash', '-c', script, 'admin', 'harness', 'queue',
+                                 '--name', 'opencode-pr-queue', '--repo', 'owner/repo',
+                                 '--issue', '123'], text=True, capture_output=True)
+        self.assertEqual(queued.returncode, 0, queued.stderr)
+        self.assertIn('/fixture/openshell/harnesses/opencode/pr-queue/queue.sh', queued.stdout)
+        collected = subprocess.run(['bash', '-c', script, 'admin', 'harness', 'collect',
+                                    '--name', 'opencode-pr-queue'], text=True, capture_output=True)
+        self.assertEqual(collected.returncode, 0, collected.stderr)
+        self.assertIn('/fixture/openshell/harnesses/opencode/pr-queue/collect.sh', collected.stdout)
+
     def test_inference_checks_survive_python_optimization(self):
         source = (ROOT / 'bootc/scripts/inference-check').read_text()
         self.assertNotIn('assert model ', source)

@@ -122,7 +122,8 @@ if args[:2] == ["sandbox", "list"]:
             script.write_text(source)
             script.chmod(0o755)
 
-    def create(self, harness, profile, integrated=False, success=True, config_dir=None, provider=None):
+    def create(self, harness, profile, integrated=False, success=True, config_dir=None,
+               provider=None, model=None):
         # Each invocation must produce fresh evidence, including subtests.
         for name in ("capture", "capture.provider"):
             (self.work / name).unlink(missing_ok=True)
@@ -132,6 +133,8 @@ if args[:2] == ["sandbox", "list"]:
             args += ["--config", str(ROOT / (config_dir or "configs/openshell-praxis"))]
         if provider:
             args += ["--provider", provider]
+        if model:
+            args += ["--model", model]
         result = subprocess.run(args, env=self.env, capture_output=True, text=True, timeout=10)
         if success:
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -172,6 +175,19 @@ if args[:2] == ["sandbox", "list"]:
             self.assertEqual(set(provider["models"]), {model})
             self.assertEqual(provider["options"]["baseURL"], "http://host.openshell.internal:18080/v1")
 
+    def test_explicit_model_replaces_environment_default(self):
+        self.create("opencode", "pr-queue", integrated=True, model="approved/model.v2")
+        config = json.loads((self.work / "capture.provider").read_text())
+        self.assertEqual(config["model"], "openai/approved/model.v2")
+        self.assertEqual(set(config["provider"]["openai"]["models"]), {"approved/model.v2"})
+        self.assertNotIn("npm", config["provider"]["openai"])
+
+    def test_model_requires_integrated_configuration(self):
+        (self.work / "capture.templates").unlink(missing_ok=True)
+        error = self.create("opencode", "dev", model="approved-model", success=False)
+        self.assertIn("model selection requires --config", error)
+        self.assertFalse((self.work / "capture.templates").exists())
+
     def test_invalid_ports_fail_before_sandbox_creation(self):
         for port in ("0", "65536", "abc", "8080\nfoo: bar"):
             with self.subTest(port=port):
@@ -201,15 +217,16 @@ if args[:2] == ["sandbox", "list"]:
         sources += [ROOT / "configs/openshell-praxis/openclaw/profiles/dev/policy.yaml"]
         sources += [ROOT / "configs/vllm/harness/profiles/dev/policy.yaml"]
         sources += [ROOT / "configs/vllm/openclaw/profiles/dev/policy.yaml"]
-        expected = [{"method": "GET", "path": "/v1/models"},
-                    {"method": "POST", "path": "/v1/chat/completions"}]
+        chat = [{"method": "GET", "path": "/v1/models"},
+                {"method": "POST", "path": "/v1/chat/completions"}]
+        responses = chat + [{"method": "POST", "path": "/v1/responses"}]
         for source in sorted(sources):
             with self.subTest(source=source.relative_to(ROOT)):
                 policy = yaml.safe_load(source.read_text().replace("@@PRAXIS_PORT@@", "18080")
                                         .replace("@@PRAXIS_API_PREFIX@@", ""))
                 endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
                 self.assertNotIn("access", endpoint)
-                self.assertEqual([rule["allow"] for rule in endpoint["rules"]], expected)
+                self.assertIn([rule["allow"] for rule in endpoint["rules"]], (chat, responses))
 
     def test_github_git_rules_permit_clone_fetch_and_deny_push(self):
         sources = list(ROOT.glob("openshell/harnesses/*/profiles/*/policy.yaml"))

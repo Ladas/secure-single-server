@@ -118,9 +118,10 @@ for name, policy in d["network_policies"].items():
     for endpoint in policy.get("endpoints", []):
         assert type(endpoint["port"]) is int and 1 <= endpoint["port"] <= 65535
         if name == "praxis_gateway" and endpoint.get("protocol") == "rest":
-            expected = [{"method": "GET", "path": "/v1/models"},
-                        {"method": "POST", "path": "/v1/chat/completions"}]
-            assert [rule.get("allow") for rule in endpoint.get("rules", [])] == expected, \
+          chat = [{"method": "GET", "path": "/v1/models"},
+                  {"method": "POST", "path": "/v1/chat/completions"}]
+          responses = chat + [{"method": "POST", "path": "/v1/responses"}]
+          assert [rule.get("allow") for rule in endpoint.get("rules", [])] in (chat, responses), \
                 f"{name}: REST endpoint requires exact Praxis method/path rules"
         if name == "github_git":
             expected = [{"method": "GET", "path": "/**"},
@@ -136,6 +137,7 @@ fi
 python3 "${OS_DIR}/tests/regressions.py"
 python3 "${OS_DIR}/tests/cleanup.py"
 python3 "${OS_DIR}/tests/templates.py"
+python3 "${OS_DIR}/tests/pr-queue.py"
 python3 "${OS_DIR}/tests/gateway.py"
 python3 "${OS_DIR}/tests/policy-boundary.py"
 printf 'openshell-static: OK\n'

@@ -90,6 +90,21 @@ Bash session without editing the harness script, use:
 os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev bash
 ```
 
+## What can I do with this setup?
+
+After deployment, try the
+[OpenCode PR-candidate queue](docs/examples/opencode-pr-queue/README.md):
+
+- Queue public GitHub issues or operator prompt files for a public repository.
+- Optionally keep a longer batch alive in `tmux` after disconnecting from SSH.
+- Collect one reviewable bundle per task containing the task, proposed patch,
+  metadata, and report.
+- Review the bundle on your workstation, then apply it and open a draft PR with
+  your local Git and GitHub CLI credentials.
+
+This scenario is issue/prompt-to-patch only. It does not perform pull-request
+reviews, and the sandbox receives no GitHub token or GitHub write access.
+
 ## Explore Further
 
 - [Architecture walkthrough](docs/quickstarts/architecture-walkthrough/README.md):

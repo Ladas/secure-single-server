@@ -41,6 +41,7 @@ repository; the guides below are separated by the question they answer.
 | Combine OpenShell with Praxis | [OpenShell + Praxis guide](quickstarts/openshell-praxis/README.md) |
 | Serve users from accounts on one RHEL host | [All-in-one gateway](quickstarts/all-in-one/README.md) |
 | Connect harnesses on remote client machines | [Remote HTTPS/JWT gateway](quickstarts/remote-gateway/README.md) |
+| Try a post-deployment workflow | [Example scenarios](examples/README.md) |
 | Deploy the OS image | [bootc guide](../bootc/README.md) |
 | Configure harnesses, providers, or quotas | [Common configuration index](quickstarts/common/README.md) |
 | Inspect OpenShell policies and boundaries | [OpenShell documentation](../openshell/docs/README.md) |

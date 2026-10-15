@@ -16,3 +16,9 @@ access. In standalone OpenShell mode, selected model endpoints remain governed
 by the harness policy.
 
 The preinstalled harness image is digest-pinned in `openshell/configs/images.env`.
+
+The experimental `pr-queue` profile keeps its queue runner, collector, and agent
+instructions in [pr-queue/](pr-queue/). The user-facing entry point is the
+[PR-candidate example](../../../docs/examples/opencode-pr-queue/README.md). The
+sandbox can read public GitHub issues and clone/fetch a repository, but it
+cannot push or create pull requests.
