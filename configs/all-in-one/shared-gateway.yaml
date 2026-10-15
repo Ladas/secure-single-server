@@ -48,7 +48,7 @@ filter_chains:
           - name: openai-rolling-day
             algorithm: sliding_window
             window: "24h"
-            capacity: 1000000
+            capacity: 10000000
             reserved_tokens: 10000
             reservation_timeout: "300s"
       # Response hooks run in reverse declaration order. token_count must
@@ -106,7 +106,7 @@ filter_chains:
           - name: anthropic-rolling-day
             algorithm: sliding_window
             window: "24h"
-            capacity: 1000000
+            capacity: 10000000
             reserved_tokens: 10000
             reservation_timeout: "300s"
       - filter: anthropic_messages_protocol
