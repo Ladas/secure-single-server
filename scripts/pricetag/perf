@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Bounded multi-user HTTPS load and ledger reconciliation for a mock-only pilot."""
 import argparse
-import base64
 from concurrent.futures import ThreadPoolExecutor
 import http.client
 import json
@@ -26,15 +25,14 @@ def private(path):
 
 def identities(directory):
     result = []
-    for path in sorted(directory.glob('*.jwt')):
+    for path in sorted(directory.glob('*.key')):
         token = private(path)
-        claim = token.split('.')[1]
-        subject = json.loads(base64.urlsafe_b64decode(claim + '=' * (-len(claim) % 4)))['sub']
+        subject = path.stem
         if not re.fullmatch(r'perf-[a-z0-9-]{1,100}', subject):
             raise ValueError('use dedicated perf-* users, never admin or real user tokens')
         result.append((subject, token))
     if len({s for s, _ in result}) != len(result) or not result:
-        raise ValueError('one distinct JWT per performance user is required')
+        raise ValueError('one distinct MaaS API key per performance user is required')
     return result
 
 
@@ -58,31 +56,13 @@ def users(args):
     if not re.fullmatch(r'perf-[a-z0-9-]{1,80}', args.prefix):
         raise ValueError('prefix must start perf- and contain lowercase letters/digits/hyphens')
     args.tokens.mkdir(mode=0o700, parents=True, exist_ok=False)
-    state = args.local_state
     for index in range(args.count):
         subject = f'{args.prefix}-{index:02d}'
         command = [str(ROOT / 'scripts/pricetag/user'), '--subject', subject,
-                   '--monthly-usd', '100', '--output', str(args.tokens / (subject + '.jwt'))]
-        if state:
-            command += ['--registry', str(state / 'gateway/users.json'), '--key', str(state / 'issuer/private.pem'),
-                        '--admin-token', str(state / 'admin.jwt'), '--ca', str(state / 'tls/ca.pem')]
+                   '--monthly-usd', '100', '--output', str(args.tokens / (subject + '.key')),
+                   '--admin-key', str(args.admin_key), '--gateway', args.gateway,
+                   '--ca', str(args.ca), '--maas-url', args.maas_url]
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
-        if state:
-            context = ssl.create_default_context(cafile=str(state / 'tls/ca.pem'))
-            token = private(args.tokens / (subject + '.jwt'))
-            for _ in range(50):
-                connection = http.client.HTTPSConnection('localhost', 8443, context=context, timeout=5)
-                try:
-                    connection.request('GET', '/v1/models', headers={'Authorization': 'Bearer ' + token})
-                    response = connection.getresponse()
-                    response.read()
-                    if response.status == 200:
-                        break
-                finally:
-                    connection.close()
-                time.sleep(.1)
-            else:
-                raise ValueError('updated registry is not visible through Podman sharing')
     print(f'Created {args.count} distinct users with $100 test allowances; credentials: {args.tokens}')
 
 
@@ -184,11 +164,14 @@ def main():
     p.add_argument('--tokens', type=Path, required=True)
     p.add_argument('--prefix', required=True)
     p.add_argument('--count', type=int, choices=range(1, 21), default=20)
-    p.add_argument('--local-state', type=Path)
+    p.add_argument('--admin-key', type=Path, default=Path('/root/pricetag-admin/admin.key'))
+    p.add_argument('--gateway', default='https://localhost:8443')
+    p.add_argument('--ca', type=Path, default=Path('/etc/praxis-pricetag/ca.pem'))
+    p.add_argument('--maas-url', default='http://127.0.0.1:18086')
     p = commands.add_parser('run')
     p.add_argument('--url', required=True); p.add_argument('--ca', type=Path, required=True)
     p.add_argument('--tokens', type=Path, required=True); p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--model', default='demo-model')
+    p.add_argument('--model', default='fixture')
     p.add_argument('--concurrency', type=int, nargs='+', choices=range(1, 21), default=[1, 5, 10, 20])
     p.add_argument('--requests', type=int, choices=range(1, 1001), default=20)
     p.add_argument('--think', type=float, default=1)

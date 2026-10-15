@@ -24,7 +24,7 @@ def main():
                      [sys.executable, "-m", "unittest", "discover", "-s", "tests/common", "-p", "test_*.py"]]
         commands += [[sys.executable, path] for path in ("tests/remote-gateway/credentials.py",
             "tests/remote-gateway/security.py", "tests/aws/plan.py", "tests/aws/session.py", "tests/aws/https-access.py",
-            "tests/rhel/smoke.py", "tests/rhel/unit.py", "tests/rhel/users.py", "tests/rhel/providers.py", "tests/rhel/vllm.py", "tests/rhel/clients.py", "tests/rhel/features-test.py", "tests/pricetag/unit.py", "tests/pricetag/credentials.py")]
+            "tests/rhel/smoke.py", "tests/rhel/unit.py", "tests/rhel/users.py", "tests/rhel/providers.py", "tests/rhel/vllm.py", "tests/rhel/clients.py", "tests/rhel/features-test.py", "tests/pricetag/unit.py", "tests/pricetag/providers.py")]
     if args.suite == "praxis":
         commands += [["bash", "tests/shared-gateway-image.sh"], ["bash", "tests/shared-gateway-valkey-image.sh"]]
     if args.suite in ("praxis", "gateways"):
@@ -46,7 +46,7 @@ def main():
     result = {"suite": args.suite, "engine": args.engine, "status": "running", "checks": [],
               "openshell_runtime": "not run: separate manual disposable-RHEL qualification lane",
               "roadmap": {"phase_1": "gateway contracts; native RHEL and real harness tasks remain separate",
-                          "phase_5": "shared quotas and caller JWT only; no personal/hierarchical quotas",
+                          "phase_5": "shared quotas and MaaS API-key checks; no personal/hierarchical quotas",
                           "phase_6": "harness/configuration contracts only; no retained-session or inference qualification"}}
     try:
         for command in commands:
