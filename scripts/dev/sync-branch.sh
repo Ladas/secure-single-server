@@ -34,7 +34,9 @@ done
 
 ssh_opts=()
 [[ -z "${KEY_FILE}" ]] || ssh_opts=(-i "${KEY_FILE}")
-remote() { ssh -o BatchMode=yes "${ssh_opts[@]}" "${HOST}" "$@"; }
+# The read loop below consumes the diff stream on stdin; ssh (-n) and scp
+# (redirected) must not drain it, or the loop stops after the first entry.
+remote() { ssh -n -o BatchMode=yes "${ssh_opts[@]}" "${HOST}" "$@"; }
 
 # Fail before transferring anything if the base ref or connectivity is wrong.
 git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null \
@@ -47,7 +49,7 @@ while IFS= read -r -d '' status && IFS= read -r -d '' path; do
     R*|C*)
       IFS= read -r -d '' new_path
       remote "mkdir -p '${DEST}/$(dirname "${new_path}")'"
-      scp -p -q "${ssh_opts[@]}" "${new_path}" "${HOST}:${DEST}/${new_path}"
+      scp -p -q "${ssh_opts[@]}" "${new_path}" "${HOST}:${DEST}/${new_path}" </dev/null
       remote "rm -f '${DEST}/${path}'"
       printf 'synced %s (removed %s)\n' "${new_path}" "${path}"
       ;;
@@ -57,7 +59,7 @@ while IFS= read -r -d '' status && IFS= read -r -d '' path; do
       ;;
     A|M)
       remote "mkdir -p '${DEST}/$(dirname "${path}")'"
-      scp -p -q "${ssh_opts[@]}" "${path}" "${HOST}:${DEST}/${path}"
+      scp -p -q "${ssh_opts[@]}" "${path}" "${HOST}:${DEST}/${path}" </dev/null
       printf 'synced %s\n' "${path}"
       ;;
     *) ;;

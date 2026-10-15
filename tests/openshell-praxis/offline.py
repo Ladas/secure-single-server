@@ -462,5 +462,58 @@ if args[:2] == ["sandbox", "list"]:
                     self.assertFalse((self.work / "capture").exists())
 
 
+class SyncBranchTest(unittest.TestCase):
+    def test_sync_transfers_every_diff_entry(self):
+        # sync-branch.sh feeds the git diff to its read loop through a
+        # process substitution; ssh and scp inside the loop inherit that
+        # stdin and drain the stream, so the loop saw EOF after the first
+        # entry and printed "sync complete" having synced 1 of N files.
+        # The fake ssh drains stdin like the real one; the fake scp records
+        # the local path it was asked to transfer.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+
+            def git(*args):
+                subprocess.run(["git", "-C", repo, *args], check=True,
+                               capture_output=True)
+
+            git("init", "-b", "main")
+            git("config", "user.email", "sync@example.com")
+            git("config", "user.name", "sync test")
+            git("config", "commit.gpgsign", "false")
+            (repo / "keep.txt").write_text("base\n")
+            git("add", ".")
+            git("commit", "-m", "base")
+            git("checkout", "-b", "feature")
+            for name in ("alpha.txt", "beta.txt", "gamma.txt"):
+                (repo / name).write_text(name + "\n")
+            git("mv", "keep.txt", "moved.txt")
+            git("add", ".")
+            git("commit", "-m", "changes")
+            shims = root / "shims"
+            shims.mkdir()
+            log = root / "scp.log"
+            for name, source in {
+                "ssh": '#!/bin/sh\n[ "$1" = "-n" ] && exec </dev/null\ncat > /dev/null\nexit 0\n',
+                "scp": '#!/bin/sh\nwhile [ $# -gt 2 ]; do shift; done\nprintf "%s\\n" "$1" >> "$SCP_LOG"\nexit 0\n',
+            }.items():
+                script = shims / name
+                script.write_text(source)
+                script.chmod(0o755)
+            env = dict(os.environ, PATH=f"{shims}:{os.environ['PATH']}",
+                       SCP_LOG=str(log))
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/dev/sync-branch.sh"),
+                 "--host", "user@fake", "--base", "main"],
+                cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("sync complete", result.stdout)
+            transferred = sorted(log.read_text().split())
+            self.assertEqual(
+                transferred, ["alpha.txt", "beta.txt", "gamma.txt", "moved.txt"])
+
+
 if __name__ == "__main__":
     unittest.main()
