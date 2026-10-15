@@ -81,6 +81,9 @@ controlled-policy-qualification convention), and use the same `runuser`
 wrapper the quickstart documents:
 
 ```bash
+# The integrated create path rejects an empty model ID. List what the gateway
+# serves: curl --fail --silent --show-error http://127.0.0.1:8080/v1/models
+model_id="qwen3-8b"
 uid="$(id -u openshell-svc)"
 sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
   XDG_RUNTIME_DIR=/run/user/"$uid" \

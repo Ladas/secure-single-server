@@ -129,7 +129,7 @@ if args[:2] == ["sandbox", "list"]:
         (self.work / "capture.stdin").unlink(missing_ok=True)
         for name, source in {
             "ssh": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CAPTURE.sshlog"\ncat >> "$CAPTURE.stdin"\n',
-            "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
+            "timeout": '#!/bin/sh\n[ "$1" = "-k" ] && shift 2\nshift\nexec "$@"\n',
         }.items():
             script = self.work / name
             script.write_text(source)
@@ -145,7 +145,14 @@ if args[:2] == ["sandbox", "list"]:
         self.assertIn("rm -rf ~/review && mkdir -p ~/review ~/reports", log)
         self.assertIn("cat > ~/AGENTS.md", log)
         self.assertIn("cat > ~/review/task.md", log)
-        self.assertIn('cd ~ && opencode run --format json "$(cat ~/review/task.md)" </dev/null', log)
+        # The turn still runs from the sandbox home with its own stdin closed,
+        # but is now wrapped in a sandbox-side deadline so a host-side timeout
+        # cannot leave a zombie turn holding gateway reservations.
+        self.assertIn("cd ~ && ", log)
+        self.assertIn('opencode run --format json "$(cat ~/review/task.md)" </dev/null', log)
+        self.assertIn("timeout -k 30 60 opencode run", log)
+        # Only the reports for the PRs under review are cleared.
+        self.assertIn("rm -f ~/reports/pr-53.md ~/reports/pr-78.md", log)
         stdin = (self.work / "capture.stdin").read_text()
         self.assertIn("PR review agent instructions", stdin)
         self.assertIn("Review pull requests #53,#78 of the GitHub repository owner/repo.", stdin)
@@ -160,7 +167,7 @@ if args[:2] == ["sandbox", "list"]:
         self.env["HOME"] = str(self.work)
         for name, source in {
             "ssh": '#!/bin/sh\nwhile [ $# -gt 1 ]; do shift; done\nexec sh -c "$1"\n',
-            "timeout": '#!/bin/sh\nshift\nexec "$@"\n',
+            "timeout": '#!/bin/sh\n[ "$1" = "-k" ] && shift 2\nshift\nexec "$@"\n',
             "opencode": '#!/bin/sh\ncat > "$CAPTURE.opencode-stdin"\nprintf "OPENCODE_TURN_DONE\\n"\n',
         }.items():
             script = self.work / name
@@ -511,8 +518,11 @@ class SyncBranchTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("sync complete", result.stdout)
             transferred = sorted(log.read_text().split())
+            # Sources are passed as ./PATH so a leading-dash filename cannot be
+            # parsed as an scp option.
             self.assertEqual(
-                transferred, ["alpha.txt", "beta.txt", "gamma.txt", "moved.txt"])
+                transferred,
+                ["./alpha.txt", "./beta.txt", "./gamma.txt", "./moved.txt"])
 
 
 if __name__ == "__main__":

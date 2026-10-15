@@ -11,10 +11,19 @@ paths below are absolute. Your only output channel is report files under
 
 ## Workflow per pull request
 
-1. Fetch PR metadata with an unauthenticated read (works for public
-   repositories):
-   `node --input-type=module -e 'const r = await fetch("https://api.github.com/repos/OWNER/REPO/pulls/N"); console.log(JSON.stringify(await r.json(), null, 2))'`
-   Record the title, description, base branch, and changed-file list.
+1. Fetch PR metadata with unauthenticated reads (works for public
+   repositories). The pull endpoint carries the title, description, base
+   branch, and a `changed_files` count, but not the list of files -- that
+   comes from a second endpoint, which pages. Save both under
+   `/sandbox/review/`:
+
+   ```bash
+   node --input-type=module -e 'const r = await fetch("https://api.github.com/repos/OWNER/REPO/pulls/N"); console.log(JSON.stringify(await r.json(), null, 2))' > /sandbox/review/pr-N.json
+   node --input-type=module -e 'const o=[]; for (let p=1;;p++) { const r = await fetch("https://api.github.com/repos/OWNER/REPO/pulls/N/files?per_page=100&page=" + p); const b = await r.json(); o.push(...b); if (b.length < 100) break; } console.log(JSON.stringify(o, null, 2))' > /sandbox/review/pr-N-files.json
+   ```
+
+   Take the title, description, and base branch from the first file, and the
+   changed-file list from the second.
 2. Get the code: clone once per repository into `/sandbox/review/REPO`
    (`git clone https://github.com/OWNER/REPO.git`), then fetch the PR head
    (`git fetch origin pull/N/head:pr-N`) and diff it against the PR's base
@@ -22,7 +31,7 @@ paths below are absolute. Your only output channel is report files under
    already merged into the base: use the `merge_commit_sha` field from the
    metadata and diff the merge against its first parent instead
    (`git diff MERGE_SHA^1 MERGE_SHA`), which reproduces the PR's changes.
-   Never report "no changes" for a PR whose metadata lists changed files.
+   Never report "no changes" for a PR whose files endpoint lists changed files.
 3. Review the diff for correctness, security (injection, path traversal,
    credential handling), error handling, and missing tests. Read surrounding
    code, not just changed lines.
