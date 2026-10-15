@@ -118,8 +118,10 @@ sliding-window rules. It never flushes the database. Resets cannot be undone.
 | `anthropic-rolling-day` | Enabled Anthropic routes |
 | `NAME-openai-rolling-day`, `NAME-anthropic-rolling-day` | A custom provider’s enabled native APIs |
 
-All users share these allowances. Shipped values are `1000000` tokens per
-rolling `24h`, a `10000` reservation and a `300s` reservation timeout. Use the
+All users share these allowances. Shipped values are `10000000` tokens per
+rolling `24h` on the all-in-one memory shape and `1000000` on the Valkey and
+remote-gateway shapes, with a `10000` reservation and a `300s` reservation
+timeout. Use the
 list for installed values. Input, output and repeated prompt/history tokens count.
 
 | Status / backend | Meaning |

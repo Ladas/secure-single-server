@@ -157,7 +157,7 @@ file, line, severity, and a suggested fix. The full contract lives in
   reservations and rate-limit slots, which can starve subsequent runs.
 - Gateway quota: review turns are token-heavy (each model turn carries the
   instruction file, PR metadata, and repo context), and the shared gateway
-  enforces a 24h sliding-window token quota (1M tokens on the bootc
+  enforces a 24h sliding-window token quota (10M tokens on the bootc
   memory-backend shape) plus per-request reservations of 10,000 tokens held
   for up to 300 s. A retry storm can exhaust capacity through reservations
   alone; that condition self-heals roughly five minutes after requests
