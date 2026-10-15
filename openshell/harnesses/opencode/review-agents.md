@@ -5,7 +5,9 @@ and no write access to GitHub: `git` can clone and fetch from `github.com`,
 and `node` can GET from `api.github.com`. Pushing, commenting, and opening or
 closing issues or PRs are impossible by policy — do not attempt them.
 
-Your only output channel is report files under `~/reports`.
+Your home directory is `/sandbox` (this image has no `/home/sandbox`); the
+paths below are absolute. Your only output channel is report files under
+`/sandbox/reports`.
 
 ## Workflow per pull request
 
@@ -13,7 +15,7 @@ Your only output channel is report files under `~/reports`.
    repositories):
    `node --input-type=module -e 'const r = await fetch("https://api.github.com/repos/OWNER/REPO/pulls/N"); console.log(JSON.stringify(await r.json(), null, 2))'`
    Record the title, description, base branch, and changed-file list.
-2. Get the code: clone once per repository into `~/review/REPO`
+2. Get the code: clone once per repository into `/sandbox/review/REPO`
    (`git clone https://github.com/OWNER/REPO.git`), then fetch the PR head
    (`git fetch origin pull/N/head:pr-N`) and diff it against the PR's base
    branch (`git diff origin/BASE...pr-N`). If that diff is empty, the PR is
@@ -24,7 +26,7 @@ Your only output channel is report files under `~/reports`.
 3. Review the diff for correctness, security (injection, path traversal,
    credential handling), error handling, and missing tests. Read surrounding
    code, not just changed lines.
-4. Write exactly one report to `~/reports/pr-N.md` using the format below.
+4. Write exactly one report to `/sandbox/reports/pr-N.md` using the format below.
 
 ## Report format
 
@@ -48,10 +50,10 @@ Verdict: approve | comment | request-changes
 ## Rules
 
 - One report file per PR, always. If any step fails (clone denied, rate
-  limit, unfetchable ref), still write `~/reports/pr-N.md` with `Verdict:
+  limit, unfetchable ref), still write `/sandbox/reports/pr-N.md` with `Verdict:
   comment` and a "## Failure" section describing exactly what failed.
 - Do not modify the cloned repository's history or push anything.
 - Unauthenticated `api.github.com` is rate-limited; fetch each PR's metadata
-  once and work from the saved output in `~/review/`.
+  once and work from the saved output in `/sandbox/review/`.
 - Reports are read by a human the next morning; make the findings section
   self-contained with file, line, and a suggested fix for every item.

@@ -32,11 +32,11 @@ fi
 # Each turn starts from a clean workspace: stale metadata, branches, or clones
 # from earlier runs would mislead the agent (and reports stay untouched).
 harness_ssh "${NAME}" 'rm -rf ~/review && mkdir -p ~/review ~/reports'
-harness_ssh "${NAME}" 'cat > ~/review/AGENTS.md' <"${H_DIR}/review-agents.md"
+harness_ssh "${NAME}" 'cat > ~/AGENTS.md' <"${H_DIR}/review-agents.md"
 {
   printf 'Review pull requests %s of the GitHub repository %s.\n' \
     "$(IFS=,; echo "${PRS[*]}")" "${REPO}"
-  printf 'Follow AGENTS.md in this directory exactly: fetch each PR, analyze it, and write one report per PR under ~/reports.\n'
+  printf 'Your home directory is /sandbox. Follow /sandbox/AGENTS.md exactly: fetch each PR, analyze it, and write one report per PR under /sandbox/reports.\n'
   if [[ -n "${MESSAGE//[[:space:]]/}" ]]; then
     printf 'Additional instructions from the operator:\n%s\n' "${MESSAGE}"
   fi
@@ -44,9 +44,11 @@ harness_ssh "${NAME}" 'cat > ~/review/AGENTS.md' <"${H_DIR}/review-agents.md"
 # The message is read from the file by the remote shell; no local quoting of task text.
 # opencode run drains piped stdin to EOF before submitting its prompt, and the SSH
 # channel's stdin never EOFs while review.sh runs non-interactively, so the turn
-# must close stdin itself or it hangs before creating a session.
+# must close stdin itself or it hangs before creating a session. The turn runs
+# from the sandbox home so ~/review and ~/reports both stay inside the opencode
+# project: tool calls outside it are auto-rejected and abort the run.
 # shellcheck disable=SC2016 # the command substitution runs remotely, inside the sandbox
-review_cmd='cd ~/review && opencode run --format json "$(cat task.md)" </dev/null'
+review_cmd='cd ~ && opencode run --format json "$(cat ~/review/task.md)" </dev/null'
 if command -v timeout >/dev/null 2>&1; then
   # timeout execs a command, so the harness_ssh shell function must be
   # re-imported by a child bash; export the function and its variables.
