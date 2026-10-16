@@ -12,7 +12,7 @@ source "${OS_DIR}/scripts/lib.sh"
 for var in ODH_GATEWAY_IMAGE ODH_SUPERVISOR_IMAGE ODH_SANDBOX_IMAGE; do
   val="${!var:-}"
   [[ -n "${val}" ]] || fail "${var} unset"
-  [[ "${val}" == ghcr.io/nvidia/openshell/*@sha256:* ]] \
+  [[ "${val}" =~ ^ghcr\.io/nvidia/openshell/[^@]+@sha256:[a-f0-9]{64}$ ]] \
     || fail "${var} not a digest-pinned upstream image: ${val}"
 done
 
@@ -20,31 +20,30 @@ done
 for var in ODH_OPENCODE_IMAGE ODH_CODEX_IMAGE; do
   val="${!var:-}"
   [[ -n "${val}" ]] || fail "${var} unset"
-  [[ "${val}" == quay.io/aipcc/base-images/agentic/*@sha256:* ]] \
+  [[ "${val}" =~ ^quay\.io/aipcc/base-images/agentic/[^@]+@sha256:[a-f0-9]{64}$ ]] \
     || fail "${var} not a digest-pinned aipcc image: ${val}"
 done
-[[ "${ODH_OPENCLAW_IMAGE}" == ghcr.io/openclaw/openclaw@sha256:* ]] || fail 'OpenClaw must use a pinned upstream image'
+[[ "${ODH_OPENCLAW_IMAGE}" =~ ^ghcr\.io/openclaw/openclaw@sha256:[a-f0-9]{64}$ ]] \
+  || fail 'OpenClaw must use a valid digest-pinned upstream image'
 [[ "${OPENSHELL_CLI_VERSION}" == v0.1.3 ]] || fail 'CLI release must match the control plane'
 for digest in "${OPENSHELL_CLI_SHA256_AMD64}" "${OPENSHELL_CLI_SHA256_ARM64}"; do
   [[ "${digest}" =~ ^[a-f0-9]{64}$ ]] || fail 'CLI checksum missing or malformed'
 done
 
 # 2. All shell scripts under openshell/ pass shellcheck.
-if command -v shellcheck >/dev/null 2>&1; then
-  mapfile -t scripts < <(find "${OS_DIR}" -name '*.sh' -type f)
-  shellcheck -S style "${scripts[@]}" || fail "shellcheck failed"
-fi
+command -v shellcheck >/dev/null 2>&1 || fail "shellcheck is required"
+mapfile -t scripts < <(find "${OS_DIR}" -name '*.sh' -type f)
+shellcheck -S style "${scripts[@]}" || fail "shellcheck failed"
 
 # 3. Gateway quadlet template renders with no leftover placeholders.
 tmp="$(mktemp)"
+trap 'rm -f -- "${tmp}"' EXIT
 render_openshell_template "${OS_DIR}/configs/quadlet/openshell-gateway.container.in" "${tmp}"
 grep -q '@@' "${tmp}" && fail "unrendered placeholder in gateway quadlet"
 grep -q "Image=${ODH_GATEWAY_IMAGE}" "${tmp}" || fail "gateway image not pinned in unit"
 grep -q 'Pull=never' "${tmp}" || fail "gateway unit must set Pull=never"
 grep -q 'Environment=OPENSHELL_TELEMETRY_ENABLED=false' "${tmp}" \
   || fail "gateway unit must disable OpenShell telemetry"
-rm -f "${tmp}"
-
 # 4. gateway.toml.in uses the podman driver, JWT auth, and pins workload/supervisor images.
 gt="${OS_DIR}/configs/gateway/gateway.toml.in"
 grep -q 'compute_driver *= *"podman"' "${gt}" || fail "gateway.toml not podman driver"
@@ -104,6 +103,18 @@ for good_memory in 512Mi 4Gi 8G 1024; do
 done
 
 # 5. Structural checks only; schema.py validates with the pinned native CLI.
+policy_roots=(
+  "${OS_DIR}"
+  "${ROOT}/configs/openshell-praxis"
+  "${ROOT}/configs/vllm/harness"
+  "${ROOT}/configs/vllm/openclaw"
+)
+for policy_root in "${policy_roots[@]}"; do
+  [[ -d "${policy_root}" ]] || fail "policy root missing: ${policy_root}"
+done
+policy_files="$(find "${policy_roots[@]}" -path '*/profiles/*/policy.yaml' -type f -print)" \
+  || fail "could not discover policy files"
+[[ -n "${policy_files}" ]] || fail "no policy files found"
 if command -v python3 >/dev/null 2>&1; then
   while IFS= read -r p; do
     python3 - "$p" <<'PY' || fail "invalid policy: $p"
@@ -131,13 +142,14 @@ for name, policy in d["network_policies"].items():
             assert [rule.get("allow") for rule in endpoint.get("rules", [])] == expected, \
                 f"{name}: Git endpoint must permit clone/fetch and deny push"
 PY
-  done < <(find "${OS_DIR}" "${ROOT}/configs/openshell-praxis" "${ROOT}/configs/vllm/harness" "${ROOT}/configs/vllm/openclaw" -path '*/profiles/*/policy.yaml')
+  done <<<"${policy_files}"
 fi
 
 python3 "${OS_DIR}/tests/regressions.py"
 python3 "${OS_DIR}/tests/cleanup.py"
 python3 "${OS_DIR}/tests/templates.py"
 python3 "${OS_DIR}/tests/pr-queue.py"
+python3 "${OS_DIR}/tests/streamlit-security.py"
 python3 "${OS_DIR}/tests/gateway.py"
 python3 "${OS_DIR}/tests/policy-boundary.py"
 printf 'openshell-static: OK\n'

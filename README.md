@@ -92,7 +92,13 @@ os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev bash
 
 ## What can I do with this setup?
 
-After deployment, try the
+For the shortest introduction to OpenShell's value, try the
+[Streamlit before-and-after demo](docs/examples/streamlit-security/README.md).
+It runs the same model-backed app first in an ordinary container and then in an
+OpenShell sandbox, showing credential substitution and filesystem confinement
+without using Praxis.
+
+After that, try the
 [OpenCode PR-candidate queue](docs/examples/opencode-pr-queue/README.md):
 
 - Queue public GitHub issues or operator prompt files for a public repository.
@@ -104,6 +110,14 @@ After deployment, try the
 
 This scenario is issue/prompt-to-patch only. It does not perform pull-request
 reviews, and the sandbox receives no GitHub token or GitHub write access.
+
+All post-deployment scenarios are indexed in
+[Example scenarios](docs/examples/README.md). Run them from the deployed
+repository checkout: on a bootc image, use
+`/usr/share/secure-single-server`; on a manual deployment, use
+`/opt/secure-single-server`. Published image tags contain only the reviewed
+revision from their build time, so use a rebuilt image or an updated manual
+checkout when trying newer examples.
 
 ## Explore Further
 
