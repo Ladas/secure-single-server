@@ -269,6 +269,8 @@ class StreamlitSecurityTests(unittest.TestCase):
         )
         self.assertLess(guide.index(setup_link), guide.index("## Run the unsafe version"))
         self.assertIn("steps 1 and 2", guide)
+        self.assertIn("in that same Bash session", guide)
+        self.assertIn("a new shell will not have the", guide)
         self.assertIn("does not need a harness or Praxis", guide)
         self.assertIn("os_run openshell profile import", guide)
         self.assertIn('bash "$repo/openshell/demos/streamlit-security/run-safe.sh"', guide)

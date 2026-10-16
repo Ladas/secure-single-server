@@ -30,7 +30,9 @@ steps 1 and 2 of the [manual OpenShell deployment guide](../../quickstarts/opens
 install OpenShell, verify Landlock ABI 3 or newer, start the gateway, and define
 the `repo` and `os_run` shell helper. The manual guide's checkout path is
 `/opt/secure-single-server`. Stop before its harness-creation steps: this demo
-runs a Streamlit container directly and does not need a harness or Praxis.
+runs a Streamlit container directly and does not need a harness or Praxis. Run
+all commands below in that same Bash session; a new shell will not have the
+`repo` variable or `os_run` helper.
 
 The unsafe half uses your login account's rootless Podman. The OpenShell half
 uses the `openshell-svc` account's OpenShell CLI and rootless Podman, so use the
