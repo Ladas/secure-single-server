@@ -60,6 +60,13 @@ With Podman running, execute the container regressions and mock API contracts:
 python3 tests/mocked-provider.py --engine podman
 ```
 
+On an SELinux-enforcing host (RHEL/Fedora) the container tests stage their
+config inputs and request a shared `container_file_t` label (`:ro,z`) on every
+bind mount, because rootless Podman cannot read the `user_home_t`/`user_tmp_t`
+labels of a checkout or temporary directory. The installer applies the same
+label to `/etc/praxis` files with `semanage` and `restorecon`; no extra host
+setup is required to run the tests.
+
 The [mocked-provider guide](mocked-provider.md) describes suite selection and
 coverage. Container tests check startup, credentials, quotas and API contracts;
 RHEL tests additionally check packages, SELinux, rootless user services and
@@ -101,8 +108,10 @@ A skipped job provides no runtime evidence. For combined Praxis inference, use
 [the optional OpenShell smoke step](rhel-smoke.md#optional-openshell).
 
 Follow the [bootc guide](../../bootc/README.md) for published-image deployment
-and booted-host checks. Bootc and OpenShell lifecycle tests do not qualify all
-provider/harness combinations.
+and booted-host checks. [Bootc service hardening](bootc-hardening.md) explains
+why the reconciler units are not sandboxed, why the container units still are,
+and what was validated on a booted host. Bootc and OpenShell
+lifecycle tests do not qualify all provider/harness combinations.
 
 ## Next step
 

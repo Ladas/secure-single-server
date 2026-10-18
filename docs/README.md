@@ -48,6 +48,24 @@ repository; the guides below are separated by the question they answer.
 | Reproduce validation or add a new combination | [Testing guide](testing/README.md) |
 | Understand future scope and acceptance | [Roadmap](roadmap.md) |
 
+## Choose by component
+
+| Component | What it provides | Start here |
+| --- | --- | --- |
+| OpenShell gateway | Policy-controlled execution boundary and sandbox lifecycle for every harness | [OpenShell docs](../openshell/docs/README.md), [threat model](../openshell/docs/threat-model.md) |
+| Harness sandboxes | Coding agents packaged as digest-pinned images with four profiles: [OpenCode](../openshell/harnesses/opencode/README.md), [OpenClaw](../openshell/harnesses/openclaw/README.md) | [Single-server guide](quickstarts/openshell-single-server/README.md) |
+| Praxis | Provider credential custody, model routing, and shared token quotas | [OpenShell + Praxis guide](quickstarts/openshell-praxis/README.md), [token quotas](quickstarts/common/token-quotas.md) |
+| vLLM | Private local model inference on a separate CPU or GPU server | [Private vLLM workflow](quickstarts/common/vllm.md) |
+| Valkey | Durable quota ledger for the managed gateway | [All-in-one Valkey profile](quickstarts/all-in-one/valkey.md) |
+| bootc images | Repeatable RHEL 9 OS deployment carrying the selected harness | [bootc images](../bootc/README.md) |
+| Streamlit security demo | Credential substitution and filesystem confinement, before and after OpenShell | [Streamlit demo](examples/streamlit-security/README.md) |
+| OpenCode PR queue | Turn public issues or prompts into reviewable patch bundles | [PR-candidate queue](examples/opencode-pr-queue/README.md) |
+| Operator CLI | `sss-bootc` / `sss-praxis` and `scripts/common/*` for install, secrets, quotas, and status | [bootc operations](quickstarts/openshell-single-server/bootc.md), [all-in-one setup](quickstarts/all-in-one/README.md) |
+
+Harness model access is configured with
+[harness configuration](quickstarts/common/harness-configuration.md); each
+harness README lists its profiles and entry points.
+
 ## Reading rules
 
 - The recommended route is the sandboxed **harness → OpenShell → Praxis →

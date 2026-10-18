@@ -16,6 +16,11 @@ access. In standalone OpenShell mode, selected model endpoints remain governed
 by the harness policy.
 
 The preinstalled harness image is digest-pinned in `openshell/configs/images.env`.
+That upstream image does not yet include `ripgrep`; RHEL 9 also does not package
+it. The bootc image and manual quickstart provide the same checksum-pinned
+static `rg`, and harness creation copies it into the sandbox's `~/.local/bin` so
+OpenCode's built-in `glob` and `grep` tools work without changing the upstream
+image or policy.
 
 The experimental `pr-queue` profile keeps its queue runner, collector, and agent
 instructions in [pr-queue/](pr-queue/). The user-facing entry point is the

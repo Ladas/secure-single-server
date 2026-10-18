@@ -396,6 +396,38 @@ if args[:2] == ["sandbox", "list"]:
                 self.assertTrue(marker.exists(), "connect failed before invoking SSH")
                 self.assertEqual(result.returncode, 255, result.stderr)
 
+    def test_connect_entry_points_reject_invalid_sandbox_names(self):
+        # The sandbox name flows into the OpenShell CLI and the ssh ProxyCommand,
+        # which runs through a shell; reject anything that is not a plain
+        # identifier before connecting.
+        for harness in ("opencode", "openclaw", "codex"):
+            for name in ("bad name", "sandbox;rm -rf /", "--force", "Uppercase_bad!", "",
+                         "12345678901234567890"):
+                with self.subTest(harness=harness, name=name):
+                    marker = self.work / "capture.ssh"
+                    marker.unlink(missing_ok=True)
+                    result = subprocess.run(
+                        ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"), "--name", name],
+                        env=self.env, capture_output=True, text=True, timeout=10)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn("invalid", result.stderr.lower())
+                    self.assertFalse(marker.exists(), "invalid sandbox name reached ssh")
+
+    def test_connect_entry_points_reject_invalid_gateway_name(self):
+        # The gateway name also reaches the ProxyCommand; a rejected value must
+        # abort before ssh instead of launching it with an empty ProxyCommand.
+        for harness in ("opencode", "openclaw"):
+            with self.subTest(harness=harness):
+                marker = self.work / "capture.ssh"
+                marker.unlink(missing_ok=True)
+                result = subprocess.run(
+                    ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"), "--name", "test"],
+                    env={**self.env, "OPENSHELL_GATEWAY_NAME": "bad name"},
+                    capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("invalid", result.stderr.lower())
+                self.assertFalse(marker.exists(), "invalid gateway name reached ssh")
+
     def test_connect_entry_points_accept_remote_command(self):
         for harness, default_name in (("opencode", "opencode-dev"), ("codex", "codex-dev"),
                                       ("openclaw", "openclaw-dev")):
@@ -419,6 +451,21 @@ if args[:2] == ["sandbox", "list"]:
             env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "a b\n")
+
+    def test_connect_command_boundary_allows_leading_options(self):
+        defaults = {"opencode": "opencode-dev", "codex": "codex-dev",
+                    "openclaw": "openclaw-dev"}
+        for harness in ("opencode", "codex", "openclaw"):
+            with self.subTest(harness=harness):
+                result = subprocess.run(
+                    ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"),
+                     "--", "--name", "remote-command"],
+                    env=self.env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                ssh_arguments = (self.work / "capture.ssh").read_text().splitlines()
+                self.assertEqual(
+                    ssh_arguments[-2:],
+                    [f"sandbox@{defaults[harness]}", "--name remote-command"])
 
     def test_openclaw_waits_for_initial_policy_before_uploading_config(self):
         cli = self.work / "openshell"

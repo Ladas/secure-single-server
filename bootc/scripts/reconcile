@@ -36,6 +36,9 @@ gateway_start as_openshell /usr/bin/openshell /var/lib/openshell-svc/.config/ope
 
 backend="$(inference_backend)"
 praxis_units="/etc/containers/systemd/users/$(service_uid)"
+install -d -o root -g "$(service_gid)" -m 0750 "${praxis_units}"
+chown root:"$(service_gid)" "${praxis_units}"
+chmod 0750 "${praxis_units}"
 if [[ "${backend}" == vllm || "${backend}" == remote-vllm ]]; then
   # No cloud secrets or cloud fallback for either vLLM route. The remote host
   # may still be loading; Praxis starts independently and reports upstream errors.
@@ -72,12 +75,20 @@ else
     PRAXIS_IMAGE "${DEFAULT_PRAXIS_IMAGE}" OPENAI_SECRET "${openai_secret}" ANTHROPIC_SECRET "${anthropic_secret}"
 fi
 regex="$(selinux_path_regex /etc/praxis/shared-gateway.yaml)"
-semanage fcontext -a -t container_file_t "${regex}" 2>/dev/null || \
-  semanage fcontext -m -t container_file_t "${regex}"
+if ! semanage fcontext -m -t container_file_t "${regex}"; then
+  semanage fcontext -a -t container_file_t "${regex}"
+fi
 restorecon -F /etc/praxis/shared-gateway.yaml
 sed '/^\[Install\]/,$d' "${tmp}/praxis.container" >"${tmp}/praxis-bootc.container"
-install -m 0644 "${tmp}/praxis-bootc.container" "${praxis_units}/praxis.container"
-install -m 0644 "${ROOT}/configs/common/quadlet/praxis.network" "${praxis_units}/praxis.network"
+install -o root -g "$(service_gid)" -m 0640 "${tmp}/praxis-bootc.container" "${praxis_units}/praxis.container"
+install -o root -g "$(service_gid)" -m 0640 "${ROOT}/configs/common/quadlet/praxis.network" "${praxis_units}/praxis.network"
+for managed_unit in "${praxis_units}/praxis.container" "${praxis_units}/praxis.network"; do
+  managed_regex="$(selinux_path_regex "${managed_unit}")"
+  if ! semanage fcontext -m -t container_file_t "${managed_regex}"; then
+    semanage fcontext -a -t container_file_t "${managed_regex}"
+  fi
+  restorecon -F "${managed_unit}"
+done
 as_service systemctl --user daemon-reload
 as_service systemctl --user restart praxis.service
 for (( attempt=0; attempt<60; attempt++ )); do

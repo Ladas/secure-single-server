@@ -20,6 +20,12 @@ secure-single-server:vllm-cpu
 secure-single-server:vllm-gpu
 ```
 
+The target must already be a bootc host. `bootc switch` refuses a package-based
+RHEL installation (`System not booted via bootc`), so provision bootc first, for
+example by installing the RHEL bootc image with `bootc install to-disk`, or use
+a bootc cloud image. A standard RHEL 9 cloud AMI is package-based and cannot
+switch.
+
 The harness images include Podman, the native
 OpenShell CLI, deployment configuration, and a boot service for OpenShell and
 the optional, separately activated Praxis path. The standalone `praxis` image is

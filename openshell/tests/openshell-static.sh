@@ -49,6 +49,8 @@ gt="${OS_DIR}/configs/gateway/gateway.toml.in"
 grep -q 'compute_driver *= *"podman"' "${gt}" || fail "gateway.toml not podman driver"
 grep -q '\[openshell.gateway.gateway_jwt\]' "${gt}" || fail "gateway.toml missing JWT auth block"
 grep -q '\[openshell.gateway.tls\]' "${gt}" || fail "gateway.toml missing TLS block"
+grep -q 'operator_enabled *= *false' "${gt}" \
+  || fail "gateway operator credential retrieval must remain disabled"
 grep -q 'cert_path *= *"/var/lib/openshell/tls/server/tls.crt"' "${gt}" || fail "gateway TLS cert path missing"
 grep -q 'key_path *= *"/var/lib/openshell/tls/server/tls.key"' "${gt}" || fail "gateway TLS key path missing"
 grep -q 'client_ca_path *= *"/var/lib/openshell/tls/ca.crt"' "${gt}" || fail "gateway client CA path missing"

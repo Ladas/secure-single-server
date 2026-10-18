@@ -14,28 +14,43 @@ source "${_HL_DIR}/lib.sh"
 _os() { "${OPENSHELL_BIN}" "$@"; }
 
 # Build the ssh ProxyCommand for a sandbox (native ssh-proxy, name mode).
+# ssh runs ProxyCommand through a shell, so reject any value that could be
+# interpreted as shell syntax; callers validate too, but keep this fail-closed.
 _proxy_cmd() {  # <sandbox>
+  [[ "${OPENSHELL_GATEWAY_NAME}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] \
+    || die "invalid OpenShell gateway name: ${OPENSHELL_GATEWAY_NAME}"
+  [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ && ${#1} -le 19 ]] \
+    || die "invalid sandbox name: $1"
   printf '%s ssh-proxy --gateway-name %s --name %s' \
     "${OPENSHELL_BIN}" "${OPENSHELL_GATEWAY_NAME}" "$1"
 }
 
 harness_ssh() {  # <sandbox> <cmd...>
   local name="$1"; shift
+  # Build the proxy command first so a rejected name aborts here instead of
+  # launching ssh with an empty ProxyCommand (a command substitution inside an
+  # argument list does not trip errexit).
+  local proxy
+  proxy="$(_proxy_cmd "${name}")" || return 1
   # Provider credentials must use explicit gateway bindings, never SSH forwarding.
+  # Host-key checking is disabled because the only transport is the local,
+  # authenticated OpenShell gateway ProxyCommand; there is no network SSH peer.
   ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o "ProxyCommand=$(_proxy_cmd "${name}")" \
+    -o "ProxyCommand=${proxy}" \
     "${OPENSHELL_SANDBOX_USER}@${name}" "$@"
 }
 
 harness_ssh_timeout() {  # <sandbox> <seconds> <cmd...>
   local name="$1" timeout_seconds="$2"; shift 2
+  local proxy
+  proxy="$(_proxy_cmd "${name}")" || return 1
   local ssh_pid watchdog_pid status timeout_dir timeout_marker
   timeout_dir="$(mktemp -d)"
   timeout_marker="${timeout_dir}/timed-out"
 
   # Provider credentials must use explicit gateway bindings, never SSH forwarding.
   ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o "ProxyCommand=$(_proxy_cmd "${name}")" \
+    -o "ProxyCommand=${proxy}" \
     "${OPENSHELL_SANDBOX_USER}@${name}" "$@" <&0 &
   ssh_pid="$!"
   (
@@ -70,14 +85,15 @@ harness_ssh_timeout() {  # <sandbox> <seconds> <cmd...>
 
 harness_connect_tty() {  # <sandbox> [cmd...]
   local name="$1"; shift || true
-  local remote_command
+  local proxy remote_command
+  proxy="$(_proxy_cmd "${name}")" || return 1
   if (($#)); then
     printf -v remote_command '%q ' "$@"
     set -- "${remote_command% }"
   fi
   # Provider credentials must use explicit gateway bindings, never SSH forwarding.
   ssh -F /dev/null -t -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o "ProxyCommand=$(_proxy_cmd "${name}")" \
+    -o "ProxyCommand=${proxy}" \
     "${OPENSHELL_SANDBOX_USER}@${name}" "$@"
 }
 

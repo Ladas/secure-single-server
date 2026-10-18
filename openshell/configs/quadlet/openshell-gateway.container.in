@@ -16,6 +16,9 @@ Volume=%h/.config/openshell/gateway.toml:/etc/openshell/gateway.toml:ro
 Volume=/var/lib/openshell:/var/lib/openshell
 Volume=%t/podman/podman.sock:/run/podman/podman.sock
 SecurityLabelDisable=true
+# Defense in depth for the trust anchor: the gateway needs the podman socket and
+# host networking, but it never needs to gain privileges.
+NoNewPrivileges=true
 PodmanArgs=--userns=keep-id:uid=1001,gid=1001
 User=1001
 Group=1001

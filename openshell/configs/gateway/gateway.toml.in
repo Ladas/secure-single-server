@@ -20,6 +20,7 @@ client_ca_path = "/var/lib/openshell/tls/ca.crt"
 
 [openshell.gateway.mtls_auth]
 enabled = true
+operator_enabled = false
 
 [openshell.gateway.gateway_jwt]
 signing_key_path = "/var/lib/openshell/tls/jwt/signing.pem"

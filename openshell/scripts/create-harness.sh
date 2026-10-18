@@ -80,6 +80,13 @@ fi
 [[ -z "${PROVIDER}" || "${PROVIDER}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || die 'invalid provider name'
 TEMPLATE="$("${C_DIR}/template.sh" ensure --harness "${HARNESS_KIND}" --profile "${PROFILE}" \
   --config "${REQUESTED_CONFIG}" --backend "${backend}")"
+install_opencode_ripgrep() {
+  local rg
+  rg="$(command -v rg)" || die 'ripgrep is required on the host for OpenCode glob and grep tools'
+  harness_ssh "${NAME}" \
+    "mkdir -p \"\$HOME/.local/bin\" && cat > \"\$HOME/.local/bin/rg\" && chmod 0755 \"\$HOME/.local/bin/rg\"" \
+    <"${rg}"
+}
 if [[ -n "${HARNESS_CONFIG_DIR}" ]]; then
   POL="$(mktemp)"; PROV="$(mktemp)"
   # shellcheck disable=SC2329,SC2317 # cleanup is invoked by the EXIT trap
@@ -92,6 +99,7 @@ if [[ -n "${HARNESS_CONFIG_DIR}" ]]; then
   harness_create "${NAME}" "${IMAGE}" "${POL}" "" "${POLICY_ADVISOR}" "${TEMPLATE}"
   case "${HARNESS_KIND}" in
     opencode)
+      install_opencode_ripgrep
       harness_ssh "${NAME}" 'mkdir -p ~/.config/opencode && cat > ~/.config/opencode/opencode.json' <"${PROV}"
       note "Provider config installed at ~/.config/opencode/opencode.json (Praxis loopback :${PRAXIS_PORT}, model ${OPENSHELL_MODEL_ID})"
       note "Connect with: ${H_DIR}/connect.sh --name ${NAME}"
@@ -113,6 +121,9 @@ if [[ -n "${HARNESS_CONFIG_DIR}" ]]; then
   esac
 else
   harness_create "${NAME}" "${IMAGE}" "${POLICY_SRC}" "${PROVIDER}" "${POLICY_ADVISOR}" "${TEMPLATE}"
+  if [[ "${HARNESS_KIND}" == opencode ]]; then
+    install_opencode_ripgrep
+  fi
   if [[ "${HARNESS_KIND}" == openclaw ]]; then
     note "Open a shell with: ${H_DIR}/connect.sh --name ${NAME}"
   else

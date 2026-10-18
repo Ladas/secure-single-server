@@ -149,7 +149,7 @@ ReadOnly=true
 NoNewPrivileges=true
 DropCapability=all
 Environment=PYTHONDONTWRITEBYTECODE=1
-Volume={mock_files}:/fixture:ro
+Volume={mock_files}:/fixture:ro,z
 Exec=python3 /fixture/rhel/harness_provider.py
 [Service]
 Restart=on-failure

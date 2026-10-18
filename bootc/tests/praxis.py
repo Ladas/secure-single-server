@@ -38,6 +38,7 @@ flock() { :; }
 systemctl() { echo "SYSTEMCTL $*"; }
 semanage() { :; }
 restorecon() { :; }
+chown() { echo "CHOWN $*"; }
 install() {
   local args=()
   while (( "$#" )); do
@@ -139,6 +140,7 @@ as_service() {
         result = self.run_praxis('reconcile')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('Praxis ready', result.stdout)
+        self.assertIn('CHOWN root:1000 ', result.stdout)
         config = self.work / 'praxis/shared-gateway.yaml'
         unit = self.work / 'containers/users/1000/praxis.container'
         self.assertIn('api.openai.com', config.read_text())
