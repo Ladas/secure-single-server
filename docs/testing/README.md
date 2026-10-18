@@ -36,8 +36,11 @@ References, as needed:
 
 ## OpenShell harness model and tool checks
 
-See [OpenShell 0.1.3 upgrade qualification](upgrade-0.1.3.md) for current AWS
-OpenCode and OpenClaw tests, migration requirements, and coverage limits.
+The active OpenShell pins and release compatibility are reviewed in
+[OpenShell 0.1.4](upgrade-0.1.4.md). The
+[OpenShell 0.1.3 upgrade qualification](upgrade-0.1.3.md) remains historical
+AWS OpenCode and OpenClaw evidence with controlled model fixtures and its
+coverage limits.
 
 The [earlier OpenClaw Praxis qualification](openclaw-praxis.md) records the
 previous pins and real-Qwen acceptance. Those results are historical and do

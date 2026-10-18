@@ -147,8 +147,9 @@ The attached provider supplies an opaque `OPENAI_API_KEY` placeholder; OpenShell
 substitutes the real key only for the profile's authorized endpoint. Do not paste
 the real key into OpenCode's `/connect` prompt or store it in harness config.
 Follow the [model verification steps](verification.md#1-prove-model-interaction).
-Verify model access on your host; see the
-[real-model deployment qualification](../../testing/upgrade-0.1.3-e2e.md).
+Verify model access on your host. The
+[real-model deployment qualification](../../testing/upgrade-0.1.3-e2e.md) is
+historical 0.1.3 evidence and does not replace a current-host check.
 
 ### Local OpenAI-compatible endpoint and key
 

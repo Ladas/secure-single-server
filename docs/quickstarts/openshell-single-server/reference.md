@@ -6,15 +6,17 @@
 
 | Harness | Qualified in the single-server OpenShell path | Explicitly not qualified |
 | --- | --- | --- |
-| OpenCode | Sandbox lifecycle and policy controls; [Praxis fixture model, write and bash tools](../../testing/upgrade-0.1.3.md) | Paid-provider and real-GPU inference on the upgraded pins; the narrower `review` profile |
-| OpenClaw | Sandbox lifecycle and policy controls; [bounded Praxis fixture model and write tool](../../testing/upgrade-0.1.3.md) | Automatic `exec`, browser/gateway authentication, retained sessions, `--backend`, and untested providers |
+| OpenCode | Sandbox lifecycle and policy controls; [historical 0.1.3 Praxis fixture model, write and bash tools](../../testing/upgrade-0.1.3.md) | Fresh paid-provider and real-GPU inference on the 0.1.4 pins; the narrower `review` profile |
+| OpenClaw | Sandbox lifecycle and policy controls; [historical 0.1.3 bounded Praxis fixture model and write tool](../../testing/upgrade-0.1.3.md) | Automatic `exec`, browser/gateway authentication, retained sessions, `--backend`, and untested providers |
 
 ## AWS verification
 
-The [0.1.3 upgrade qualification](../../testing/upgrade-0.1.3.md) records the
-current pins, both harnesses' controlled model/tool tests, and rebuilt bootc
-container checks. It does not qualify a booted OS rollout or real inference on
-the upgraded pins. The following published-image results predate that upgrade.
+The active [0.1.4 pin review](../../testing/upgrade-0.1.4.md) records release
+compatibility and offline validation. The [0.1.3 upgrade qualification](../../testing/upgrade-0.1.3.md)
+remains historical evidence for both harnesses' controlled model/tool tests and
+rebuilt bootc container checks. Neither record qualifies a fresh booted OS
+rollout or real inference on the 0.1.4 pins. The following published-image
+results predate both upgrades.
 
 On 2026-10-02, the manual path was exercised on a disposable RHEL 9 x86_64 EC2
 host in `us-east-1`. It created Ready OpenCode and OpenClaw sandboxes, passed
