@@ -39,6 +39,7 @@ def main():
                      for scenario in ("all-in-one", "remote") for backend in ([], ["--valkey"])]
     if args.suite == "openshell":
         commands += [[sys.executable, "openshell/tests/regressions.py"],
+                     [sys.executable, "tests/github/test_upstream_watch.py"],
                      [sys.executable, "openshell/tests/gateway.py"],
                      [sys.executable, "openshell/tests/probe-test.py"],
                      [sys.executable, "tests/openshell-praxis/offline.py"],
