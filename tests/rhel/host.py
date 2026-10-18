@@ -448,6 +448,51 @@ def main():
                 f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{owner.pw_uid}/bus",
                 "OPENSHELL_TELEMETRY_ENABLED=false",
                 *openshell_inference(json.loads((STATE / "state.json").read_text()))]
+            state_directory = Path(owner.pw_dir) / "opencode-pr-queue"
+            run("install", "-d", "-o", owner.pw_name,
+                "-g", pwd.getpwgid(owner.pw_gid).pw_name, "-m", "0700",
+                state_directory)
+            fake_bin = Path(directory) / "fake-bin"
+            fake_bin.mkdir()
+            fake_curl = fake_bin / "curl"
+            fake_curl.write_text(
+                "#!/bin/sh\n"
+                "output=\n"
+                "while [ \"$#\" -gt 0 ]; do\n"
+                "  case \"$1\" in\n"
+                "    --output) output=\"$2\"; shift 2 ;;\n"
+                "    *) shift ;;\n"
+                "  esac\n"
+                "done\n"
+                "printf '[]\\n' >\"$output\"\n"
+                "printf 'HTTP_STATUS=200\\nCONTENT_TYPE=application/json\\n'\n")
+            fake_curl.chmod(0o755)
+            state_file = state_directory / "runbook-smoke-state.json"
+            lock_file = Path(f"{state_file}.lock")
+            watch_command = ["runuser", "-u", "openshell-svc", "--", "env", "-i",
+                f"HOME={owner.pw_dir}",
+                f"PATH={fake_bin}:/usr/local/bin:/usr/bin:/usr/sbin:/bin",
+                "LANG=C.UTF-8", f"XDG_RUNTIME_DIR=/run/user/{owner.pw_uid}",
+                f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{owner.pw_uid}/bus",
+                "bash", str(Path(directory) / "openshell/harnesses/opencode/pr-queue/watch.sh"),
+                "--name", "opencode-pr-queue", "--repo", "owner/repo",
+                "--label", "bot", "--state", str(state_file),
+                "--once", "--dry-run"]
+            try:
+                watch = subprocess.run(watch_command, cwd="/", text=True,
+                                       capture_output=True, timeout=30)
+                if watch.returncode:
+                    raise ValueError(
+                        "OpenCode watcher runbook failed under openshell-svc: "
+                        + watch.stderr.strip())
+                state_status = state_file.stat()
+                if (state_status.st_uid != owner.pw_uid or
+                        state_status.st_mode & 0o777 != 0o600):
+                    raise ValueError("OpenCode watcher state is not service-owned and private")
+                print("PASS: OpenCode watcher runbook state under openshell-svc", flush=True)
+            finally:
+                state_file.unlink(missing_ok=True)
+                lock_file.unlink(missing_ok=True)
             existing = openshell_names(owner_command)
             result = subprocess.run([*owner_command, "bash", str(Path(directory) / "tests/openshell-praxis/smoke.sh")], cwd="/")
             advisor = subprocess.run([*owner_command, "bash", str(Path(directory) / "openshell/tests/policy-advisor.sh")], cwd="/")
