@@ -105,4 +105,7 @@ retention behavior.
 The metering image currently has no configured raw-event retention deletion.
 Do not delete rows manually on a test database. Record its growth rate and keep
 the test host isolated; define a reviewed retention and backup policy before
-using this deployment for long-lived users.
+using this deployment for long-lived users. The tested rootless Podman units use
+the `k8s-file` log driver with no per-container size cap (`-1B`); the short run
+showed stable journald usage, but it does not establish a long-term log bound.
+Set and verify a log rotation limit before running a long-lived service.

@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+import ipaddress
 
 ROOT = Path(__file__).resolve().parents[2]
 loader = importlib.machinery.SourceFileLoader('pricetag_harness', str(ROOT / 'scripts/pricetag/harness'))
@@ -20,6 +21,11 @@ client = importlib.util.module_from_spec(spec)
 loader.exec_module(client)
 sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
 import prepare
+network_loader = importlib.machinery.SourceFileLoader(
+    'pricetag_private_network', str(ROOT / 'scripts/pricetag/private-network.py'))
+network_spec = importlib.util.spec_from_loader(network_loader.name, network_loader)
+private_network = importlib.util.module_from_spec(network_spec)
+network_loader.exec_module(private_network)
 perf_loader = importlib.machinery.SourceFileLoader('pricetag_perf', str(ROOT / 'scripts/pricetag/perf'))
 perf_spec = importlib.util.spec_from_loader(perf_loader.name, perf_loader)
 perf = importlib.util.module_from_spec(perf_spec)
@@ -51,6 +57,45 @@ class PreparationTest(unittest.TestCase):
             ['Secret=openai-key,type=env,target=OPENAI_API_KEY'], '', False)
         self.assertIn('Secret=openai-key,type=env,target=OPENAI_API_KEY', with_secret)
         self.assertNotIn('Network=pricetag-mock.network', with_secret)
+
+    def test_maas_trusts_only_loopback_and_required_service_containers(self):
+        fixture = [{'subnets': [{'subnet': '10.77.0.0/24', 'gateway': '10.77.0.1'}],
+                    'containers': {'a': {'name': 'pricetag-gateway',
+                                         'interfaces': {'eth0': {'subnets': [
+                                             {'ipnet': '10.77.0.10/24'}]}}},
+                                   'b': {'name': 'pricetag-metering',
+                                         'interfaces': {'eth0': {'subnets': [
+                                             {'ipnet': '10.77.0.11/24'}]}}}}}]
+        addresses = private_network.service_addresses(fixture)
+        self.assertEqual(addresses, {'maas': '10.77.0.12', 'gateway': '10.77.0.10',
+                                     'metering': '10.77.0.11'})
+        with tempfile.TemporaryDirectory() as directory:
+            maas = Path(directory) / 'maas.container'
+            gateway = Path(directory) / 'gateway.container'
+            metering = Path(directory) / 'metering.container'
+            maas.write_text('[Container]\nEnvironment=MAAS_TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.77.0.0/24\n')
+            gateway.write_text('[Container]\nNetwork=pricetag.network\nNetwork=pricetag-mock.network\n')
+            metering.write_text('[Container]\nNetwork=pricetag.network\n')
+            private_network.configure_units(maas, gateway, metering, addresses)
+            trusted = next(line.partition('=')[2].partition('=')[2]
+                           for line in maas.read_text().splitlines()
+                           if line.startswith('Environment=MAAS_TRUSTED_PROXY_CIDRS='))
+            networks = [ipaddress.ip_network(item) for item in trusted.split(',')]
+            self.assertTrue(any(ipaddress.ip_address('127.0.0.1') in net for net in networks))
+            for address in ('10.77.0.10', '10.77.0.11', '10.77.0.12'):
+                self.assertTrue(any(ipaddress.ip_address(address) in net for net in networks))
+            self.assertFalse(any(ipaddress.ip_address('10.77.0.15') in net for net in networks))
+            self.assertIn('IP=10.77.0.12', maas.read_text())
+            self.assertIn('Network=pricetag.network:ip=10.77.0.10', gateway.read_text())
+            self.assertIn('Network=pricetag.network:ip=10.77.0.11', metering.read_text())
+
+    def test_service_addresses_avoid_other_containers(self):
+        fixture = [{'subnets': [{'subnet': '10.77.0.0/24', 'gateway': '10.77.0.1'}],
+                    'containers': {'a': {'name': 'other', 'interfaces': {'eth0': {'subnets': [
+                        {'ipnet': '10.77.0.10/24'}]}}}}}]
+        self.assertEqual(private_network.service_addresses(fixture),
+                         {'maas': '10.77.0.11', 'gateway': '10.77.0.12',
+                          'metering': '10.77.0.13'})
 
     def test_mock_deployment_has_native_routes_and_no_provider_credentials(self):
         original, models = prepare.mock_inputs()

@@ -23,6 +23,70 @@ from gateway import render as gateway
 
 
 class SetupTest(unittest.TestCase):
+    def test_gateway_activation_accepts_public_catalog_and_requires_auth_for_inference(self):
+        requests = []
+
+        class Response:
+            def __init__(self, status, body=b'{}'):
+                self.status = status
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, *_):
+                return self.body
+
+        def open_request(request, timeout):
+            target = request if isinstance(request, str) else request.full_url
+            requests.append((target, request))
+            if target.endswith('/login'):
+                return Response(200)
+            if target.endswith('/v1/models'):
+                return Response(200, b'{"data":[]}')
+            raise setup.urllib.error.HTTPError(target, 401, 'unauthorized', {}, io.BytesIO(b''))
+
+        with patch.object(setup, 'service'), \
+                patch.object(setup.ssl, 'create_default_context'), \
+                patch.object(setup.urllib.request, 'build_opener',
+                             return_value=SimpleNamespace(open=open_request)):
+            setup.activate_gateway()
+        self.assertTrue(requests[1][0].endswith('/v1/models'))
+        self.assertEqual(requests[2][0], 'https://localhost:8443/v1/responses')
+        self.assertEqual(requests[2][1].data, b'{}')
+
+    def test_gateway_activation_rejects_anonymous_inference_success(self):
+        class Response:
+            status = 200
+
+            def __init__(self, body=b'{}'):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, *_):
+                return self.body
+
+        def open_request(request, timeout):
+            target = request if isinstance(request, str) else request.full_url
+            if target.endswith('/v1/models'):
+                return Response(b'{"data":[]}')
+            return Response()
+
+        with patch.object(setup, 'service'), \
+                patch.object(setup.ssl, 'create_default_context'), \
+                patch.object(setup.urllib.request, 'build_opener',
+                             return_value=SimpleNamespace(open=open_request)):
+            with self.assertRaisesRegex(ValueError, 'inference request did not fail closed'):
+                setup.activate_gateway()
+
     def test_refresh_replaces_only_pricetag_models_and_preserves_security_boundary(self):
         import yaml
         from provider_config import render
@@ -504,7 +568,7 @@ class SetupTest(unittest.TestCase):
             def reject(request, timeout):
                 self.assertEqual(request.get_header(header), value)
                 self.assertEqual(request.full_url, 'https://remote.example/v1/models')
-                raise setup.urllib.error.HTTPError(request.full_url, 401, 'SECRET', {}, None)
+                raise setup.urllib.error.HTTPError(request.full_url, 401, 'SECRET', {}, io.BytesIO(b''))
             with patch.object(setup.urllib.request, 'build_opener',
                               return_value=SimpleNamespace(open=reject)):
                 with self.assertRaisesRegex(ValueError, 'HTTP 401') as error:

@@ -27,23 +27,6 @@ fi
 if [[ -f "${DEPLOY_DIR}/quadlets/pricetag-provider.container" ]]; then
   install -m 0644 "${DEPLOY_DIR}/quadlets/pricetag-provider.container" "${units}/pricetag-provider.container"
 fi
-existing_subnets="$(as_service podman network inspect \
-  --format '{{range .Subnets}}{{.Subnet}} {{end}}' pricetag-private 2>/dev/null || true)"
-if [[ -n "${existing_subnets// /}" ]]; then
-  trusted_cidrs="$(python3 -c 'import ipaddress,sys; nets=[str(ipaddress.ip_network(x)) for x in sys.argv[1].split()]; print("127.0.0.1/32,"+",".join(nets))' "${existing_subnets}")" ||
-    die 'could not validate the existing private-network subnet'
-  python3 - "${units}/pricetag-maas.container" "${trusted_cidrs}" <<'PY'
-import sys
-from pathlib import Path
-path = Path(sys.argv[1])
-lines = path.read_text().splitlines()
-indexes = [i for i, line in enumerate(lines) if line.startswith('Environment=MAAS_TRUSTED_PROXY_CIDRS=')]
-if len(indexes) != 1:
-    raise SystemExit('expected exactly one MaaS trusted-proxy setting')
-lines[indexes[0]] = 'Environment=MAAS_TRUSTED_PROXY_CIDRS=' + sys.argv[2]
-path.write_text('\n'.join(lines) + '\n')
-PY
-fi
 semanage fcontext -a -t container_file_t '/etc/praxis-pricetag(/.*)?' 2>/dev/null ||
   semanage fcontext -m -t container_file_t '/etc/praxis-pricetag(/.*)?'
 restorecon -R "${DEPLOY_DIR}"
@@ -61,6 +44,15 @@ for ((attempt=0; attempt<60; attempt++)); do
   sleep 1
 done
 [[ "${ready}" == 1 ]] || die 'PostgreSQL did not become ready'
+network_json="$(as_service podman network inspect --format json pricetag-private)" ||
+  die 'could not inspect the private MaaS network'
+service_addresses="$(printf '%s' "${network_json}" | python3 "${SCRIPT_DIR}/private-network.py" addresses)" ||
+  die 'could not select private MaaS, gateway and metering addresses'
+printf '%s' "${service_addresses}" | python3 "${SCRIPT_DIR}/private-network.py" configure \
+  "${units}/pricetag-maas.container" "${units}/pricetag-gateway.container" \
+  "${units}/pricetag-metering.container" ||
+  die 'could not restrict MaaS trusted peers to the host and required services'
+as_service systemctl --user daemon-reload
 pg_admin_user=postgres
 pg_admin_database=postgres
 if ! as_service podman exec pricetag-db psql -X -qAt -U postgres -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
@@ -75,12 +67,12 @@ if [[ ! -f "${DEPLOY_DIR}/postgres-bootstrap.done" ]]; then
     < "${DEPLOY_DIR}/initdb/10-create-databases.sql"
   install -m 0600 /dev/null "${DEPLOY_DIR}/postgres-bootstrap.done"
 fi
-as_service systemctl --user start pricetag-maas.service
-as_service podman run --rm --network pricetag-private "${PROBE_IMAGE}" python3 -c '
+as_service systemctl --user restart pricetag-maas.service
+python3 - <<'PY'
 import time, urllib.request
 for attempt in range(60):
     try:
-        with urllib.request.urlopen("http://pricetag-maas:8080/health", timeout=2) as r:
+        with urllib.request.urlopen("http://127.0.0.1:18086/health", timeout=2) as r:
             if r.status == 200:
                 break
     except OSError:
@@ -88,14 +80,14 @@ for attempt in range(60):
     time.sleep(1)
 else:
     raise SystemExit("MaaS API did not become ready")
-'
+PY
 admin_dir="$(<"${DEPLOY_DIR}/admin-directory")"
 install -d -m 0700 "${admin_dir}"
 if [[ ! -f "${admin_dir}/admin.key" ]]; then
   python3 "${SCRIPT_DIR}/maas-key" create --subject admin --admin --name admin \
     --url http://127.0.0.1:18086 --output "${admin_dir}/admin.key"
 fi
-as_service systemctl --user start pricetag-metering.service
+as_service systemctl --user restart pricetag-metering.service
 as_service podman run --rm --network pricetag-private "${PROBE_IMAGE}" python3 -c '
 import time, urllib.request
 for attempt in range(60):
@@ -120,7 +112,7 @@ fi
 if [[ -f "${DEPLOY_DIR}/quadlets/pricetag-provider.container" ]]; then
   as_service systemctl --user start pricetag-provider.service
 fi
-as_service systemctl --user start pricetag-gateway.service
+as_service systemctl --user restart pricetag-gateway.service
 python3 - "${DEPLOY_DIR}/ca.pem" <<'PY'
 import ssl, sys, time, urllib.request
 context = ssl.create_default_context(cafile=sys.argv[1])

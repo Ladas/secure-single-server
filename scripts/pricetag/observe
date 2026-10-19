@@ -9,7 +9,7 @@ import pwd
 import subprocess
 import time
 
-SERVICES = ['pricetag-' + name for name in ('gateway', 'metering', 'db', 'provider')]
+SERVICES = ['pricetag-' + name for name in ('gateway', 'maas', 'metering', 'db', 'provider')]
 SQL = """
 SET statement_timeout = '10s';
 SELECT json_build_object(

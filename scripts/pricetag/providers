@@ -491,14 +491,23 @@ def activate_gateway():
             with opener.open('https://localhost:8443/login', timeout=2) as response:
                 if response.status != 200:
                     raise ValueError('unexpected login status')
+            with opener.open('https://localhost:8443/v1/models', timeout=2) as response:
+                if response.status != 200:
+                    raise ValueError('public model catalog is unavailable')
+                catalog = json.load(response)
+                if not isinstance(catalog, dict) or not isinstance(catalog.get('data'), list):
+                    raise ValueError('public model catalog has an invalid response')
+            request = urllib.request.Request('https://localhost:8443/v1/responses',
+                data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
             try:
-                opener.open('https://localhost:8443/v1/models', timeout=2).close()
+                with opener.open(request, timeout=2) as response:
+                    status = response.status
             except urllib.error.HTTPError as error:
                 status = error.code
                 error.close()
-                if status == 401:
-                    return
-            raise ValueError('unauthenticated inference catalog did not fail closed')
+            if status == 401:
+                return
+            raise ValueError('unauthenticated inference request did not fail closed')
         except (urllib.error.URLError, OSError):
             time.sleep(.5)
     raise ValueError('gateway did not become healthy after replacement')

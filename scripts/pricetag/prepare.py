@@ -214,17 +214,19 @@ def main():
         'HealthCmd=pg_isready -U postgres -d postgres\nHealthInterval=10s\n' + common, '1G')
     container('pricetag-maas', 'MaaS standalone key API', 'pricetag-db.service',
         f'Image={args.maas_image}\nPull=never\nNetworkAlias=pricetag-maas\n'
+        'IP=10.77.0.10\n'
         'PublishPort=127.0.0.1:18086:8080\n'
         f'Volume={args.directory}/maas-db-url:/run/secrets/maas-db-url:ro\n'
         'Environment=MAAS_RUNTIME_MODE=standalone\nEnvironment=MAAS_SUBSCRIPTION_MODE=standalone\n'
         'Environment=ADDRESS=:8080\nEnvironment=SECURE=false\n'
         'Environment=DB_CONNECTION_URL_FILE=/run/secrets/maas-db-url\n'
         'Environment=API_KEY_MAX_EXPIRATION_DAYS=90\nEnvironment=MAAS_ADMIN_GROUPS=single-server-admin\n'
-        'Environment=MAAS_TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.77.0.0/24\n'
+        'Environment=MAAS_TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.77.0.10/32,10.77.0.11/32,10.77.0.12/32\n'
         'Environment=METRICS_SECURE=false\nEnvironment=METRICS_ADDRESS=127.0.0.1:9090\n' + app, '1G')
     container('pricetag-metering', 'PriceTag metering and dashboards', 'pricetag-db.service',
         f'Image={args.metering_image}\nPull=never\nNetworkAlias=pricetag-metering\n'
-        f'EnvironmentFile={args.directory}/metering.env\n' + app, '2G')
+        f'EnvironmentFile={args.directory}/metering.env\n' + app, '2G',
+        network='pricetag.network:ip=10.77.0.12')
     dependencies = 'pricetag-metering.service'
     if args.mock_provider:
         (units / 'pricetag-mock.network').write_text(
@@ -240,7 +242,7 @@ def main():
     container('pricetag-gateway', 'Praxis HTTPS gateway with MaaS identity and USD budgets',
         'pricetag-metering.service pricetag-maas.service',
         gateway_quadlet_body(args.praxis_image, provider_secrets, mount, args.mock_provider) + app,
-        '1G')
+        '1G', network='pricetag.network:ip=10.77.0.11')
     for path in [args.directory, *args.directory.rglob('*')]:
         os.chown(path, 0, owner.pw_gid)
         path.chmod(0o750 if path.is_dir() else 0o640)

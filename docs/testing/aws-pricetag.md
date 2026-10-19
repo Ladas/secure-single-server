@@ -81,7 +81,7 @@ Copy the tracked source from the reviewed branch, then connect:
 ```console
 (
   set -o pipefail
-  git ls-files -z | tar --no-xattrs --null -T - -czf - | \
+  git ls-files -z --cached --others --exclude-standard | tar --no-xattrs --null -T - -czf - | \
     ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST" \
       'mkdir -p ~/secure-single-server && tar -xzf - -C ~/secure-single-server'
 )
@@ -89,9 +89,9 @@ ssh -o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY" "$RHEL_HOST"
 ```
 
 For the second host, return to the workstation and set `VM_NAME=pricetag-perf`,
-then repeat. This transfers tracked files from the current checkout, including
-its working-tree edits. Review the staged diff before copying; do not include
-credential files or `.state` data.
+then repeat. This transfers tracked and new, non-ignored source files from the
+current checkout, including local edits. Review the diff before copying; do not
+include credential files or `.state` data.
 
 ## 3. Prepare RHEL and build pinned images
 
@@ -109,7 +109,8 @@ unmodified PriceTag metering from the revision pinned by this repository. The
 MaaS checkout must include `maas-api/Dockerfile` and `maas-api/`:
 
 ```console
-git clone https://github.com/Ladas/models-as-a-service.git ~/models-as-a-service
+git clone --branch feat/standalone-runtime-config \
+  https://github.com/Ladas/models-as-a-service.git ~/models-as-a-service
 git -C ~/models-as-a-service checkout --detach REVIEWED_MAAS_COMMIT
 sudo scripts/pricetag/build-maas --source ~/models-as-a-service \
   --expected-commit REVIEWED_MAAS_COMMIT
@@ -123,7 +124,8 @@ filters. `--format docker` preserves the health check declared by its
 Containerfile.
 
 ```console
-git clone https://github.com/praxis-proxy/experimental.git ~/praxis-experimental
+git clone --branch feat/single-server-et-praxis \
+  https://github.com/Ladas/experimental.git ~/praxis-experimental
 git -C ~/praxis-experimental checkout --detach REVIEWED_EXPERIMENTAL_COMMIT
 sudo podman build --pull=always --format docker \
   --label org.opencontainers.image.revision=REVIEWED_EXPERIMENTAL_COMMIT \
@@ -137,16 +139,17 @@ Import all three local images into the rootless service account and capture
 their immutable IDs. Set `PRAXIS_IMAGE` to the image built or pulled above:
 
 ```console
+set -o pipefail
 PRICETAG_UID=$(id -u praxis-svc)
 svc() {
   (cd /tmp && sudo -u praxis-svc env \
     XDG_RUNTIME_DIR="/run/user/$PRICETAG_UID" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$PRICETAG_UID/bus" "$@")
 }
-PRAXIS_IMAGE=localhost/praxis-experimental:REVIEWED_TAG
-podman save "$PRAXIS_IMAGE" | svc podman load
-podman save localhost/pricetag-maas:standalone | svc podman load
-podman save localhost/pricetag-metering:upstream-557ceb1 | svc podman load
+PRAXIS_IMAGE=localhost/praxis-experimental:reviewed
+sudo podman save "$PRAXIS_IMAGE" | svc podman load
+sudo podman save localhost/pricetag-maas:standalone | svc podman load
+sudo podman save localhost/pricetag-metering:upstream-557ceb1 | svc podman load
 PRAXIS_IMAGE=$(svc podman image inspect "$PRAXIS_IMAGE" --format '{{.Id}}')
 MAAS_IMAGE=$(svc podman image inspect localhost/pricetag-maas:standalone --format '{{.Id}}')
 METERING_IMAGE=$(svc podman image inspect localhost/pricetag-metering:upstream-557ceb1 --format '{{.Id}}')
@@ -211,7 +214,10 @@ The performance price source must be a reviewed local fixture file mapping
 `fixture` to a model already priced in the pinned metering image. Do not use
 real provider secrets or aliases on this VM. `prepare.py` refuses to overwrite
 existing deployment directories. `start` installs and starts user Quadlets;
-PostgreSQL, MaaS, metering, the optional mock, and Praxis start on boot.
+PostgreSQL, MaaS, metering, the optional mock, and Praxis start on boot. It
+selects unused static addresses for MaaS, Praxis and PriceTag on
+`pricetag-private`. MaaS trusts host loopback and only those three `/32`
+service addresses; unrelated containers on the network are excluded.
 
 For an existing deployment, first make a root-only backup of its configuration,
 Quadlet units, and PostgreSQL data. Stop the old services, then move
@@ -220,7 +226,8 @@ Quadlet units, and PostgreSQL data. Stop the old services, then move
 Podman secrets. `start` detects the existing `metering`-superuser PostgreSQL
 layout, creates the MaaS database, updates the application-role passwords, and
 preserves existing metering rows. It also detects an existing
-`pricetag-private` subnet and aligns the MaaS trusted-proxy CIDR with it; a new
+`pricetag-private` subnet, selects unused addresses for MaaS, Praxis and
+PriceTag in it, and trusts only those service addresses and host loopback. A new
 network uses the subnet in the Quadlet definition. It refuses to apply the
 initial USD policy and model aliases when `usage_events` is nonempty. After
 reviewing the backup, schema, and configured price-source IDs, explicitly
