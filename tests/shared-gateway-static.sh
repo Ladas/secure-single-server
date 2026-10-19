@@ -151,6 +151,56 @@ if rg -n '^Volume=/etc/praxis/.*:Z$' configs/common/quadlet; then
   exit 1
 fi
 
+# Container-backed tests bind-mount checkout and temporary paths, which are
+# user_home_t/user_tmp_t on an SELinux-enforcing host. Rootless Podman cannot
+# read those labels, so every read-only test mount must request a relabel
+# (:ro,z or ,readonly,Z) — the same container_file_t label the installer applies
+# to /etc/praxis files with semanage and restorecon. Without it the tests only
+# pass on the non-SELinux CI runners.
+if ! python3 - <<'PY'
+import ast
+from pathlib import Path
+import re
+
+failed = False
+gateway_helper = Path("tests/common/gateway.py")
+if gateway_helper.exists():
+    tree = ast.parse(gateway_helper.read_text())
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef) or function.name != "bind":
+            continue
+        mount_flag = any(isinstance(node, ast.Constant) and node.value == "--volume"
+                         for node in ast.walk(function))
+        if not mount_flag:
+            print(f"{gateway_helper}: bind helper does not assemble a volume mount")
+            failed = True
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            read_only = re.search(r"(?<![A-Za-z])ro(?![A-Za-z])", node.value)
+            relabeled = re.search(r"(?<![A-Za-z])[zZ](?![A-Za-z])", node.value)
+            if mount_flag and read_only and not relabeled:
+                print(f"{gateway_helper}: assembled read-only bind mount lacks an SELinux relabel option")
+                failed = True
+for path in sorted(Path("tests").rglob("*")):
+    if (path.suffix not in {".py", ".sh"} or
+            path.name == "shared-gateway-static.sh"):
+        continue
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        mount_context = any(marker in line for marker in
+                            ("--volume", "-v ", "--mount", "Volume="))
+        read_only = re.search(r"(?<![A-Za-z])ro(?![A-Za-z])", line)
+        relabeled = re.search(r"(?<![A-Za-z])[zZ](?![A-Za-z])", line)
+        if mount_context and read_only and not relabeled:
+            print(f"{path}:{number}: test bind mount is missing an SELinux relabel option")
+            failed = True
+raise SystemExit(failed)
+PY
+then
+  printf 'test bind mount is missing an SELinux relabel option (use ,readonly,Z)\n' >&2
+  exit 1
+fi
+
 for file in configs/common/quadlet/*.container.in; do
   rg -q '^Pull=never$' "${file}"
   rg -q '^ReadOnly=true$' "${file}"

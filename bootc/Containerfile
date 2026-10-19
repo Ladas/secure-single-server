@@ -23,7 +23,18 @@ RUN --mount=type=secret,id=rhsm_org,target=/run/secrets/rhsm_org \
       registered=1; \
     fi; \
     dnf install -y podman skopeo policycoreutils-python-utils shadow-utils \
-      util-linux openssl openssh-clients jq python3 curl cloud-init; \
+    util-linux openssl openssh-clients jq python3 curl cloud-init; \
+    rg_version=14.1.1; \
+    rg_sha256=4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e; \
+    rg_archive="/tmp/ripgrep-${rg_version}-x86_64-unknown-linux-musl.tar.gz"; \
+    curl --fail --show-error --silent --location --retry 3 --retry-all-errors \
+      "https://github.com/BurntSushi/ripgrep/releases/download/${rg_version}/ripgrep-${rg_version}-x86_64-unknown-linux-musl.tar.gz" \
+      -o "${rg_archive}"; \
+    printf '%s  %s\n' "${rg_sha256}" "${rg_archive}" | sha256sum -c -; \
+    tar -xzf "${rg_archive}" -C /tmp; \
+    install -m 0755 "/tmp/ripgrep-${rg_version}-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg; \
+    rm -rf "${rg_archive}" "/tmp/ripgrep-${rg_version}-x86_64-unknown-linux-musl"; \
+    /usr/local/bin/rg --version | grep -F "ripgrep ${rg_version}"; \
     rhsm_cleanup; \
     trap - EXIT; \
     dnf clean all; \

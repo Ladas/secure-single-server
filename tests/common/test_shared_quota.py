@@ -21,6 +21,22 @@ from test_quota_manage import template
 
 
 class SharedQuotaTest(unittest.TestCase):
+    def test_provider_restart_treats_only_a_missing_container_as_transient(self):
+        healthy = SimpleNamespace(returncode=0, stdout='healthy\n', stderr='')
+        operational = SimpleNamespace(returncode=1, stdout='', stderr='permission denied')
+        for diagnostic in ('Error: no such container', 'Error: no such object'):
+            with self.subTest(diagnostic=diagnostic):
+                missing = SimpleNamespace(returncode=1, stdout='', stderr=diagnostic)
+                with patch.object(provider_manage, 'service',
+                                  side_effect=[None, None, missing, healthy]), \
+                        patch.object(provider_manage.time, 'sleep'):
+                    provider_manage.restart()
+        with patch.object(provider_manage, 'service',
+                          side_effect=[None, None, operational]), \
+                patch.object(provider_manage.time, 'sleep'):
+            with self.assertRaisesRegex(RuntimeError, 'permission denied'):
+                provider_manage.restart()
+
     def test_shared_quota_command_retains_the_remote_inference_endpoint(self):
         endpoint = '10.0.1.10:8000'
         state = dict(vllm=True, vllm_endpoint=endpoint, openai_secret='', anthropic_secret='')

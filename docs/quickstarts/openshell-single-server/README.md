@@ -14,6 +14,10 @@ recorded AWS evidence, and enforcement limits.
 
 Connect entry points accept an optional remote command after the sandbox name.
 For example, use `connect.sh --name opencode-dev bash` for a simple Bash session.
+Sandbox names must be simple identifiers (letters, digits and `-`, starting with
+a letter or digit, at most 19 characters), and `OPENSHELL_GATEWAY_NAME` must
+match `[A-Za-z0-9][A-Za-z0-9_-]*`; the entry points and the shared SSH helpers
+reject any other value before connecting.
 
 Praxis model routing is optional and experimental for OpenCode and
 [OpenClaw bounded tasks](../openshell-praxis/openclaw.md). Follow the [Praxis installation walkthrough](../openshell-praxis/install.md)

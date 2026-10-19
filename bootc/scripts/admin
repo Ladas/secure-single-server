@@ -1,7 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
+require_trusted_root() {
+  local path owner group mode mode_number
+  for path in /usr/share/secure-single-server /usr/share /usr; do
+    if [[ ! -d "${path}" || -L "${path}" ]]; then
+      printf 'error: trusted deployment path is invalid: %s\n' "${path}" >&2
+      exit 1
+    fi
+    read -r owner group mode < <(stat -Lc '%u %g %a' "${path}")
+    if [[ "${owner}" != 0 || "${group}" != 0 ]]; then
+      printf 'error: trusted deployment path is not root-owned: %s\n' "${path}" >&2
+      exit 1
+    fi
+    mode_number=$((8#${mode}))
+    if (( (mode_number & 8#22) != 0 )); then
+      printf 'error: trusted deployment path is writable by group or others: %s\n' "${path}" >&2
+      exit 1
+    fi
+  done
+}
+require_trusted_root
+
 # shellcheck disable=SC1091
 source /usr/share/secure-single-server/bootc/scripts/common
+
 # Root's home or a private administrator checkout may be unreadable to service users.
 cd /
 case "${1:-help}" in
@@ -16,7 +38,7 @@ Usage (run as root except help):
   sss-bootc activate OPENAI_SECRET ANTHROPIC_SECRET
   sss-bootc openshell ARGS...                    CLI as openshell-svc
   sss-bootc harness template sync               Synchronize workload catalog
-  sss-bootc harness create|connect|queue|collect|run ARGS...
+  sss-bootc harness create|connect|queue|collect|watch|run ARGS...
                                                   Selected harness scripts
 Activation uses the memory quota profile. No provider credentials enter the OS image.
 EOF
@@ -110,21 +132,24 @@ EOF
       exit 0
     fi
     case "${action}" in
-      create|connect|queue|collect|run) ;;
-      *) die 'expected create, connect, queue, collect or run' ;;
+      create|connect|queue|collect|watch|run) ;;
+      *) die 'expected create, connect, queue, collect, watch or run' ;;
     esac
     if [[ "${action}" == run && "${harness}" != openclaw ]]; then
       die 'harness run supports OpenClaw only'
     fi
-    if [[ "${action}" == queue || "${action}" == collect ]] && [[ "${harness}" != opencode ]]; then
+    if [[ "${action}" == queue || "${action}" == collect || "${action}" == watch ]] &&
+       [[ "${harness}" != opencode ]]; then
       die "harness ${action} supports OpenCode only"
     fi
     shift 2
     backend="$(inference_backend)"
     case "${action}" in
-      queue|collect) script="${ROOT}/openshell/harnesses/${harness}/pr-queue/${action}.sh" ;;
+      queue|collect|watch) script="${ROOT}/openshell/harnesses/${harness}/pr-queue/${action}.sh" ;;
       *) script="${ROOT}/openshell/harnesses/${harness}/${action}.sh" ;;
     esac
+    [[ -f "${script}" && -x "${script}" ]] ||
+      die "harness ${action} script is missing or not executable: ${script}"
     if [[ "${action}" == create ]]; then
       as_openshell env OPENSHELL_BOOTC_BACKEND="${backend}" \
         "${script}" "$@"

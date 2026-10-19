@@ -59,20 +59,33 @@ def updated_config(template, installed, previous, selected, *, legacy=False, ove
     return None if previous == selected else configured(selected)
 
 
-def service(*args, **kwargs):
+def service(*args, check=True, **kwargs):
     return subprocess.run(["bash", "-c", 'source "$1"; shift; as_service "$@"', "providers",
-                           str(ROOT / "scripts/common/lib.sh"), *args], check=True, **kwargs)
+                           str(ROOT / "scripts/common/lib.sh"), *args], check=check, **kwargs)
 
 
 def restart():
     service("systemctl", "--user", "daemon-reload")
     service("systemctl", "--user", "restart", "praxis.service")
-    for _ in range(90):
-        status = service("podman", "inspect", "praxis-shared-gateway", "--format",
-                         '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}',
-                         capture_output=True, text=True).stdout.strip()
-        if status == "healthy":
-            return
+    # Loading a changed catalog and secrets can take minutes on a small or busy
+    # host, so allow the same window as the unit's start timeout instead of
+    # aborting a valid change after 90 seconds.
+    for _ in range(300):
+        # The quadlet recreates the container during the restart, so podman can
+        # briefly report that it does not exist. Treat that as "not healthy yet"
+        # instead of aborting an otherwise valid provider change.
+        inspection = service("podman", "inspect", "praxis-shared-gateway", "--format",
+                             '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}',
+                             capture_output=True, text=True, check=False)
+        if inspection.returncode == 0:
+            if inspection.stdout.strip() == "healthy":
+                return
+        else:
+            diagnostic = (inspection.stderr or inspection.stdout).strip()
+            if not any(message in diagnostic.lower()
+                       for message in ("no such container", "no such object")):
+                raise RuntimeError(
+                    "Could not inspect Praxis after configuration change: " + diagnostic)
         time.sleep(1)
     raise RuntimeError("Praxis did not become healthy after configuration change")
 

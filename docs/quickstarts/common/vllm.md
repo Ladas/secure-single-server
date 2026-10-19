@@ -143,7 +143,11 @@ sudo scripts/vllm/prepare-gpu
 sudo systemctl reboot
 ```
 
-Reconnect and run `cd ~/secure-single-server-deploy`. Select **one model**:
+The reboot is mandatory. If the running kernel is older than the one the
+enabled repositories carry, the script installs the matched newer kernel and
+headers and reports that the module targets a newer kernel instead of running
+`nvidia-smi`; the reboot boots that kernel. Reconnect and run
+`cd ~/secure-single-server-deploy`. Select **one model**:
 
 ```console
 VLLM_MODEL=qwen3-8b

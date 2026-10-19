@@ -34,7 +34,7 @@ inference_endpoint() {
 
 praxis_reconcile() (
   trap 'printf "Praxis reconciliation failed at line %s\n" "${LINENO}" >&2' ERR
-  local backend endpoint openai_secret anthropic_secret extra tmp unit
+  local backend endpoint openai_secret anthropic_secret extra tmp managed_unit managed_regex
   require_root
   cd /
   [[ "$(uname -m)" == x86_64 ]] || die 'bootc currently targets x86_64 only'
@@ -77,12 +77,24 @@ praxis_reconcile() (
   mv "${tmp}/praxis-reconciled.container" "${tmp}/praxis.container"
 
   unit="/etc/containers/systemd/users/$(service_uid)"
+  install -d -o root -g "$(service_gid)" -m 0750 "${unit}"
+  chown root:"$(service_gid)" "${unit}"
+  chmod 0750 "${unit}"
   install -o root -g "$(service_gid)" -m 0640 "${tmp}/praxis.yaml" /etc/praxis/shared-gateway.yaml
-  install -m 0644 "${tmp}/praxis.container" "${unit}/praxis.container"
-  install -m 0644 "${ROOT}/configs/common/quadlet/praxis.network" "${unit}/praxis.network"
-  semanage fcontext -a -t container_file_t "$(selinux_path_regex /etc/praxis/shared-gateway.yaml)" 2>/dev/null || \
-    semanage fcontext -m -t container_file_t "$(selinux_path_regex /etc/praxis/shared-gateway.yaml)"
+  install -o root -g "$(service_gid)" -m 0640 "${tmp}/praxis.container" "${unit}/praxis.container"
+  install -o root -g "$(service_gid)" -m 0640 "${ROOT}/configs/common/quadlet/praxis.network" "${unit}/praxis.network"
+  managed_regex="$(selinux_path_regex /etc/praxis/shared-gateway.yaml)"
+  if ! semanage fcontext -m -t container_file_t "${managed_regex}"; then
+    semanage fcontext -a -t container_file_t "${managed_regex}"
+  fi
   restorecon -F /etc/praxis/shared-gateway.yaml
+  for managed_unit in "${unit}/praxis.container" "${unit}/praxis.network"; do
+    managed_regex="$(selinux_path_regex "${managed_unit}")"
+    if ! semanage fcontext -m -t container_file_t "${managed_regex}"; then
+      semanage fcontext -a -t container_file_t "${managed_regex}"
+    fi
+    restorecon -F "${managed_unit}"
+  done
   as_service systemctl --user daemon-reload
   as_service systemctl --user restart praxis.service
   for ((attempt=0; attempt<60; attempt++)); do

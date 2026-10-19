@@ -262,6 +262,33 @@ turn from waiting for OpenCode's own tool prompt, and closing stdin prevents
 `opencode run` from waiting for terminal input. These choices do not expand the
 boundary: OpenShell still enforces the filesystem, process, and network policy.
 
+### GitHub CLI credential decision (issue #57)
+
+Keep authenticated `gh` on the operator's workstation, after human review. Do
+not add it to the sandbox image or inject a GitHub token into the sandbox for
+this workflow. The alternatives considered are:
+
+| Option | Benefit | Credential and policy tradeoff | Decision |
+| --- | --- | --- | --- |
+| Ship unauthenticated `gh` in the sandbox | Some CLI convenience for public data | Adds an image dependency; many PR commands require authentication. It does not remove unauthenticated API rate limits, and `gh` is not an allowed network binary in the current policy. | Defer; public HTTPS Git and unauthenticated REST already cover intake. |
+| Inject a scoped read-only token | Authenticated metadata access and higher API rate limits | Repository content and agent tools could read or disclose the token. Read-only scope limits writes, not disclosure or private-data access; a token does not itself grant OpenShell network access. | Reject for this workflow; requires a separate credential-boundary and policy review. |
+| Keep authenticated `gh` outside the sandbox | Natural PR metadata and publication commands | The trusted operator retains credentials and chooses what to publish. | Use the workstation workflow in step 5. |
+
+Do not forward `GH_TOKEN`, `GITHUB_TOKEN`, `gh` authentication configuration, Git
+credential helpers, or SSH credentials into the sandbox. Issue intake remains
+public and unauthenticated; API rate limits are an accepted limitation rather
+than a reason to load a token into the worker.
+
+Issue #57 refers to an earlier `pr-review` proposal and
+`docs/development/review-service.md`; that service and document are not part of
+the current tree. This queue generates patch candidates, and its boundary is
+stricter than the proposed host-side report poster: publication credentials
+belong on the workstation, not the EC2 or bootc host. A future host-side poster
+would need its own reviewed design for token scope, storage, repository and
+operation restrictions, and explicit human approval before posting. Sandbox
+reports and metadata must remain untrusted proposals, never instructions to run
+authenticated commands or automatic authorization to publish.
+
 ## Where this example lives
 
 | Purpose | Path |

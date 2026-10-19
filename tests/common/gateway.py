@@ -8,6 +8,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import shutil
 import ssl
 import subprocess
 import sys
@@ -35,6 +36,18 @@ def run(*args):
     if result.returncode:
         raise RuntimeError(redact(result.stderr or result.stdout))
     return result.stdout.strip()
+
+
+def bind(source, target):
+    """Read-only bind mount with a shared SELinux label.
+
+    Rootless Podman on an SELinux-enforcing host (RHEL/Fedora) cannot read a
+    user_home_t/user_tmp_t bind mount; relabeling to container_file_t matches the
+    deployment, which labels /etc/praxis files via semanage. The ":z" option is a
+    no-op on engines and hosts without SELinux.
+    """
+    mode = "ro,Z"
+    return ["--volume", f"{source}:{target}:{mode}"]
 
 
 def yaml_file(path):
@@ -118,7 +131,9 @@ class Gateway:
             raise
 
     def fixture_command(self):
-        return ["--mount", f"type=bind,source={ROOT}/tests/common/provider.py,target=/provider.py,readonly",
+        provider = self.work / "provider.py"
+        shutil.copyfile(ROOT / "tests/common/provider.py", provider)
+        return [*bind(provider, "/provider.py"),
                 MOCK_IMAGE, "python3", "/provider.py", "--control-host", "0.0.0.0"]
 
     def start(self):
@@ -192,21 +207,32 @@ class Gateway:
                      "-e", "OPENAI_API_KEY=synthetic-openai", "-e", "ANTHROPIC_API_KEY=synthetic-anthropic"]
         if Path(ENGINE).name == "podman":
             self.arguments += ["--userns", "keep-id:uid=1001,gid=1001"]
+        staging_root = self.work / "staged" / uuid.uuid4().hex
         for destination, source in files.items():
             if source.is_relative_to(self.work):
-                source.chmod(0o644)
-            self.arguments += ["--mount", f"type=bind,source={source},target=/etc/praxis/{destination},readonly"]
+                # Subclasses may rewrite work-dir files in boot(); mount them live.
+                mount_source = source
+            else:
+                # Stage repo files so the mount can be labeled without relabeling the checkout.
+                mount_source = staging_root / destination
+                mount_source.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, mount_source)
+            mount_source.chmod(0o644)
+            self.arguments += bind(mount_source, f"/etc/praxis/{destination}")
         if self.profile == "valkey":
             run(ENGINE, "volume", "create", self.name)
             acl = self.work / "users.acl"
             acl.write_text((ROOT / "configs/common/valkey/users.acl.example").read_text().replace(
                 "SHA256_PASSWORD", "69d6dc9618d24d693cad07557702696090d0f575d9c0868384b8001fd1252358"))
             acl.chmod(0o644)
+            vkconf = self.work / "valkey.conf"
+            shutil.copyfile(ROOT / "configs/common/valkey/valkey.conf", vkconf)
+            vkconf.chmod(0o644)
             vk_args = [ENGINE, "run", "--detach", "--name", self.name + "-valkey", "--network", self.name,
                        "--network-alias", "praxis-valkey", "--user", "999:999", "--read-only", "--cap-drop", "all",
                        "--security-opt", "no-new-privileges", "-v", self.name + ":/data",
-                       "--mount", f"type=bind,source={acl},target=/run/secrets/users.acl,readonly",
-                       "--mount", f"type=bind,source={ROOT}/configs/common/valkey/valkey.conf,target=/etc/valkey.conf,readonly"]
+                       *bind(acl, "/run/secrets/users.acl"),
+                       *bind(vkconf, "/etc/valkey.conf")]
             if Path(ENGINE).name == "podman":
                 vk_args += ["--userns", "keep-id:uid=999,gid=999"]
             run(*vk_args, VALKEY_IMAGE, "valkey-server", "/etc/valkey.conf")

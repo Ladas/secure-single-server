@@ -113,7 +113,9 @@ Additional review checks:
 - All 16 standalone/rendered integrated policy files passed the exact pinned CLI
   parser in a network-disabled container. Numeric ports now survive rendering.
 - Five build tests, three harness behavioral tests, 33 existing remote/AWS tests,
-  shared-gateway static checks, ShellCheck and OpenShell workflow actionlint passed.
+  shared-gateway static checks and ShellCheck passed. The workflows were also
+  reviewed with a locally installed `actionlint`; that review is manual today
+  because no CI job runs it yet.
 - HTTP 200, 401, 403 and 500 all passed the probe's reachability regression, with
   four requests recorded by the local test server. HTTP errors are not denials.
 - Native mutable-RHEL lifecycle: install Praxis with dummy secrets, install the

@@ -117,7 +117,7 @@ jobs:
       - name: Install policy parser
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-yaml
+          sudo apt-get install -y python3-yaml ripgrep
           # Hosted runners already provide Node. Avoid downloading a second
           # distribution copy before the actual regression checks can run.
           if ! command -v node >/dev/null; then

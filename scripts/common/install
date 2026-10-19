@@ -58,10 +58,27 @@ Options:
   --vllm                            Also route /vllm to the co-located vLLM service.
   --vllm-endpoint RFC1918_IP:PORT   Route /vllm to a separate private vLLM server.
   --replace                          Replace a same-profile managed install.
+
+Values may begin with --, except for an exact match of another installer option,
+which is rejected as a likely missing value.
 EOF
 }
 
 while (( "$#" )); do
+  # Reject a trailing value-taking option with a clear message before shifting.
+  case "$1" in
+    --owner|--scenario|--tls-cert|--tls-key|--jwt-public-key|--profile|--praxis-image|--valkey-image|--openai-secret|--anthropic-secret|--judge-secret|--valkey-url-secret|--valkey-acl-secret|--judge-model|--weak-model|--strong-model)
+      [[ "$#" -ge 2 && -n "$2" ]] ||
+        { usage >&2; die "missing value for $1"; }
+      if [[ "$2" == --* ]]; then
+        case "$2" in
+          --owner|--scenario|--tls-cert|--tls-key|--jwt-public-key|--profile|--praxis-image|--valkey-image|--openai-secret|--anthropic-secret|--judge-secret|--valkey-url-secret|--valkey-acl-secret|--judge-model|--weak-model|--strong-model|--development-fedora|--providers|--vllm|--vllm-endpoint|--prepare|--replace)
+            { usage >&2; die "missing value for $1"; }
+            ;;
+        esac
+      fi
+      ;;
+  esac
   case "$1" in
     --owner) openshell_owner="${2:-}"; shift 2 ;;
     --scenario) scenario="${2:-}"; shift 2 ;;

@@ -12,10 +12,17 @@ an optional, separately installed model gateway. Review the
 
 Use a dedicated RHEL 9 x86_64 host. For first qualification, use a disposable
 instance before changing a long-lived server. Install Git, Podman, Python 3,
-OpenSSH clients, curl, and the SELinux management tools:
+OpenSSH clients, curl, and the SELinux management tools. RHEL 9 does not
+package `ripgrep`, so install the pinned static binary used by the image:
 
 ```bash
 sudo dnf install -y git podman python3 policycoreutils openssh-clients curl
+rg_version=14.1.1
+rg_sha256=4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+curl -fsSL "https://github.com/BurntSushi/ripgrep/releases/download/${rg_version}/ripgrep-${rg_version}-x86_64-unknown-linux-musl.tar.gz" -o /tmp/rg.tar.gz
+printf '%s  /tmp/rg.tar.gz\n' "${rg_sha256}" | sha256sum -c - &&
+  tar -xzf /tmp/rg.tar.gz -C /tmp &&
+  sudo install -m 0755 "/tmp/ripgrep-${rg_version}-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
 ```
 
 Clone the reviewed repository to a durable, service-readable location, review
