@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -611,6 +612,9 @@ if args[:2] == ["sandbox", "list"]:
                     self.assertFalse((self.work / "capture").exists())
 
 
+# The UBI9 static lane runs this suite in a container without git; the sync
+# script itself targets an operator workstation, which always has it.
+@unittest.skipUnless(shutil.which("git"), "git is required")
 class SyncBranchTest(unittest.TestCase):
     def test_sync_transfers_every_diff_entry(self):
         # sync-branch.sh feeds the git diff to its read loop through a
