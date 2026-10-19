@@ -62,9 +62,14 @@ os_run() {
     PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     XDG_RUNTIME_DIR=/run/user/"$uid" \
     DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$uid"/bus \
+    OPENSHELL_BIN="${OPENSHELL_BIN:-/usr/local/bin/openshell}" \
     "$@"
 }
 ```
+
+The harness scripts look for the OpenShell CLI at `/usr/local/bin/openshell`
+by default. Export `OPENSHELL_BIN` before using `os_run` when the CLI lives
+elsewhere — on bootc hosts, for example, it is `/usr/bin/openshell`.
 
 ## 3. Create and connect the harness
 

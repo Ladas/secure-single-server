@@ -1,5 +1,6 @@
 """Quota edits preserve providers, authentication, and managed upgrade state."""
 import copy
+import functools
 import io
 import json
 import os
@@ -29,13 +30,28 @@ def template(scenario="all-in-one"):
         "ruby", "-ryaml", "-rjson", "-e", "puts YAML.load_file(ARGV[0]).to_json", str(ROOT / name)]))
 
 
+# The shipped capacity is a tuning knob, and the shapes do not agree: all-in-one
+# was raised to 10M for the review pilots while remote-gateway stayed at 1M. So
+# derive each scenario's baseline instead of pinning it, and override to a value
+# that cannot collide with either -- when baseline and override are equal,
+# "overridden" and "untouched" look alike and the assertions stop discriminating.
+@functools.lru_cache(maxsize=None)
+def baseline(scenario="all-in-one"):
+    return quota_config.rules(provider_config.render(
+        template(scenario), vllm=True, openai=True, anthropic=True))["vllm-openai-rolling-day"]["capacity"]
+
+
+BASELINE = baseline()
+OVERRIDE = max(baseline("all-in-one"), baseline("remote-gateway")) * 2
+
+
 class QuotaManageTest(unittest.TestCase):
     def test_listing_prints_copyable_setting_commands_for_only_selected_settable_rules(self):
         source = provider_config.render(template(), vllm=True, openai=True, anthropic=True)
         report = quota_manage.listing(source, names=["vllm-openai-rolling-day"])
         output = quota_manage.format_listing(report)
         commands = [line.strip() for line in output.splitlines() if "quota-set --rule" in line]
-        self.assertEqual(commands, ["sudo scripts/common/quota-set --rule vllm-openai-rolling-day --capacity 1000000"])
+        self.assertEqual(commands, [f"sudo scripts/common/quota-set --rule vllm-openai-rolling-day --capacity {BASELINE}"])
         self.assertIn("--apply", output)
         self.assertIn("sudo scripts/common/quota-status", output)
         # A custom rule name must remain a single literal shell argument.
@@ -56,7 +72,7 @@ class QuotaManageTest(unittest.TestCase):
         for row in report["rules"]:
             self.assertEqual(row["backend"], "memory")
             self.assertEqual(row["minimum_capacity"], 10000)
-            self.assertEqual(row["capacity"], 1000000)
+            self.assertEqual(row["capacity"], BASELINE)
             self.assertTrue(row["settable"])
         text = quota_manage.format_listing(report)
         self.assertIn("disabled", text)
@@ -91,7 +107,7 @@ class QuotaManageTest(unittest.TestCase):
         self.assertIn("sliding_window", report["rules"][0]["reason"])
         self.assertEqual(report["providers"][0]["settable"], 1)
         with self.assertRaisesRegex(ValueError, "sliding_window"):
-            quota_manage.plan(source, {}, 10000000, names=[rule["name"]])
+            quota_manage.plan(source, {}, OVERRIDE, names=[rule["name"]])
 
     def test_list_cli_cannot_be_combined_with_a_mutation(self):
         args = quota_manage.parse_args(["--list", "--provider", "vllm", "--json"])
@@ -131,12 +147,13 @@ class QuotaManageTest(unittest.TestCase):
             source = provider_config.render(template(scenario), vllm=True, openai=True, anthropic=True)
             before = copy.deepcopy(source)
             for provider, count in (("vllm", 2), ("openai", 1), ("anthropic", 1)):
-                overrides, rows = quota_manage.plan(source, {}, 10000000, provider=provider)
+                overrides, rows = quota_manage.plan(source, {}, OVERRIDE, provider=provider)
                 result = quota_config.apply(source, overrides)
                 self.assertEqual(len(rows), count)
                 for name, rule in quota_config.rules(result).items():
-                    self.assertEqual(rule["capacity"], 10000000 if name in overrides else 1000000)
-                    rule["capacity"] = 1000000
+                    self.assertEqual(rule["capacity"],
+                                     OVERRIDE if name in overrides else baseline(scenario))
+                    rule["capacity"] = baseline(scenario)
                 self.assertEqual(result, before)
             self.assertEqual(source, before)
 
@@ -156,16 +173,16 @@ class QuotaManageTest(unittest.TestCase):
         for kwargs in ({"provider": "openai"}, {"names": ["missing"]},
                        {"names": ["vllm-openai-rolling-day", "missing"]}):
             with self.assertRaises(ValueError):
-                quota_manage.plan(source, {}, 10000000, **kwargs)
+                quota_manage.plan(source, {}, OVERRIDE, **kwargs)
         source["filter_chains"] *= 2
         with self.assertRaisesRegex(ValueError, "unique"):
-            quota_manage.plan(source, {}, 10000000, provider="vllm")
+            quota_manage.plan(source, {}, OVERRIDE, provider="vllm")
 
     def test_provider_add_remove_reenable_retains_only_explicit_quota_overrides(self):
         for scenario in ("all-in-one", "remote-gateway"):
             base = template(scenario)
             state = {"vllm": True, "openai_secret": "", "anthropic_secret": ""}
-            overrides = {"vllm-openai-rolling-day": 10000000, "openai-rolling-day": 2000000}
+            overrides = {"vllm-openai-rolling-day": OVERRIDE, "openai-rolling-day": 2000000}
             config = quota_config.apply(provider_config.render(base, vllm=True, openai=False,
                                                                 anthropic=False), overrides)
             for selected in ({**state, "openai_secret": "key"},
@@ -187,7 +204,7 @@ class QuotaManageTest(unittest.TestCase):
         result = provider_manage.updated_config(base, quota_config.apply(base, overrides), state,
                     {**state, "vllm": True}, legacy=True, overrides=overrides)
         self.assertEqual(quota_config.rules(result)["openai-rolling-day"]["capacity"], 2000000)
-        self.assertEqual(quota_config.rules(result)["vllm-openai-rolling-day"]["capacity"], 1000000)
+        self.assertEqual(quota_config.rules(result)["vllm-openai-rolling-day"]["capacity"], BASELINE)
 
     def test_preview_and_unchanged_apply_never_write_or_restart(self):
         source = provider_config.render(template(), vllm=True, openai=False, anthropic=False)
@@ -196,7 +213,7 @@ class QuotaManageTest(unittest.TestCase):
             path = root / "shared-gateway.yaml"
             path.write_text(json.dumps(source))
             original = path.read_bytes()
-            for apply, capacity in ((False, 10000000), (True, 1000000)):
+            for apply, capacity in ((False, OVERRIDE), (True, BASELINE)):
                 with patch.object(quota_manage, "transaction") as tx, redirect_stdout(io.StringIO()):
                     quota_manage.change(root, source, {}, capacity, os.getgid(), provider="vllm", apply=apply)
                     tx.assert_not_called()
@@ -218,11 +235,11 @@ class QuotaManageTest(unittest.TestCase):
                 with patch.object(quota_manage, "transaction", side_effect=tx), redirect_stdout(io.StringIO()):
                     if fail:
                         with self.assertRaisesRegex(RuntimeError, "activation failed"):
-                            quota_manage.change(root, source, {}, 10000000, os.getgid(), provider="vllm", apply=True)
+                            quota_manage.change(root, source, {}, OVERRIDE, os.getgid(), provider="vllm", apply=True)
                         self.assertEqual((path.read_bytes(), manifest.read_bytes()), previous)
                         self.assertFalse((root / "quota-overrides.json").exists())
                     else:
-                        quota_manage.change(root, source, {}, 10000000, os.getgid(), provider="vllm", apply=True)
+                        quota_manage.change(root, source, {}, OVERRIDE, os.getgid(), provider="vllm", apply=True)
                         self.assertEqual(json.loads(path.read_text()), quota_config.apply(source,
                                             json.loads((root / "quota-overrides.json").read_text())))
                         self.assertIn("kept  /etc/praxis/tls.pem", manifest.read_text())
@@ -238,7 +255,7 @@ class QuotaManageTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path, saved = root / "shared-gateway.yaml", root / "quota-overrides.json"
-            saved.write_text('{"vllm-openai-rolling-day": 10000000}')
+            saved.write_text(json.dumps({"vllm-openai-rolling-day": OVERRIDE}))
             for scenario in ("all-in-one", "remote-gateway"):
                 for cloud in (False, True):
                     source = provider_config.render(template(scenario), vllm=True, openai=cloud, anthropic=cloud)
@@ -247,11 +264,13 @@ class QuotaManageTest(unittest.TestCase):
                             patch.dict(sys.modules, {"yaml": SimpleNamespace(safe_load=json.loads)}):
                         quota_config.main()
                     result = json.loads(path.read_text())
-                    self.assertEqual(quota_config.rules(result)["vllm-openai-rolling-day"]["capacity"], 10000000)
-                    self.assertEqual(quota_config.rules(result)["vllm-anthropic-rolling-day"]["capacity"], 1000000)
+                    self.assertEqual(quota_config.rules(result)["vllm-openai-rolling-day"]["capacity"], OVERRIDE)
+                    self.assertEqual(quota_config.rules(result)["vllm-anthropic-rolling-day"]["capacity"],
+                                     baseline(scenario))
                     if cloud:
-                        self.assertEqual(quota_config.rules(result)["openai-rolling-day"]["capacity"], 1000000)
-                    self.assertEqual(saved.read_text(), '{"vllm-openai-rolling-day": 10000000}')
+                        self.assertEqual(quota_config.rules(result)["openai-rolling-day"]["capacity"],
+                                         baseline(scenario))
+                    self.assertEqual(saved.read_text(), json.dumps({"vllm-openai-rolling-day": OVERRIDE}))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -122,6 +123,84 @@ if args[:2] == ["sandbox", "list"]:
             script.write_text(source)
             script.chmod(0o755)
 
+    def test_review_entry_point_pushes_contract_and_task(self):
+        # The fake ssh appends every remote command and stdin payload.
+        (self.work / "capture.sshlog").unlink(missing_ok=True)
+        (self.work / "capture.stdin").unlink(missing_ok=True)
+        script = self.work / "ssh"
+        script.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CAPTURE.sshlog"\ncat >> "$CAPTURE.stdin"\n')
+        script.chmod(0o755)
+        args = ["bash", str(ROOT / "openshell/harnesses/opencode/review.sh"),
+                "--name", "test", "--repo", "owner/repo", "--pr", "53", "--pr", "78",
+                "--timeout", "60"]
+        result = subprocess.run(args, env=self.env, capture_output=True, text=True,
+                                timeout=15, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("No such file or directory", result.stderr)
+        log = (self.work / "capture.sshlog").read_text()
+        self.assertIn("rm -rf ~/review && mkdir -p ~/review ~/reports", log)
+        self.assertIn("cat > ~/AGENTS.md", log)
+        self.assertIn("cat > ~/review/task.md", log)
+        # The turn still runs from the sandbox home with its own stdin closed,
+        # but is now wrapped in a sandbox-side deadline so a host-side timeout
+        # cannot leave a zombie turn holding gateway reservations.
+        self.assertIn("cd ~ && ", log)
+        self.assertIn('opencode run --format json "$(cat ~/review/task.md)" </dev/null', log)
+        self.assertIn("timeout -k 30 60 opencode run", log)
+        # Only the reports for the PRs under review are cleared.
+        self.assertIn("rm -f ~/reports/pr-53.md ~/reports/pr-78.md", log)
+        stdin = (self.work / "capture.stdin").read_text()
+        self.assertIn("PR review agent instructions", stdin)
+        self.assertIn("Review pull requests #53,#78 of the GitHub repository owner/repo.", stdin)
+
+    def test_review_turn_stdin_reaches_eof(self):
+        # `opencode run` drains piped stdin to EOF before submitting its argv
+        # prompt. Over harness_ssh (no PTY) that stdin is the SSH channel,
+        # which never EOFs while review.sh runs from a terminal, so the turn
+        # must close stdin itself or it hangs before creating a session.
+        # The fake ssh executes the remote command with stdin passed through,
+        # like real ssh; the fake opencode blocks until stdin EOFs.
+        self.env["HOME"] = str(self.work)
+        for name, source in {
+            "ssh": '#!/bin/sh\nwhile [ $# -gt 1 ]; do shift; done\nexec sh -c "$1"\n',
+            "opencode": '#!/bin/sh\ncat > "$CAPTURE.opencode-stdin"\nprintf "OPENCODE_TURN_DONE\\n"\n',
+        }.items():
+            script = self.work / name
+            script.write_text(source)
+            script.chmod(0o755)
+        read_fd, write_fd = os.pipe()
+        try:
+            args = ["bash", str(ROOT / "openshell/harnesses/opencode/review.sh"),
+                    "--name", "test", "--repo", "owner/repo", "--pr", "53",
+                    "--timeout", "60"]
+            result = subprocess.run(args, env=self.env, capture_output=True, text=True,
+                                    timeout=20, stdin=read_fd)
+        finally:
+            os.close(write_fd)
+            os.close(read_fd)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("OPENCODE_TURN_DONE", result.stdout)
+        self.assertEqual((self.work / "capture.opencode-stdin").read_text(), "")
+
+    def test_review_collect_entry_point_pulls_reports_over_ssh(self):
+        collected = self.work / "collected"
+        script = self.work / "ssh"
+        script.write_text('#!/bin/sh\n'
+                          'mkdir -p "$CAPTURE.reports"\n'
+                          'printf "# PR #53\\n" > "$CAPTURE.reports/pr-53.md"\n'
+                          # BSD tar adds AppleDouble ._member entries on macOS;
+                          # GNU tar in the sandbox never does.
+                          'COPYFILE_DISABLE=1 tar cf - -C "$CAPTURE.reports" .\n')
+        script.chmod(0o755)
+        args = ["bash", str(ROOT / "openshell/harnesses/opencode/review-collect.sh"),
+                "--name", "test", "--dest", str(collected)]
+        result = subprocess.run(args, env=self.env, capture_output=True, text=True,
+                                timeout=15, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = collected / "pr-53.md"
+        self.assertTrue(report.is_file())
+        self.assertIn("# PR #53", report.read_text())
+
     def create(self, harness, profile, integrated=False, success=True, config_dir=None,
                provider=None, model=None):
         # Each invocation must produce fresh evidence, including subtests.
@@ -146,8 +225,13 @@ if args[:2] == ["sandbox", "list"]:
         return result.stderr
 
     def test_every_standalone_create_entry_point_and_profile(self):
-        for harness in ("opencode", "codex", "openclaw"):
-            for profile in ("review", "dev", "automation", "interactive"):
+        profiles = {
+            "opencode": ("review", "dev", "automation", "interactive", "pr-review"),
+            "codex": ("review", "dev", "automation", "interactive"),
+            "openclaw": ("review", "dev", "automation", "interactive"),
+        }
+        for harness, harness_profiles in profiles.items():
+            for profile in harness_profiles:
                 with self.subTest(harness=harness, profile=profile):
                     policy = self.create(harness, profile)
                     source = ROOT / f"openshell/harnesses/{harness}/profiles/{profile}/policy.yaml"
@@ -157,15 +241,19 @@ if args[:2] == ["sandbox", "list"]:
                             self.assertIs(type(endpoint["port"]), int)
 
     def test_integrated_policy_has_numeric_port_and_provider_json_escapes_model(self):
-        for profile in ("review", "dev", "automation", "interactive"):
+        chat = [{"method": "GET", "path": "/v1/models"},
+                {"method": "POST", "path": "/v1/chat/completions"}]
+        for profile in ("review", "dev", "automation", "interactive", "pr-review"):
             policy = self.create("opencode", profile, integrated=True)
             endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
             self.assertIs(type(endpoint["port"]), int)
             self.assertEqual(endpoint["port"], 18080)
             self.assertNotIn("access", endpoint)
-            self.assertEqual([rule["allow"] for rule in endpoint["rules"]],
-                             [{"method": "GET", "path": "/v1/models"},
-                              {"method": "POST", "path": "/v1/chat/completions"}])
+            # pr-review renders the native OpenAI adapter, so its gateway also
+            # admits the Responses surface that adapter speaks.
+            expected_rules = chat + ([{"method": "POST", "path": "/v1/responses"}]
+                                     if profile == "pr-review" else [])
+            self.assertEqual([rule["allow"] for rule in endpoint["rules"]], expected_rules)
             self.assertEqual({b["path"] for b in policy["network_policies"]["praxis_gateway"]["binaries"]},
                              {"/usr/bin/node-26", "/usr/local/bin/opencode"})
             config = json.loads((self.work / "capture.provider").read_text())
@@ -174,6 +262,14 @@ if args[:2] == ["sandbox", "list"]:
             provider = config["provider"]["praxis"]
             self.assertEqual(set(provider["models"]), {model})
             self.assertEqual(provider["options"]["baseURL"], "http://host.openshell.internal:18080/v1")
+            if profile == "pr-review":
+                # Current OpenAI model families reject max_tokens; the native
+                # adapter with forceReasoning sends max_completion_tokens.
+                self.assertEqual(provider["npm"], "@ai-sdk/openai")
+                self.assertEqual(provider["models"][model]["options"], {"forceReasoning": True})
+            else:
+                self.assertEqual(provider["npm"], "@ai-sdk/openai-compatible")
+                self.assertNotIn("options", provider["models"][model])
 
     def test_explicit_model_replaces_environment_default(self):
         self.create("opencode", "pr-queue", integrated=True, model="approved/model.v2")
@@ -206,6 +302,9 @@ if args[:2] == ["sandbox", "list"]:
         model = config["provider"]["praxis"]["models"][self.env["OPENSHELL_MODEL_ID"]]
         self.assertTrue(model["reasoning"])
         self.assertEqual(model["interleaved"], {"field": "reasoning"})
+        # The vLLM path keeps the classic adapter and parameter surface.
+        self.assertEqual(config["provider"]["praxis"]["npm"], "@ai-sdk/openai-compatible")
+        self.assertNotIn("options", model)
         endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
         self.assertEqual(endpoint["host"], "host.openshell.internal")
         self.assertEqual(endpoint["port"], 18080)
@@ -511,6 +610,65 @@ if args[:2] == ["sandbox", "list"]:
                     self.assertNotIn("readonly variable", result.stderr)
                     self.assertNotIn("unbound variable", result.stderr)
                     self.assertFalse((self.work / "capture").exists())
+
+
+# The UBI9 static lane runs this suite in a container without git; the sync
+# script itself targets an operator workstation, which always has it.
+@unittest.skipUnless(shutil.which("git"), "git is required")
+class SyncBranchTest(unittest.TestCase):
+    def test_sync_transfers_every_diff_entry(self):
+        # sync-branch.sh feeds the git diff to its read loop through a
+        # process substitution; ssh and scp inside the loop inherit that
+        # stdin and drain the stream, so the loop saw EOF after the first
+        # entry and printed "sync complete" having synced 1 of N files.
+        # The fake ssh drains stdin like the real one; the fake scp records
+        # the local path it was asked to transfer.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+
+            def git(*args):
+                subprocess.run(["git", "-C", repo, *args], check=True,
+                               capture_output=True)
+
+            git("init", "-b", "main")
+            git("config", "user.email", "sync@example.com")
+            git("config", "user.name", "sync test")
+            git("config", "commit.gpgsign", "false")
+            (repo / "keep.txt").write_text("base\n")
+            git("add", ".")
+            git("commit", "-m", "base")
+            git("checkout", "-b", "feature")
+            for name in ("alpha.txt", "beta.txt", "gamma.txt"):
+                (repo / name).write_text(name + "\n")
+            git("mv", "keep.txt", "moved.txt")
+            git("add", ".")
+            git("commit", "-m", "changes")
+            shims = root / "shims"
+            shims.mkdir()
+            log = root / "scp.log"
+            for name, source in {
+                "ssh": '#!/bin/sh\n[ "$1" = "-n" ] && exec </dev/null\ncat > /dev/null\nexit 0\n',
+                "scp": '#!/bin/sh\nwhile [ $# -gt 2 ]; do shift; done\nprintf "%s\\n" "$1" >> "$SCP_LOG"\nexit 0\n',
+            }.items():
+                script = shims / name
+                script.write_text(source)
+                script.chmod(0o755)
+            env = dict(os.environ, PATH=f"{shims}:{os.environ['PATH']}",
+                       SCP_LOG=str(log))
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/dev/sync-branch.sh"),
+                 "--host", "user@fake", "--base", "main"],
+                cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("sync complete", result.stdout)
+            transferred = sorted(log.read_text().split())
+            # Sources are passed as ./PATH so a leading-dash filename cannot be
+            # parsed as an scp option.
+            self.assertEqual(
+                transferred,
+                ["./alpha.txt", "./beta.txt", "./gamma.txt", "./moved.txt"])
 
 
 if __name__ == "__main__":

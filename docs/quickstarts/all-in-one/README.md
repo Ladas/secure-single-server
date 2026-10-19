@@ -178,7 +178,7 @@ Each protocol chain has independent limiter instances:
 | Control | Current configuration | Restart behavior |
 | --- | --- | --- |
 | `rate_limit` | Global 2 requests/second with burst 10, per chain | Resets with Praxis |
-| `token_rate_limit` | One catch-all rolling 24-hour allowance of 1,000,000 tokens, reserving 10,000 per request, per chain | Resets in memory; survives only in the Valkey profile |
+| `token_rate_limit` | One catch-all rolling 24-hour allowance of 10,000,000 tokens (1,000,000 in the Valkey profile), reserving 10,000 per request, per chain | Resets in memory; survives only in the Valkey profile |
 | `token_count` | OpenAI or Anthropic response parser | Reconciles reported use; missing usage leaves the reservation charged |
 
 The OpenAI-compatible and Anthropic chains have separate allowances even when

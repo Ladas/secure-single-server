@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "praxis": {
+      "npm": "@ai-sdk/openai",
+      "name": "Praxis (sandboxed)",
+      "options": {"baseURL": "http://host.openshell.internal:@@PRAXIS_PORT@@/v1", "apiKey": "local-placeholder"},
+      "models": {"@@MODEL_ID@@": {"name": "Administrator-approved model", "options": {"forceReasoning": true}}}
+    }
+  }
+}

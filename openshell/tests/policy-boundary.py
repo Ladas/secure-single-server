@@ -99,7 +99,7 @@ def check_mutated_policy(prover, boundary, directory):
 def main():
     prover = os.environ.get("OPENSHELL_PROVER_BIN", "openshell-prover")
     policies = discover_policies()
-    assert len(policies) == 20, f"expected 20 shipped policies, found {len(policies)}"
+    assert len(policies) == 22, f"expected 22 shipped policies, found {len(policies)}"
     with tempfile.TemporaryDirectory() as temporary_directory:
         directory = Path(temporary_directory)
         boundaries = {}

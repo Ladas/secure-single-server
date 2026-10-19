@@ -24,6 +24,11 @@ static `rg`, and harness creation copies it into the sandbox's `~/.local/bin` so
 OpenCode's built-in `glob` and `grep` tools work without changing the upstream
 image or policy.
 
+The `pr-review` profile adds delegated PR review: `review.sh` sends a
+batch of PRs as one bounded agent turn and `review-collect.sh` retrieves the
+report artifacts. See the [review service
+guide](../../../docs/development/review-service.md).
+
 The experimental `pr-queue` profile keeps its queue runner, collector, and agent
 instructions in [pr-queue/](pr-queue/). The user-facing entry point is the
 [PR-candidate example](../../../docs/examples/opencode-pr-queue/README.md). The

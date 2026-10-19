@@ -38,7 +38,7 @@ Usage (run as root except help):
   sss-bootc activate OPENAI_SECRET ANTHROPIC_SECRET
   sss-bootc openshell ARGS...                    CLI as openshell-svc
   sss-bootc harness template sync               Synchronize workload catalog
-  sss-bootc harness create|connect|queue|collect|watch|run ARGS...
+  sss-bootc harness create|connect|run|review|review-collect|queue|collect|watch ARGS...
                                                   Selected harness scripts
 Activation uses the memory quota profile. No provider credentials enter the OS image.
 EOF
@@ -132,13 +132,14 @@ EOF
       exit 0
     fi
     case "${action}" in
-      create|connect|queue|collect|watch|run) ;;
-      *) die 'expected create, connect, queue, collect, watch or run' ;;
+      create|connect|review|review-collect|queue|collect|watch|run) ;;
+      *) die 'expected create, connect, run, review, review-collect, queue, collect or watch' ;;
     esac
     if [[ "${action}" == run && "${harness}" != openclaw ]]; then
       die 'harness run supports OpenClaw only'
     fi
-    if [[ "${action}" == queue || "${action}" == collect || "${action}" == watch ]] &&
+    if [[ "${action}" == review || "${action}" == review-collect ||
+          "${action}" == queue || "${action}" == collect || "${action}" == watch ]] &&
        [[ "${harness}" != opencode ]]; then
       die "harness ${action} supports OpenCode only"
     fi
