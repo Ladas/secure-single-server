@@ -11,7 +11,7 @@ repository; the guides below are separated by the question they answer.
    before choosing a deployment. It explains what each layer protects, what it
    does not protect, and which evidence is accepted.
 2. **Deploy a sandboxed harness.** Use
-   [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.3/docs) through the
+   [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.4/docs) through the
    [manual container guide](quickstarts/openshell-single-server/manual.md) or
    [bootc deployment guide](quickstarts/openshell-single-server/bootc.md) to deploy [OpenCode](https://github.com/anomalyco/opencode) or
    [OpenClaw](https://github.com/openclaw/openclaw) on one trusted RHEL host.
@@ -80,8 +80,8 @@ harness README lists its profiles and entry points.
 
 - [OpenCode](https://github.com/anomalyco/opencode)
 - [OpenClaw](https://github.com/openclaw/openclaw)
-- [OpenShell documentation](https://github.com/NVIDIA/OpenShell/tree/v0.1.3/docs)
-  and [sandbox overview](https://github.com/NVIDIA/OpenShell/blob/v0.1.3/docs/how-it-works/sandboxes/overview.mdx)
+- [OpenShell documentation](https://github.com/NVIDIA/OpenShell/tree/v0.1.4/docs)
+  and [sandbox overview](https://github.com/NVIDIA/OpenShell/blob/v0.1.4/docs/how-it-works/sandboxes/overview.mdx)
 - [Praxis framework](https://github.com/praxis/praxis)
 - [Praxis experimental gateway](https://github.com/praxis-proxy/experimental)
 - [Red Hat bootc](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_image_mode_for_rhel_to_build_deploy_and_manage_operating_systems/index)

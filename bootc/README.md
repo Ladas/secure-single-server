@@ -171,9 +171,10 @@ also support the dedicated [Praxis integration workflow](../docs/quickstarts/ope
 using `--config`, which rejects direct provider bindings. Local and remote vLLM
 backend selection chooses the catalog's integrated configuration automatically.
 OpenClaw's qualified model tools are read/write; automatic command execution
-remains disabled. See the [real-model qualification](../docs/testing/upgrade-0.1.3-e2e.md)
-for the cloud tests and the separate historical Qwen scope. A boot check alone
-does not prove a model task or its access policy works.
+remains disabled. See the [0.1.4 pin review](../docs/testing/upgrade-0.1.4.md)
+and the historical [0.1.3 real-model qualification](../docs/testing/upgrade-0.1.3-e2e.md).
+A boot check alone does not prove a model task or its access policy works, and
+the 0.1.4 pins still require opt-in real-model qualification.
 
 Start with `dev` for the CLI smoke test. OpenCode currently attempts to write
 runtime state under `/sandbox/.local/share`, which the shipped read-only

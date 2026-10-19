@@ -2,7 +2,7 @@
 
 Secure single-server AI harness runs [OpenCode](https://github.com/anomalyco/opencode)
 and [OpenClaw](https://github.com/openclaw/openclaw) on one dedicated RHEL 9
-x86_64 host. [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.3/docs)
+x86_64 host. [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.4/docs)
 enforces the execution boundary. For the integrated harness paths,
 [Praxis](https://github.com/praxis/praxis) routes model traffic, while
 [Red Hat bootc](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_image_mode_for_rhel_to_build_deploy_and_manage_operating_systems/index)

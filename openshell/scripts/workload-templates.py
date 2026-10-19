@@ -101,7 +101,7 @@ def workload(item):
     labels = {'managed-by': 'secure-single-server', **{key: item[key] for key in ('harness', 'profile', 'backend')}}
     result = {'image': image, 'resources': {'cpu': cpu, 'memory': memory},
               'environment': item.get('environment', {}), 'labels': labels}
-    # v0.1.3 validates templates with the sandbox's 19-character name limit.
+    # v0.1.4 validates templates with the sandbox's 19-character name limit.
     # Human-readable identity lives in labels and sync's catalog/name output.
     digest = hashlib.sha256(json.dumps(result, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     name = 'sss-' + digest[:15]

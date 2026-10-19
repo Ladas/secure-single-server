@@ -112,7 +112,7 @@ sys.stdin.read()
 
     def test_invalid_arguments_never_create(self):
         for h in ('codex','opencode','openclaw'):
-            for args in (('--profile',),('--profile','../dev'),('--unknown','x'),('--config',),('--backend','anthropic')):
+            for args in (('--profile',),('--profile','--prepare'),('--profile','../dev'),('--unknown','x'),('--config',),('--backend','anthropic')):
                 r=self.create(h,*args)
                 self.assertNotEqual(r.returncode,0)
                 self.assertNotIn('unbound variable',r.stderr)
@@ -197,7 +197,7 @@ class ReleaseCliTests(unittest.TestCase):
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
             def pins(checksum):
                 (configs / 'images.env').write_text(
-                    f'OPENSHELL_CLI_VERSION=v0.1.3\nOPENSHELL_CLI_SHA256_AMD64={checksum}\n'
+                    f'OPENSHELL_CLI_VERSION=v0.1.4\nOPENSHELL_CLI_SHA256_AMD64={checksum}\n'
                     f'OPENSHELL_CLI_SHA256_ARM64={checksum}\n')
             for name, body in {
                 'uname': '#!/bin/sh\nif [ "$1" = -s ]; then echo Linux; else echo "$TEST_ARCH"; fi\n',
@@ -214,7 +214,7 @@ class ReleaseCliTests(unittest.TestCase):
                     result = subprocess.run(['bash', str(helper), str(output)], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual((output / 'openshell').read_bytes(), payload)
-                    self.assertIn(f'/v0.1.3/openshell-{target}-unknown-linux-musl.tar.gz', (work / 'download').read_text())
+                    self.assertIn(f'/v0.1.4/openshell-{target}-unknown-linux-musl.tar.gz', (work / 'download').read_text())
                     (output / 'openshell').unlink()
                     pins('0' * 64)
                     result = subprocess.run(['bash', str(helper), str(output)], env=env, capture_output=True, text=True)

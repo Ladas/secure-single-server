@@ -11,9 +11,9 @@ copy the operator's keys to user accounts.
 
 | Combination | Status |
 | --- | --- |
-| OpenClaw + Praxis | Experimental dev profile; [bounded read/write workflow](openclaw.md); [current fixture qualification](../../testing/upgrade-0.1.3.md) |
+| OpenClaw + Praxis | Experimental dev profile; [bounded read/write workflow](openclaw.md); [historical 0.1.3 fixture qualification](../../testing/upgrade-0.1.3.md) |
 | Claude Code + Praxis | Sandbox image and recipe are missing |
-| OpenCode + Praxis dev | Experimental; [model, write and bash fixture qualification](../../testing/upgrade-0.1.3.md); qualify each real host/provider/model task |
+| OpenCode + Praxis dev | Experimental; [historical 0.1.3 model, write and bash fixture qualification](../../testing/upgrade-0.1.3.md); qualify each real host/provider/model task on the current pins |
 | OpenCode + Praxis pr-queue | Experimental [PR-candidate example](../../examples/opencode-pr-queue/README.md); static, schema, and policy-boundary contracts only |
 | OpenCode review | CLI data-directory permission limitation; outside supported recipes |
 

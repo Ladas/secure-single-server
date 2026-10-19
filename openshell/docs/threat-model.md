@@ -17,9 +17,9 @@ without a destination request. It fails closed when the result is inconclusive.
 `landlock.compatibility: best_effort` can degrade filesystem protection. Record
 the actual supervisor/kernel enforcement result; host SELinux Enforcing alone is
 insufficient. The gateway Quadlet disables SELinux labeling to operate its
-Podman socket, so rootless execution, loopback-only management, and the locked
-service account are compensating controls rather than replacements for a
-SELinux container label. No blanket enforcement claim is made for unqualified
+Podman socket, so rootless execution, loopback-only management, the locked
+service account, and `NoNewPrivileges=true` on the gateway container are
+compensating controls rather than replacements for a SELinux container label. No blanket enforcement claim is made for unqualified
 kernel/profile combinations.
 
 `include_workdir` grants policy permissions; it neither mounts a host checkout nor

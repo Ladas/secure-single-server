@@ -50,7 +50,7 @@ gateway_install_config owner "$TEST_TMP/home" "$TEST_TMP" 'example/harness@sha25
             self.assertIn('[openshell.gateway.tls]', config)
             self.assertIn('client_ca_path = "/var/lib/openshell/tls/ca.crt"', config)
             self.assertIn('allow_unauthenticated_users = false', config)
-            # Public v0.1.3 GatewayTlsFileConfig rejects internal TLS fields.
+            # Public v0.1.4 GatewayTlsFileConfig rejects internal TLS fields.
             tls = re.search(r'\[openshell.gateway.tls\]\n(.*?)(?=\n\[|\Z)', config, re.S).group(1)
             fields = set(re.findall(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=', tls, re.M))
             self.assertLessEqual(fields, {'cert_path', 'key_path', 'client_ca_path',
