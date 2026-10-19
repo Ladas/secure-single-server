@@ -246,16 +246,35 @@ class StreamlitSecurityTests(unittest.TestCase):
         self.assertLess(guide.index("Before you start"), guide.index("Run the unsafe version"))
         self.assertIn("OpenAI-compatible endpoint", guide)
         self.assertIn("openshell profile import", guide)
-        self.assertIn("openshell provider create", guide)
+        self.assertIn("--credential OPENAI_API_KEY", guide)
         self.assertIn("POST /v1/chat/completions", guide)
 
     def test_documentation_explains_where_to_run_the_demo(self):
         guide = (ROOT / "docs/examples/streamlit-security/README.md").read_text()
         self.assertIn("AWS is not required", guide)
-        self.assertIn("/usr/share/secure-single-server", guide)
         self.assertIn("/opt/secure-single-server", guide)
         self.assertIn("Landlock ABI 3", guide)
-        self.assertIn("ordinary nested container", guide)
+        self.assertIn("not a supported OpenShell host", guide)
+        self.assertIn("manual.md#4-choose-model-access", guide)
+        self.assertIn("model-access.md#local-openai-compatible-service", guide)
+        self.assertIn("--name streamlit-demo-openai", guide)
+        self.assertIn("--type streamlit-openai-compatible", guide)
+
+    def test_documentation_links_manual_setup_before_demo_commands(self):
+        guide = (ROOT / "docs/examples/streamlit-security/README.md").read_text()
+        setup_link = "../../quickstarts/openshell-single-server/manual.md"
+        self.assertIn(setup_link, guide)
+        self.assertTrue(
+            (ROOT / "docs/examples/streamlit-security" / setup_link).is_file()
+        )
+        self.assertLess(guide.index(setup_link), guide.index("## Run the unsafe version"))
+        self.assertIn("steps 1 and 2", guide)
+        self.assertIn("in that same Bash session", guide)
+        self.assertIn("a new shell will not have the", guide)
+        self.assertIn("does not need a harness or Praxis", guide)
+        self.assertIn("os_run openshell profile import", guide)
+        self.assertIn('bash "$repo/openshell/demos/streamlit-security/run-safe.sh"', guide)
+        self.assertIn("rootless Podman context", guide)
 
     def test_root_readme_introduces_the_example_catalog(self):
         readme = (ROOT / "README.md").read_text()
