@@ -1,0 +1,19 @@
+id: streamlit-openai-compatible
+display_name: Streamlit demo OpenAI-compatible access
+category: inference
+credentials:
+  - name: api_key
+    env_vars: [OPENAI_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+endpoints:
+  - host: inference.internal
+    port: 443
+    path: /v1/chat/completions
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: {method: POST, path: /v1/chat/completions}
+binaries:
+  - /usr/local/bin/python3

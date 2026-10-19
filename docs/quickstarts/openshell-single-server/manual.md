@@ -11,25 +11,42 @@ an optional, separately installed model gateway. Review the
 ## 1. Install OpenShell
 
 Use a dedicated RHEL 9 x86_64 host. For first qualification, use a disposable
-instance before changing a long-lived server. On the host, install Podman,
-Python 3, OpenSSH clients, curl, and the SELinux management tools, then
-transfer or check out the reviewed repository revision. Run from the repository
-root:
+instance before changing a long-lived server. Install Git, Podman, Python 3,
+OpenSSH clients, curl, and the SELinux management tools. RHEL 9 does not
+package `ripgrep`, so install the pinned static binary used by the image:
 
 ```bash
-sudo dnf install -y podman python3 policycoreutils openssh-clients curl
+sudo dnf install -y git podman python3 policycoreutils openssh-clients curl
+rg_version=14.1.1
+rg_sha256=4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+curl -fsSL "https://github.com/BurntSushi/ripgrep/releases/download/${rg_version}/ripgrep-${rg_version}-x86_64-unknown-linux-musl.tar.gz" -o /tmp/rg.tar.gz
+printf '%s  /tmp/rg.tar.gz\n' "${rg_sha256}" | sha256sum -c - &&
+  tar -xzf /tmp/rg.tar.gz -C /tmp &&
+  sudo install -m 0755 "/tmp/ripgrep-${rg_version}-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
+```
+
+Clone the reviewed repository to a durable, service-readable location, review
+the checked-out revision, and run the installer from that directory:
+
+```bash
+sudo install -d -o "$(id -un)" -m 0755 /opt/secure-single-server
+git clone https://github.com/redhat-et/secure-single-server /opt/secure-single-server
+cd /opt/secure-single-server
+repo="$PWD"
 ```
 
 ```bash
-sudo openshell/scripts/install.sh --owner openshell-svc
+sudo ./openshell/scripts/install.sh --owner openshell-svc
 ```
 
 The installer creates the locked `openshell-svc` account, enables lingering so
 the gateway remains available after logout, and starts the loopback-only
 OpenShell gateway with TLS/mTLS for the service operator.
-It pre-pulls every pinned supported harness image; the selected harness is
-chosen when its sandbox is created. If it reports that cgroup delegation needs
-a host reboot, reboot and rerun the same installer.
+It first verifies Landlock ABI 3 or newer, then pre-pulls every pinned supported
+harness image; the selected harness is chosen when its sandbox is created. If
+Landlock is unavailable or too old, installation stops with that kernel
+diagnostic instead of a later `ContainerExited` sandbox failure. If it reports
+that cgroup delegation needs a host reboot, reboot and rerun the same installer.
 
 ## 2. Set up the service-owner shell helper
 
@@ -74,6 +91,13 @@ os_run "$repo/openshell/harnesses/$harness/connect.sh" --name "$harness"-dev
 OpenCode launches its CLI. OpenClaw opens a shell for inspecting the sandbox.
 For OpenClaw model tasks, configure Praxis and use the
 [bounded model and tool workflow](../openshell-praxis/openclaw.md).
+
+To inspect any harness sandbox with a Bash session, pass `bash` as the remote
+command instead of modifying the harness script:
+
+```bash
+os_run "$repo/openshell/harnesses/$harness/connect.sh" --name "$harness"-dev bash
+```
 
 Use `dev` for the initial deployment. Each sandbox defaults to two CPUs, 4 GiB
 of memory, and 2048 PIDs. See the [qualification reference](reference.md) for
@@ -135,8 +159,9 @@ The attached provider supplies an opaque `OPENAI_API_KEY` placeholder; OpenShell
 substitutes the real key only for the profile's authorized endpoint. Do not paste
 the real key into OpenCode's `/connect` prompt or store it in harness config.
 Follow the [model verification steps](verification.md#1-prove-model-interaction).
-Verify model access on your host; see the
-[real-model deployment qualification](../../testing/upgrade-0.1.3-e2e.md).
+Verify model access on your host. The
+[real-model deployment qualification](../../testing/upgrade-0.1.3-e2e.md) is
+historical 0.1.3 evidence and does not replace a current-host check.
 
 ### Local OpenAI-compatible endpoint and key
 

@@ -123,17 +123,12 @@ if args[:2] == ["sandbox", "list"]:
             script.chmod(0o755)
 
     def test_review_entry_point_pushes_contract_and_task(self):
-        # The fake ssh appends every remote command and stdin payload; a fake
-        # timeout shim forces the child-bash code path on every platform.
+        # The fake ssh appends every remote command and stdin payload.
         (self.work / "capture.sshlog").unlink(missing_ok=True)
         (self.work / "capture.stdin").unlink(missing_ok=True)
-        for name, source in {
-            "ssh": '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CAPTURE.sshlog"\ncat >> "$CAPTURE.stdin"\n',
-            "timeout": '#!/bin/sh\n[ "$1" = "-k" ] && shift 2\nshift\nexec "$@"\n',
-        }.items():
-            script = self.work / name
-            script.write_text(source)
-            script.chmod(0o755)
+        script = self.work / "ssh"
+        script.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CAPTURE.sshlog"\ncat >> "$CAPTURE.stdin"\n')
+        script.chmod(0o755)
         args = ["bash", str(ROOT / "openshell/harnesses/opencode/review.sh"),
                 "--name", "test", "--repo", "owner/repo", "--pr", "53", "--pr", "78",
                 "--timeout", "60"]
@@ -167,7 +162,6 @@ if args[:2] == ["sandbox", "list"]:
         self.env["HOME"] = str(self.work)
         for name, source in {
             "ssh": '#!/bin/sh\nwhile [ $# -gt 1 ]; do shift; done\nexec sh -c "$1"\n',
-            "timeout": '#!/bin/sh\n[ "$1" = "-k" ] && shift 2\nshift\nexec "$@"\n',
             "opencode": '#!/bin/sh\ncat > "$CAPTURE.opencode-stdin"\nprintf "OPENCODE_TURN_DONE\\n"\n',
         }.items():
             script = self.work / name
@@ -187,15 +181,17 @@ if args[:2] == ["sandbox", "list"]:
         self.assertIn("OPENCODE_TURN_DONE", result.stdout)
         self.assertEqual((self.work / "capture.opencode-stdin").read_text(), "")
 
-    def test_collect_entry_point_pulls_reports_over_ssh(self):
+    def test_review_collect_entry_point_pulls_reports_over_ssh(self):
         collected = self.work / "collected"
         script = self.work / "ssh"
         script.write_text('#!/bin/sh\n'
                           'mkdir -p "$CAPTURE.reports"\n'
                           'printf "# PR #53\\n" > "$CAPTURE.reports/pr-53.md"\n'
-                          'tar cf - -C "$CAPTURE.reports" .\n')
+                          # BSD tar adds AppleDouble ._member entries on macOS;
+                          # GNU tar in the sandbox never does.
+                          'COPYFILE_DISABLE=1 tar cf - -C "$CAPTURE.reports" .\n')
         script.chmod(0o755)
-        args = ["bash", str(ROOT / "openshell/harnesses/opencode/collect.sh"),
+        args = ["bash", str(ROOT / "openshell/harnesses/opencode/review-collect.sh"),
                 "--name", "test", "--dest", str(collected)]
         result = subprocess.run(args, env=self.env, capture_output=True, text=True,
                                 timeout=15, stdin=subprocess.DEVNULL)
@@ -204,7 +200,8 @@ if args[:2] == ["sandbox", "list"]:
         self.assertTrue(report.is_file())
         self.assertIn("# PR #53", report.read_text())
 
-    def create(self, harness, profile, integrated=False, success=True, config_dir=None, provider=None):
+    def create(self, harness, profile, integrated=False, success=True, config_dir=None,
+               provider=None, model=None):
         # Each invocation must produce fresh evidence, including subtests.
         for name in ("capture", "capture.provider"):
             (self.work / name).unlink(missing_ok=True)
@@ -214,6 +211,8 @@ if args[:2] == ["sandbox", "list"]:
             args += ["--config", str(ROOT / (config_dir or "configs/openshell-praxis"))]
         if provider:
             args += ["--provider", provider]
+        if model:
+            args += ["--model", model]
         result = subprocess.run(args, env=self.env, capture_output=True, text=True, timeout=10)
         if success:
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -241,11 +240,19 @@ if args[:2] == ["sandbox", "list"]:
                             self.assertIs(type(endpoint["port"]), int)
 
     def test_integrated_policy_has_numeric_port_and_provider_json_escapes_model(self):
+        chat = [{"method": "GET", "path": "/v1/models"},
+                {"method": "POST", "path": "/v1/chat/completions"}]
         for profile in ("review", "dev", "automation", "interactive", "pr-review"):
             policy = self.create("opencode", profile, integrated=True)
             endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
             self.assertIs(type(endpoint["port"]), int)
             self.assertEqual(endpoint["port"], 18080)
+            self.assertNotIn("access", endpoint)
+            # pr-review renders the native OpenAI adapter, so its gateway also
+            # admits the Responses surface that adapter speaks.
+            expected_rules = chat + ([{"method": "POST", "path": "/v1/responses"}]
+                                     if profile == "pr-review" else [])
+            self.assertEqual([rule["allow"] for rule in endpoint["rules"]], expected_rules)
             self.assertEqual({b["path"] for b in policy["network_policies"]["praxis_gateway"]["binaries"]},
                              {"/usr/bin/node-26", "/usr/local/bin/opencode"})
             config = json.loads((self.work / "capture.provider").read_text())
@@ -254,10 +261,27 @@ if args[:2] == ["sandbox", "list"]:
             provider = config["provider"]["praxis"]
             self.assertEqual(set(provider["models"]), {model})
             self.assertEqual(provider["options"]["baseURL"], "http://host.openshell.internal:18080/v1")
-            # Current OpenAI model families reject max_tokens; the native
-            # adapter with forceReasoning sends max_completion_tokens.
-            self.assertEqual(provider["npm"], "@ai-sdk/openai")
-            self.assertEqual(provider["models"][model]["options"], {"forceReasoning": True})
+            if profile == "pr-review":
+                # Current OpenAI model families reject max_tokens; the native
+                # adapter with forceReasoning sends max_completion_tokens.
+                self.assertEqual(provider["npm"], "@ai-sdk/openai")
+                self.assertEqual(provider["models"][model]["options"], {"forceReasoning": True})
+            else:
+                self.assertEqual(provider["npm"], "@ai-sdk/openai-compatible")
+                self.assertNotIn("options", provider["models"][model])
+
+    def test_explicit_model_replaces_environment_default(self):
+        self.create("opencode", "pr-queue", integrated=True, model="approved/model.v2")
+        config = json.loads((self.work / "capture.provider").read_text())
+        self.assertEqual(config["model"], "openai/approved/model.v2")
+        self.assertEqual(set(config["provider"]["openai"]["models"]), {"approved/model.v2"})
+        self.assertNotIn("npm", config["provider"]["openai"])
+
+    def test_model_requires_integrated_configuration(self):
+        (self.work / "capture.templates").unlink(missing_ok=True)
+        error = self.create("opencode", "dev", model="approved-model", success=False)
+        self.assertIn("model selection requires --config", error)
+        self.assertFalse((self.work / "capture.templates").exists())
 
     def test_invalid_ports_fail_before_sandbox_creation(self):
         for port in ("0", "65536", "abc", "8080\nfoo: bar"):
@@ -283,6 +307,51 @@ if args[:2] == ["sandbox", "list"]:
         endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
         self.assertEqual(endpoint["host"], "host.openshell.internal")
         self.assertEqual(endpoint["port"], 18080)
+        self.assertEqual([rule["allow"]["path"] for rule in endpoint["rules"]],
+                         ["/vllm/v1/models", "/vllm/v1/chat/completions"])
+
+    def test_every_praxis_profile_has_explicit_rest_rules(self):
+        sources = list((ROOT / "configs/openshell-praxis/profiles").glob("*/policy.yaml"))
+        sources += [ROOT / "configs/openshell-praxis/openclaw/profiles/dev/policy.yaml"]
+        sources += [ROOT / "configs/vllm/harness/profiles/dev/policy.yaml"]
+        sources += [ROOT / "configs/vllm/openclaw/profiles/dev/policy.yaml"]
+        chat = [{"method": "GET", "path": "/v1/models"},
+                {"method": "POST", "path": "/v1/chat/completions"}]
+        responses = chat + [{"method": "POST", "path": "/v1/responses"}]
+        for source in sorted(sources):
+            with self.subTest(source=source.relative_to(ROOT)):
+                policy = yaml.safe_load(source.read_text().replace("@@PRAXIS_PORT@@", "18080")
+                                        .replace("@@PRAXIS_API_PREFIX@@", ""))
+                endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
+                self.assertNotIn("access", endpoint)
+                self.assertIn([rule["allow"] for rule in endpoint["rules"]], (chat, responses))
+
+    def test_github_git_rules_permit_clone_fetch_and_deny_push(self):
+        sources = list(ROOT.glob("openshell/harnesses/*/profiles/*/policy.yaml"))
+        sources += list(ROOT.glob("configs/openshell-praxis/*/profiles/*/policy.yaml"))
+        sources += list(ROOT.glob("configs/openshell-praxis/profiles/*/policy.yaml"))
+        expected = [{"method": "GET", "path": "/**"},
+                    {"method": "HEAD", "path": "/**"},
+                    {"method": "OPTIONS", "path": "/**"},
+                    {"method": "POST", "path": "/**/git-upload-pack"}]
+        checked = 0
+        for source in sorted(sources):
+            policy = yaml.safe_load(source.read_text()
+                                    .replace("@@PRAXIS_PORT@@", "18080")
+                                    .replace("@@PRAXIS_API_PREFIX@@", ""))
+            rule = policy.get("network_policies", {}).get("github_git")
+            if rule is None:
+                continue
+            checked += 1
+            with self.subTest(source=source.relative_to(ROOT)):
+                endpoint = rule["endpoints"][0]
+                self.assertEqual(endpoint["host"], "github.com")
+                self.assertEqual(endpoint["port"], 443)
+                self.assertEqual(endpoint["protocol"], "rest")
+                self.assertEqual(endpoint["enforcement"], "enforce")
+                self.assertNotIn("access", endpoint)
+                self.assertEqual([item["allow"] for item in endpoint["rules"]], expected)
+        self.assertGreaterEqual(checked, 9)
 
     def test_resource_limits_reach_every_harness_create(self):
         for cpu, memory in (("2", "4Gi"), ("500m", "512Mi")):
@@ -341,6 +410,8 @@ if args[:2] == ["sandbox", "list"]:
                 self.assertNotIn("--provider", args)
                 rule = policy["network_policies"]["praxis_gateway"]
                 self.assertEqual(rule["endpoints"][0]["port"], 18080)
+                self.assertEqual([item["allow"]["path"] for item in rule["endpoints"][0]["rules"]],
+                                 [f"{prefix}/v1/models", f"{prefix}/v1/chat/completions"])
                 self.assertEqual({b["path"] for b in rule["binaries"]},
                                  {"/usr/local/bin/node", "/usr/local/bin/openclaw"})
                 hosts = {e["host"] for r in policy["network_policies"].values() for e in r["endpoints"]}
@@ -422,6 +493,77 @@ if args[:2] == ["sandbox", "list"]:
                     "--name", "test"], env=self.env, capture_output=True, text=True, timeout=10)
                 self.assertTrue(marker.exists(), "connect failed before invoking SSH")
                 self.assertEqual(result.returncode, 255, result.stderr)
+
+    def test_connect_entry_points_reject_invalid_sandbox_names(self):
+        # The sandbox name flows into the OpenShell CLI and the ssh ProxyCommand,
+        # which runs through a shell; reject anything that is not a plain
+        # identifier before connecting.
+        for harness in ("opencode", "openclaw", "codex"):
+            for name in ("bad name", "sandbox;rm -rf /", "--force", "Uppercase_bad!", "",
+                         "12345678901234567890"):
+                with self.subTest(harness=harness, name=name):
+                    marker = self.work / "capture.ssh"
+                    marker.unlink(missing_ok=True)
+                    result = subprocess.run(
+                        ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"), "--name", name],
+                        env=self.env, capture_output=True, text=True, timeout=10)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn("invalid", result.stderr.lower())
+                    self.assertFalse(marker.exists(), "invalid sandbox name reached ssh")
+
+    def test_connect_entry_points_reject_invalid_gateway_name(self):
+        # The gateway name also reaches the ProxyCommand; a rejected value must
+        # abort before ssh instead of launching it with an empty ProxyCommand.
+        for harness in ("opencode", "openclaw"):
+            with self.subTest(harness=harness):
+                marker = self.work / "capture.ssh"
+                marker.unlink(missing_ok=True)
+                result = subprocess.run(
+                    ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"), "--name", "test"],
+                    env={**self.env, "OPENSHELL_GATEWAY_NAME": "bad name"},
+                    capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("invalid", result.stderr.lower())
+                self.assertFalse(marker.exists(), "invalid gateway name reached ssh")
+
+    def test_connect_entry_points_accept_remote_command(self):
+        for harness, default_name in (("opencode", "opencode-dev"), ("codex", "codex-dev"),
+                                      ("openclaw", "openclaw-dev")):
+            for arguments, sandbox in ((["bash"], default_name),
+                                       (["--name", "test", "bash"], "test")):
+                with self.subTest(harness=harness, arguments=arguments):
+                    result = subprocess.run(
+                        ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"),
+                         *arguments],
+                        env=self.env, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    ssh_arguments = (self.work / "capture.ssh").read_text().splitlines()
+                    self.assertEqual(ssh_arguments[-2:], [f"sandbox@{sandbox}", "bash"])
+
+    def test_connect_remote_command_preserves_argument_boundaries(self):
+        (self.work / "ssh").write_text(
+            '#!/bin/sh\ncommand=\nfor argument do\n  command=$argument\ndone\nexec sh -c "$command"\n')
+        result = subprocess.run(
+            ["bash", str(ROOT / "openshell/harnesses/opencode/connect.sh"),
+             "--name", "test", "printf", "%s\\n", "a b"],
+            env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "a b\n")
+
+    def test_connect_command_boundary_allows_leading_options(self):
+        defaults = {"opencode": "opencode-dev", "codex": "codex-dev",
+                    "openclaw": "openclaw-dev"}
+        for harness in ("opencode", "codex", "openclaw"):
+            with self.subTest(harness=harness):
+                result = subprocess.run(
+                    ["bash", str(ROOT / f"openshell/harnesses/{harness}/connect.sh"),
+                     "--", "--name", "remote-command"],
+                    env=self.env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                ssh_arguments = (self.work / "capture.ssh").read_text().splitlines()
+                self.assertEqual(
+                    ssh_arguments[-2:],
+                    [f"sandbox@{defaults[harness]}", "--name remote-command"])
 
     def test_openclaw_waits_for_initial_policy_before_uploading_config(self):
         cli = self.work / "openshell"

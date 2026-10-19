@@ -24,7 +24,10 @@ def validate_profiles(invoke, results):
             return 'Connection refused' in output and 'transport error' in output
 
         source = ROOT / 'configs/openshell-praxis/profiles/review/policy.yaml'
-        numeric = source.read_text().replace('@@PRAXIS_PORT@@', '18080').replace('port: "18080"', 'port: 18080')
+        numeric = (source.read_text()
+                   .replace('@@PRAXIS_PORT@@', '18080')
+                   .replace('@@PRAXIS_API_PREFIX@@', '')
+                   .replace('port: "18080"', 'port: 18080'))
         invalid = numeric.replace('port: 18080', 'port: "18080"')
         assert invalid != numeric, 'invalid-port control did not change the policy'
         output = validate(invalid)
@@ -36,9 +39,11 @@ def validate_profiles(invoke, results):
         policies += sorted((ROOT / 'configs/vllm/harness/profiles').glob('*/policy.yaml'))
         policies += sorted((ROOT / 'configs/openshell-praxis/openclaw/profiles').glob('*/policy.yaml'))
         policies += sorted((ROOT / 'configs/vllm/openclaw/profiles').glob('*/policy.yaml'))
-        assert len(policies) == 21, f'expected all 21 policies, found {len(policies)}'
+        assert len(policies) == 22, f'expected all 22 policies, found {len(policies)}'
         for source in policies:
-            output = validate(source.read_text().replace('@@PRAXIS_PORT@@', '18080'))
+            output = validate(source.read_text()
+                              .replace('@@PRAXIS_PORT@@', '18080')
+                              .replace('@@PRAXIS_API_PREFIX@@', ''))
             passed = accepted(output)
             results.append({'path': str(source.relative_to(ROOT)), 'status': 'passed' if passed else 'failed',
                             'diagnostic': 'schema accepted; gateway deliberately unreachable' if passed else output[-1000:]})

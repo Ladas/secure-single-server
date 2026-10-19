@@ -6,15 +6,17 @@
 
 | Harness | Qualified in the single-server OpenShell path | Explicitly not qualified |
 | --- | --- | --- |
-| OpenCode | Sandbox lifecycle and policy controls; [Praxis fixture model, write and bash tools](../../testing/upgrade-0.1.3.md) | Paid-provider and real-GPU inference on the upgraded pins; the narrower `review` profile |
-| OpenClaw | Sandbox lifecycle and policy controls; [bounded Praxis fixture model and write tool](../../testing/upgrade-0.1.3.md) | Automatic `exec`, browser/gateway authentication, retained sessions, `--backend`, and untested providers |
+| OpenCode | Sandbox lifecycle and policy controls; [historical 0.1.3 Praxis fixture model, write and bash tools](../../testing/upgrade-0.1.3.md) | Fresh paid-provider and real-GPU inference on the 0.1.4 pins; the narrower `review` profile |
+| OpenClaw | Sandbox lifecycle and policy controls; [historical 0.1.3 bounded Praxis fixture model and write tool](../../testing/upgrade-0.1.3.md) | Automatic `exec`, browser/gateway authentication, retained sessions, `--backend`, and untested providers |
 
 ## AWS verification
 
-The [0.1.3 upgrade qualification](../../testing/upgrade-0.1.3.md) records the
-current pins, both harnesses' controlled model/tool tests, and rebuilt bootc
-container checks. It does not qualify a booted OS rollout or real inference on
-the upgraded pins. The following published-image results predate that upgrade.
+The active [0.1.4 pin review](../../testing/upgrade-0.1.4.md) records release
+compatibility and offline validation. The [0.1.3 upgrade qualification](../../testing/upgrade-0.1.3.md)
+remains historical evidence for both harnesses' controlled model/tool tests and
+rebuilt bootc container checks. Neither record qualifies a fresh booted OS
+rollout or real inference on the 0.1.4 pins. The following published-image
+results predate both upgrades.
 
 On 2026-10-02, the manual path was exercised on a disposable RHEL 9 x86_64 EC2
 host in `us-east-1`. It created Ready OpenCode and OpenClaw sandboxes, passed
@@ -79,11 +81,12 @@ a reviewed policy change with fresh positive and negative network tests.
 
 Important limits:
 
-- `landlock.compatibility` is `best_effort`; filesystem protection can degrade
-  on an unqualified kernel. Record actual runtime enforcement.
-- GitHub API access is method-restricted, but Git-over-HTTPS to `github.com` is
-  not read-only. An allowed endpoint can still receive data from a malicious
-  harness or tool.
+- The installer rejects a host without Landlock ABI 3 or newer, but
+  `landlock.compatibility` remains `best_effort`; record actual runtime
+  filesystem enforcement.
+- GitHub API access is method-restricted. Git Smart HTTP permits clone and
+  fetch operations on `github.com`, while push remains denied. An allowed
+  endpoint can still receive data from a malicious harness or tool.
 - A policy parsing or sandbox Ready result does not prove enforcement. Use a
   successful positive control plus an explicit denial when qualifying a host.
 - Deleting a sandbox can destroy work. Export anything you need first.

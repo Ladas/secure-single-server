@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Offline behavioral regressions for harness argument, policy and SSH contracts."""
+import errno
 import json
 import hashlib
 import io
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import tempfile
 import tarfile
@@ -110,7 +112,7 @@ sys.stdin.read()
 
     def test_invalid_arguments_never_create(self):
         for h in ('codex','opencode','openclaw'):
-            for args in (('--profile',),('--profile','../dev'),('--unknown','x'),('--config',),('--backend','anthropic')):
+            for args in (('--profile',),('--profile','--prepare'),('--profile','../dev'),('--unknown','x'),('--config',),('--backend','anthropic')):
                 r=self.create(h,*args)
                 self.assertNotEqual(r.returncode,0)
                 self.assertNotIn('unbound variable',r.stderr)
@@ -195,7 +197,7 @@ class ReleaseCliTests(unittest.TestCase):
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
             def pins(checksum):
                 (configs / 'images.env').write_text(
-                    f'OPENSHELL_CLI_VERSION=v0.1.3\nOPENSHELL_CLI_SHA256_AMD64={checksum}\n'
+                    f'OPENSHELL_CLI_VERSION=v0.1.4\nOPENSHELL_CLI_SHA256_AMD64={checksum}\n'
                     f'OPENSHELL_CLI_SHA256_ARM64={checksum}\n')
             for name, body in {
                 'uname': '#!/bin/sh\nif [ "$1" = -s ]; then echo Linux; else echo "$TEST_ARCH"; fi\n',
@@ -212,12 +214,36 @@ class ReleaseCliTests(unittest.TestCase):
                     result = subprocess.run(['bash', str(helper), str(output)], env=env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual((output / 'openshell').read_bytes(), payload)
-                    self.assertIn(f'/v0.1.3/openshell-{target}-unknown-linux-musl.tar.gz', (work / 'download').read_text())
+                    self.assertIn(f'/v0.1.4/openshell-{target}-unknown-linux-musl.tar.gz', (work / 'download').read_text())
                     (output / 'openshell').unlink()
                     pins('0' * 64)
                     result = subprocess.run(['bash', str(helper), str(output)], env=env, capture_output=True, text=True)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertFalse((output / 'openshell').exists())
+
+class LandlockPreflightTests(unittest.TestCase):
+    def setUp(self):
+        self.check = runpy.run_path(str(ROOT / 'openshell/scripts/check-landlock.py'))['check_landlock']
+
+    def test_landlock_preflight_accepts_required_abi(self):
+        passed, message = self.check(3, lambda: 3)
+        self.assertTrue(passed, message)
+        self.assertIn('host Landlock ABI 3 meets the required ABI 3', message)
+
+    def test_landlock_preflight_rejects_old_abi_with_actionable_diagnostic(self):
+        passed, message = self.check(3, lambda: 2)
+        self.assertFalse(passed)
+        self.assertIn('host Landlock ABI is 2, but ABI 3 or later is required', message)
+        self.assertIn('ContainerExited', message)
+
+    def test_landlock_preflight_rejects_missing_syscall_with_actionable_diagnostic(self):
+        error = OSError(errno.ENOSYS, os.strerror(errno.ENOSYS))
+        def unavailable():
+            raise error
+        passed, message = self.check(3, unavailable)
+        self.assertFalse(passed)
+        self.assertIn('landlock_create_ruleset is unavailable', message)
+        self.assertIn('ContainerExited', message)
 
 
 if __name__=='__main__': unittest.main()

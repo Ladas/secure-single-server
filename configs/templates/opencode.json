@@ -103,6 +103,16 @@
     },
     {
       "harness": "opencode",
+      "profile": "pr-queue",
+      "backend": "cloud",
+      "image_variable": "ODH_OPENCODE_IMAGE",
+      "cpu": "2",
+      "memory": "4Gi",
+      "environment": {},
+      "config_dir": "configs/openshell-praxis"
+    },
+    {
+      "harness": "opencode",
       "profile": "dev",
       "backend": "vllm",
       "image_variable": "ODH_OPENCODE_IMAGE",

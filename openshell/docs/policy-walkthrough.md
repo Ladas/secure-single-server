@@ -31,7 +31,7 @@ operator-owned maximum in `tests/policy-boundary/`. It requires the pinned
 `openshell-prover` to return `within_boundary`, requires complete coverage of
 the modeled filesystem, network, process, and Landlock domains, and rejects an
 extra endpoint through a mutation control. CI installs OpenShell prover
-`v0.1.3` by digest and runs this check in the UBI static lane.
+`v0.1.4` by checksum and runs this check in the UBI static lane.
 
 When a profile intentionally widens access, update the matching boundary in the
 same reviewed change. Treat the boundary as the reviewed maximum, not something

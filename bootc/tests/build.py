@@ -90,7 +90,7 @@ else:
             'curl': '''#!/usr/bin/env python3
 import io, sys, tarfile
 with tarfile.open(sys.argv[sys.argv.index('-o') + 1], 'w:gz') as archive:
-    payload = b'#!/bin/sh\\necho openshell 0.1.3\\n'
+    payload = b'#!/bin/sh\\necho openshell 0.1.4\\n'
     member = tarfile.TarInfo('openshell'); member.size = len(payload)
     archive.addfile(member, io.BytesIO(payload))
 ''',
@@ -117,6 +117,12 @@ with tarfile.open(sys.argv[sys.argv.index('-o') + 1], 'w:gz') as archive:
         calls = [json.loads(row) for row in self.log.read_text().splitlines()]
         builds = [call for call in calls if call[0] == 'build']
         self.assertEqual(len(builds), 7)
+        source = (ROOT / 'bootc/Containerfile').read_text()
+        self.assertNotRegex(source, r'dnf install[^\n]*ripgrep')
+        self.assertIn('rg_version=14.1.1', source)
+        self.assertIn('4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e', source)
+        self.assertIn('BurntSushi/ripgrep/releases/download', source)
+        self.assertIn('/usr/local/bin/rg', source)
         self.assertIn('RHEL_BOOTC_IMAGE=' + PIN, builds[0])
         self.assertIn('RHSM=0', builds[0])
         self.assertIn('--secret', builds[0])
@@ -169,6 +175,8 @@ with tarfile.open(sys.argv[sys.argv.index('-o') + 1], 'w:gz') as archive:
                 self.assertIn(expected_digest, source)
                 self.assertIn('sha256sum -c -', source)
                 self.assertNotIn('epel-release-latest-9', source)
+                if relative == 'scripts/vllm/prepare-gpu':
+                    self.assertIn('[[ -d "/lib/modules/$(uname -r)/build" ]]', source)
 
     def test_rejects_ambiguous_vllm_target(self):
         result = self.run_build('vllm', 'localhost/vllm-test')

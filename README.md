@@ -2,7 +2,7 @@
 
 Secure single-server AI harness runs [OpenCode](https://github.com/anomalyco/opencode)
 and [OpenClaw](https://github.com/openclaw/openclaw) on one dedicated RHEL 9
-x86_64 host. [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.3/docs)
+x86_64 host. [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.4/docs)
 enforces the execution boundary. For the integrated harness paths,
 [Praxis](https://github.com/praxis/praxis) routes model traffic, while
 [Red Hat bootc](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_image_mode_for_rhel_to_build_deploy_and_manage_operating_systems/index)
@@ -46,15 +46,12 @@ model call, use the [Podman quickstart](docs/quickstarts/podman/README.md).
 
 Before starting, have:
 
-- A disposable RHEL 9 x86_64 host and a Bash shell.
-- A bootc-managed host for the bootc route, or Podman already running for the
-  Podman route.
+- Podman or a bootc enabled server
 - A valid OpenAI API key and the exact ID of a model your account can access.
-- The required images already cached for the under-five-minute target.
 
 With these prerequisites, target a first model response in under five minutes.
-Initial image downloads, bootc OS installation and reboot, and local-model
-loading add time.
+Initial image downloads, bootc OS deployment, and local-model
+loading add time(optional).
 
 The published-image quickstart uses OpenCode. For OpenClaw, use the
 [model and tool walkthrough](docs/quickstarts/openshell-praxis/openclaw.md) with
@@ -76,12 +73,59 @@ To install OpenShell, harnesses, and Praxis separately on a fresh VM or bare
 metal, follow the [manual single-server guide](docs/quickstarts/openshell-single-server/manual.md)
 and [Praxis installation walkthrough](docs/quickstarts/openshell-praxis/install.md).
 
+The manual guide installs Git and Podman, clones the reviewed revision to the
+service-readable `/opt/secure-single-server` path, and runs the installer from
+that checkout. The installer verifies that the host provides Landlock ABI 3 or
+newer before creating sandboxes. After the guide's `repo` and `os_run`
+definitions are active, connect to an OpenCode sandbox with:
+
+```bash
+os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev
+```
+
+The connect entry point also accepts an optional remote command. For a simple
+Bash session without editing the harness script, use:
+
+```bash
+os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev bash
+```
+
+## What can I do with this setup?
+
+For the shortest introduction to OpenShell's value, try the
+[Streamlit before-and-after demo](docs/examples/streamlit-security/README.md).
+It runs the same model-backed app first in an ordinary container and then in an
+OpenShell sandbox, showing credential substitution and filesystem confinement
+without using Praxis.
+
+After that, try the
+[OpenCode PR-candidate queue](docs/examples/opencode-pr-queue/README.md):
+
+- Queue public GitHub issues or operator prompt files for a public repository.
+- Optionally keep a longer batch alive in `tmux` after disconnecting from SSH.
+- Collect one reviewable bundle per task containing the task, proposed patch,
+  metadata, and report.
+- Review the bundle on your workstation, then apply it and open a draft PR with
+  your local Git and GitHub CLI credentials.
+
+This scenario is issue/prompt-to-patch only. It does not perform pull-request
+reviews, and the sandbox receives no GitHub token or GitHub write access.
+
+All post-deployment scenarios are indexed in
+[Example scenarios](docs/examples/README.md). Run them from the deployed
+repository checkout: on a bootc image, use
+`/usr/share/secure-single-server`; on a manual deployment, use
+`/opt/secure-single-server`. Published image tags contain only the reviewed
+revision from their build time, so use a rebuilt image or an updated manual
+checkout when trying newer examples.
+
 ## Explore Further
 
 - [Architecture walkthrough](docs/quickstarts/architecture-walkthrough/README.md):
   why each layer exists and what its evidence does not prove.
 - [Manual single-server guide](docs/quickstarts/openshell-single-server/manual.md):
-  OpenShell installation, harness setup, verification, and policy tests.
+  OpenShell installation from a service-readable checkout, harness setup, Bash
+  sandbox access, verification, and policy tests.
 - [OpenShell trust model](openshell/docs/threat-model.md): the execution
   boundary and assumptions behind the current single-operator deployment.
 - [Praxis integration](docs/quickstarts/openshell-praxis/README.md): model

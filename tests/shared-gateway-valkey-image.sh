@@ -42,8 +42,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Stage the read-only inputs in their own directories so they can be relabeled
+# for SELinux hosts. The deployment labels /etc/praxis/valkey.conf
+# container_file_t via semanage; bind-mounting the user_home_t checkout file
+# would be denied when SELinux is enforcing (e.g. rootless Podman on
+# RHEL/Fedora, as in CI's disposable-RHEL lane).
+config_dir="${tmp_dir}/config"
+secret_dir="${tmp_dir}/secret"
+install -d -m 0755 "${config_dir}" "${secret_dir}"
+install -m 0644 "${REPO_DIR}/configs/common/valkey/valkey.conf" \
+  "${config_dir}/valkey.conf"
 sed "s/SHA256_PASSWORD/${TEST_PASSWORD_HASH}/" \
-  "${REPO_DIR}/configs/common/valkey/users.acl.example" >"${tmp_dir}/users.acl"
+  "${REPO_DIR}/configs/common/valkey/users.acl.example" >"${secret_dir}/users.acl"
+chmod 0644 "${secret_dir}/users.acl"
 
 "${engine}" network create "${network}" >/dev/null
 "${engine}" volume create "${volume}" >/dev/null
@@ -60,8 +71,8 @@ fi
   "${isolation_args[@]}" \
   --network "${network}" \
   --mount "type=volume,source=${volume},target=/data" \
-  --mount "type=bind,source=${REPO_DIR}/configs/common/valkey/valkey.conf,target=/usr/local/etc/valkey/valkey.conf,readonly" \
-  --mount "type=bind,source=${tmp_dir}/users.acl,target=/run/secrets/users.acl,readonly" \
+  --volume "${config_dir}/valkey.conf:/usr/local/etc/valkey/valkey.conf:ro,Z" \
+  --volume "${secret_dir}/users.acl:/run/secrets/users.acl:ro,Z" \
   "${IMAGE}" valkey-server /usr/local/etc/valkey/valkey.conf >/dev/null
 
 client() {

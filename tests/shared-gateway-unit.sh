@@ -89,4 +89,22 @@ grep -Fq 'expected_arch="$(oci_architecture "$(uname -m)")"' "${REPO_DIR}/script
 # shellcheck disable=SC2016
 grep -Fq 'acl="$(valkey_acl "${password_hash}")"' "${REPO_DIR}/scripts/common/secret-set"
 
+# A value-taking option with no value, or followed by another option, must fail
+# with a clear message instead of silently consuming the next argument or
+# continuing with an empty value.
+expect_missing_value() {  # <flag> [args...]
+  local flag="$1"; shift
+  local output
+  if output="$(bash "${REPO_DIR}/scripts/common/install" "$@" 2>&1)"; then
+    die "installer accepted a value-taking option without a value: ${flag}"
+  fi
+  [[ "${output}" == *"missing value for ${flag}"* ]] ||
+    die "installer did not report a missing value for ${flag}"
+}
+expect_missing_value --owner --owner
+expect_missing_value --tls-cert --tls-cert
+expect_missing_value --openai-secret --openai-secret --replace
+bash "${REPO_DIR}/scripts/common/install" --help >/dev/null 2>&1 ||
+  die "installer --help must still succeed"
+
 printf 'architecture mapping, native-image checks, and Valkey ACL unit checks passed\n'

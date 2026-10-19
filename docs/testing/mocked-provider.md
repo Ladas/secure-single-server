@@ -14,6 +14,13 @@ installed. This repository has no workspace-wide build or Makefile gate.
 The runner acquires missing digest-pinned images before starting each fixture;
 inference uses no public endpoints, provider credentials or AWS access.
 
+On an SELinux-enforcing host the fixtures stage their config inputs and label
+every bind mount `container_file_t` (`:ro,z`), matching how the installer labels
+`/etc/praxis` files with `semanage` and `restorecon`; rootless Podman cannot
+read the `user_home_t`/`user_tmp_t` labels of a checkout or temporary directory.
+Without that label the container fixtures only start on the non-SELinux CI
+runners.
+
 For shorter local iterations:
 
 ```console

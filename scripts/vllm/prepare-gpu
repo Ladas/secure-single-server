@@ -23,7 +23,18 @@ printf '%s  %s\n' \
   "${epel_release}" | sha256sum -c -
 dnf install -y "${epel_release}"
 rm -f "${epel_release}"
-dnf install -y "kernel-devel-$(uname -r)" kernel-headers gcc make elfutils-libelf-devel dkms
+# The headers must match a kernel that will actually run. A fresh PAYG image can
+# boot a kernel older than the RHUI repositories carry, so fall back to the
+# matched meta package, which installs the newer kernel together with its
+# headers; the reboot below boots that kernel.
+if [[ -d "/lib/modules/$(uname -r)/build" ]]; then
+  dnf install -y kernel-headers gcc make elfutils-libelf-devel dkms
+elif dnf -q list available "kernel-devel-$(uname -r)" >/dev/null 2>&1; then
+  dnf install -y "kernel-devel-$(uname -r)" kernel-headers gcc make elfutils-libelf-devel dkms
+else
+  note "kernel-devel for $(uname -r) is unavailable; installing the matched kernel and headers"
+  dnf install -y kernel-devel-matched kernel-headers gcc make elfutils-libelf-devel dkms
+fi
 dnf module enable -y nvidia-driver:580-open
 dnf install -y nvidia-driver-cuda kmod-nvidia-open-dkms nvidia-container-toolkit
 # DKMS dependencies can install a newer kernel than the running one. Build
@@ -36,9 +47,13 @@ for build in /lib/modules/*/build; do
   depmod -a "${kernel}"
 done
 printf 'nvidia\nnvidia_uvm\n' >/etc/modules-load.d/praxis-nvidia.conf
-modprobe nvidia
-modprobe nvidia_uvm
-systemctl restart nvidia-cdi-refresh.service
-nvidia-smi
-nvidia-ctk cdi list
+if modinfo -k "$(uname -r)" nvidia >/dev/null 2>&1; then
+  modprobe nvidia
+  modprobe nvidia_uvm
+  systemctl restart nvidia-cdi-refresh.service
+  nvidia-smi
+  nvidia-ctk cdi list
+else
+  note "NVIDIA modules target a newer kernel; reboot before nvidia-smi or CDI checks."
+fi
 note 'NVIDIA driver and CDI installed. Reboot before final lifecycle qualification.'

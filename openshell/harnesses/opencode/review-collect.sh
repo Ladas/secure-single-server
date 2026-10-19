@@ -21,39 +21,32 @@ while [[ $# -gt 0 ]]; do
 done
 [[ "${NAME}" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]] || die 'invalid sandbox name'
 DEST="${DEST:-${NAME}-reports}"
+require_command python3
 
 # Extract into staging, never straight into DEST: reports already sitting in
 # DEST would otherwise make an empty collection look like a successful one.
-# (PR #55 adds openshell/scripts/extract-safe-tar.py for the same job; collapse
-# this onto it when the two branches reconcile.)
 staging="$(mktemp -d)"
 trap 'rm -rf "${staging}"' EXIT
-tarball="${staging}/reports.tar"
+out="${staging}/out"
+mkdir -p "${out}"
 max_bytes=$(( MAX_KB * 1024 ))
-# The sandbox is the untrusted side of this channel and chooses what it sends,
-# so head caps what can land here rather than letting a runaway archive fill
-# the workstation. Byte-transparent tar over the same channel that installed
-# the harness config.
-status=0
-harness_ssh "${NAME}" 'tar cf - -C ~/reports .' | head -c "${max_bytes}" >"${tarball}" \
-  || status=$?
-(( $(wc -c <"${tarball}") < max_bytes )) \
-  || die "sandbox reports exceed the ${MAX_KB} KiB limit"
-(( status == 0 )) || die "collecting from sandbox ${NAME} failed (exit ${status})"
-mkdir -p "${staging}/out"
-tar xf "${tarball}" -C "${staging}/out"
+# The sandbox is the untrusted side of this channel and chooses what it sends.
+# extract-safe-tar.py refuses non-regular members and unsafe paths and bounds
+# the bytes it will write, so a runaway or hostile archive cannot fill the
+# workstation or escape the staging directory.
+harness_ssh "${NAME}" 'tar cf - -C ~/reports .' </dev/null \
+  | python3 "${H_DIR}/../../scripts/extract-safe-tar.py" "${out}" \
+     --max-file-bytes "${max_bytes}" --max-total-bytes "${max_bytes}" \
+  || die "collecting from sandbox ${NAME} failed or exceeded the ${MAX_KB} KiB limit"
 
-# Only plain pr-N.md files may reach DEST. A symlink or a nested path chosen by
-# the sandbox would otherwise be written wherever it pointed.
+# Only plain pr-N.md files may reach DEST.
 reports=()
 while IFS= read -r -d '' entry; do
-  rel="${entry#"${staging}/out/"}"
-  [[ -f "${entry}" && ! -L "${entry}" ]] \
-    || die "refusing non-regular entry in collected reports: ${rel}"
+  rel="${entry#"${out}/"}"
   [[ "${rel}" =~ ^pr-[0-9]+\.md$ ]] \
     || die "unexpected entry in collected reports: ${rel}"
   reports+=("${rel}")
-done < <(find "${staging}/out" -mindepth 1 -print0)
+done < <(find "${out}" -mindepth 1 -print0)
 (( ${#reports[@]} > 0 )) \
   || die "no reports produced in sandbox ${NAME}; the review turn may not have run"
 

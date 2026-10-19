@@ -22,6 +22,7 @@ fi
 cd /
 umask 077
 for cmd in podman python3 curl tar sha256sum runuser systemctl; do require_command "$cmd"; done
+python3 "${OS_DIR}/scripts/check-landlock.py" --minimum-abi 3
 PRAXIS_SERVICE_USER="${owner}" PRAXIS_CONFIG_DIR=/etc/secure-single-server/openshell \
   "${REPO_ROOT}/scripts/common/install" --prepare
 uid="$(id -u "${owner}")"

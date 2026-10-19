@@ -17,9 +17,9 @@ without a destination request. It fails closed when the result is inconclusive.
 `landlock.compatibility: best_effort` can degrade filesystem protection. Record
 the actual supervisor/kernel enforcement result; host SELinux Enforcing alone is
 insufficient. The gateway Quadlet disables SELinux labeling to operate its
-Podman socket, so rootless execution, loopback-only management, and the locked
-service account are compensating controls rather than replacements for a
-SELinux container label. No blanket enforcement claim is made for unqualified
+Podman socket, so rootless execution, loopback-only management, the locked
+service account, and `NoNewPrivileges=true` on the gateway container are
+compensating controls rather than replacements for a SELinux container label. No blanket enforcement claim is made for unqualified
 kernel/profile combinations.
 
 `include_workdir` grants policy permissions; it neither mounts a host checkout nor
@@ -28,9 +28,9 @@ removal and test any retained-task/session requirement separately. Detached
 creation retains a sandbox main process, not necessarily a harness launched later
 through an SSH session. Admission and resource ceilings require deployment work.
 
-The dev policy limits GitHub API methods but does not impose read-only semantics
-on Git-over-HTTPS to github.com. Allowed endpoints can receive data from a malicious
-harness; allowlists do not inspect model prompts or guarantee trustworthy code.
+The dev policy limits GitHub API methods and permits Git Smart HTTP clone/fetch
+without push. Allowed endpoints can receive data from a malicious harness;
+allowlists do not inspect model prompts or guarantee trustworthy code.
 
 Images are digest-pinned for repeatability, not a claim of audited contents.
 Harness CLIs are preinstalled; profiles permitting package registries still permit

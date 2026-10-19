@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import ssl
 import sys
@@ -14,7 +15,7 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "tests/common"), str(ROOT / "scripts/common")]
-from gateway import Gateway, ENGINE, IMAGE, MOCK_IMAGE, run, token
+from gateway import Gateway, ENGINE, IMAGE, MOCK_IMAGE, bind, run, token
 from provider_config import render
 from contracts import check
 from evidence import save
@@ -26,7 +27,12 @@ spec.loader.exec_module(client)
 
 class LocalGateway(Gateway):
     def fixture_command(self):
-        return ["--mount", f"type=bind,source={ROOT}/tests,target=/tests,readonly",
+        # Copy the test tree into the work dir so the bind mount can be labeled
+        # for SELinux-enforcing hosts without relabeling the checkout.
+        tests = self.work / "tests"
+        shutil.copytree(ROOT / "tests", tests,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        return [*bind(tests, "/tests"),
                 MOCK_IMAGE, "python3", "/tests/remote-client/provider.py"]
 
     def boot(self):

@@ -1,0 +1,25 @@
+version: 1
+
+filesystem_policy:
+  include_workdir: false
+  read_only:
+    - /usr
+    - /lib
+    - /lib64
+    - /etc
+    - /proc
+    - /dev/urandom
+    - /opt/openshell-demo
+  read_write:
+    - /tmp
+    - /dev/null
+
+landlock:
+  compatibility: hard_requirement
+
+process:
+  run_as_user: "1500"
+  run_as_group: "1500"
+
+# Model egress is supplied by the attached provider; this adds no direct routes.
+network_policies: {}

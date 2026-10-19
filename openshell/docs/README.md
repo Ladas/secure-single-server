@@ -13,10 +13,10 @@ If you are new to the architecture, start with the
 This repository consumes pinned OpenShell control-plane and preinstalled harness
 images. The current deployment target is a dedicated, trusted single-operator
 RHEL 9 x86_64 host with rootless Podman. Bootc builds one OS image per harness.
-The host and bootc OS remain RHEL 9; the upstream OpenShell 0.1.3 and OpenClaw
+The host and bootc OS remain RHEL 9; the upstream OpenShell 0.1.4 and OpenClaw
 2026.9.9 workload containers use Debian-based runtimes. See the
-[upgrade qualification](../../docs/testing/upgrade-0.1.3.md) for coordinated
-pins and current model/tool evidence.
+[0.1.4 pin review](../../docs/testing/upgrade-0.1.4.md) and the historical
+[0.1.3 upgrade qualification](../../docs/testing/upgrade-0.1.3.md).
 
 - [Manual OpenShell and harness deployment](../../docs/quickstarts/openshell-single-server/manual.md)
 - [Bootc OpenShell and harness deployment](../../docs/quickstarts/openshell-single-server/bootc.md)

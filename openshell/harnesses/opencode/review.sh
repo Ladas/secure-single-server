@@ -33,34 +33,38 @@ if [[ ! "${TIMEOUT}" =~ ^[1-9][0-9]{0,4}$ ]] || (( TIMEOUT > 14400 )); then
   die 'timeout must be 1..14400 seconds'
 fi
 
-# timeout execs a command, so the harness_ssh shell function must be
-# re-imported by a child bash; export the function and its variables once.
-export OPENSHELL_BIN OPENSHELL_GATEWAY_NAME OPENSHELL_SANDBOX_USER
-export -f _os _proxy_cmd harness_ssh
 # A stalled SSH channel is a known failure mode for this harness (see
 # docs/development/review-turn-stdin-hang.md), so every call carries a
-# deadline, not only the turn.
-bounded() {  # <seconds> <sandbox> <cmd>; stdin is forwarded to the remote
-  if command -v timeout >/dev/null 2>&1; then
-    # shellcheck disable=SC2016 # $1/$2 are the child bash's positional parameters
-    timeout "$1" bash -c 'harness_ssh "$1" "$2"' _ "$2" "$3"
-  else
-    harness_ssh "$2" "$3"
-  fi
+# deadline, not only the turn. harness_ssh_timeout enforces the deadline
+# in-process: routing through a host-side `timeout` binary would require
+# exporting harness_ssh to a child shell, and /bin/sh on Linux strips
+# exported bash functions from the environment.
+review_ssh() {  # <deadline> <cmd...>; stdin is forwarded to the remote
+  local deadline="$1"; shift
+  local remaining
+  remaining=$((deadline - $(date +%s)))
+  ((remaining > 0)) || die 'review deadline elapsed before sandbox operation'
+  harness_ssh_timeout "${NAME}" "${remaining}" "$@"
+}
+
+review_ssh_no_input() {  # <deadline> <cmd...>
+  local deadline="$1"; shift
+  review_ssh "${deadline}" "$@" </dev/null
 }
 
 # Instructions and the task travel through stdin, not interpolated commands.
 # Each turn starts from a clean workspace: stale metadata, branches, or clones
 # from earlier runs would mislead the agent. Reports for other PRs survive, but
 # the ones this run is about must not -- a turn that fails before writing would
-# otherwise leave collect.sh returning the previous run's report as this one's.
+# otherwise leave review-collect.sh returning the previous run's report as this one's.
 stale_reports=""
 for pr_num in "${PR_NUMS[@]}"; do
   stale_reports+=" ~/reports/pr-${pr_num}.md"
 done
-bounded "${SETUP_TIMEOUT}" "${NAME}" \
+setup_deadline=$(( $(date +%s) + SETUP_TIMEOUT ))
+review_ssh_no_input "${setup_deadline}" \
   "rm -rf ~/review && mkdir -p ~/review ~/reports && rm -f${stale_reports}"
-bounded "${SETUP_TIMEOUT}" "${NAME}" 'cat > ~/AGENTS.md' <"${H_DIR}/review-agents.md"
+review_ssh "${setup_deadline}" 'cat > ~/AGENTS.md' <"${H_DIR}/review-agents.md"
 {
   printf 'Review pull requests %s of the GitHub repository %s.\n' \
     "$(IFS=,; echo "${PRS[*]}")" "${REPO}"
@@ -68,7 +72,7 @@ bounded "${SETUP_TIMEOUT}" "${NAME}" 'cat > ~/AGENTS.md' <"${H_DIR}/review-agent
   if [[ -n "${MESSAGE//[[:space:]]/}" ]]; then
     printf 'Additional instructions from the operator:\n%s\n' "${MESSAGE}"
   fi
-} | bounded "${SETUP_TIMEOUT}" "${NAME}" 'cat > ~/review/task.md'
+} | review_ssh "${setup_deadline}" 'cat > ~/review/task.md'
 # The message is read from the file by the remote shell; no local quoting of task text.
 # opencode run drains piped stdin to EOF before submitting its prompt, and the SSH
 # channel's stdin never EOFs while review.sh runs non-interactively, so the turn
@@ -84,5 +88,5 @@ turn='opencode run --format json "$(cat ~/review/task.md)" </dev/null'
 # The host waits slightly longer so the sandbox's own deadline reports first.
 review_cmd="cd ~ && if command -v timeout >/dev/null 2>&1; then"
 review_cmd+=" timeout -k 30 ${TIMEOUT} ${turn}; else ${turn}; fi"
-bounded "$(( TIMEOUT + 60 ))" "${NAME}" "${review_cmd}"
-note "Review turn finished; collect reports with: ${H_DIR}/collect.sh --name ${NAME}"
+review_ssh_no_input "$(( $(date +%s) + TIMEOUT + 60 ))" "${review_cmd}"
+note "Review turn finished; collect reports with: ${H_DIR}/review-collect.sh --name ${NAME}"

@@ -91,7 +91,8 @@ OpenCode is configured to use the Praxis URL and a placeholder local API key.
 The [OpenCode provider configuration](../../../configs/vllm/harness/harness-provider.json.in)
 does not contain a provider secret. The
 [sandbox network policy](../../../configs/vllm/harness/profiles/dev/policy.yaml)
-allows the OpenCode and Node binaries to reach only the Praxis host alias.
+allows the OpenCode and Node binaries to use only `GET /vllm/v1/models` and
+`POST /vllm/v1/chat/completions` on the Praxis host alias.
 
 That combination is the value of the architecture: the agent can still call a
 model and use its tools, but it does not receive a cloud key, the vLLM port, or

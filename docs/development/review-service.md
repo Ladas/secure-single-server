@@ -37,7 +37,7 @@ OpenShell 0.1.3 caps sandbox names at 19 characters; the profile is named
 fits without an explicit `--name`.
 
 Output is deliberately artifact-based. Reports land in `~/reports` inside the
-sandbox and leave only through `collect.sh` run by the operator. Posting
+sandbox and leave only through `review-collect.sh` run by the operator. Posting
 reports as PR comments is a planned phase-2 host-side step so the GitHub
 token never enters the sandbox.
 
@@ -68,7 +68,7 @@ work directly:
 ```bash
 sudo sss-bootc harness create --profile pr-review
 sudo sss-bootc harness review --repo OWNER/REPO --pr 74 --pr 78
-sudo sss-bootc harness collect --name opencode-pr-review
+sudo sss-bootc harness review-collect --name opencode-pr-review
 ```
 
 To pilot from a checkout that predates the running image, sync the branch to
@@ -94,7 +94,7 @@ sudo runuser -u openshell-svc -- env HOME=/var/lib/openshell-svc \
   --config /var/tmp/secure-single-server/configs/openshell-praxis
 ```
 
-`review.sh` and `collect.sh` take the same `runuser` wrapper (without
+`review.sh` and `review-collect.sh` take the same `runuser` wrapper (without
 `OPENSHELL_MODEL_ID`). On the bootc/Praxis shape the sandbox reaches the
 Praxis gateway, not provider APIs directly, so always pass the
 `--config .../configs/openshell-praxis` recipe and the administrator-approved
@@ -120,11 +120,11 @@ bounded non-interactive `opencode run` turn (default timeout 1 h, maximum
 4 h), and prints the agent's final JSON response. Next morning:
 
 ```bash
-openshell/harnesses/opencode/collect.sh            # into ./opencode-review-github-reports/
-openshell/harnesses/opencode/collect.sh --dest ~/reviews-2026-10-14/
+openshell/harnesses/opencode/review-collect.sh            # into ./opencode-review-github-reports/
+openshell/harnesses/opencode/review-collect.sh --dest ~/reviews-2026-10-14/
 ```
 
-`collect.sh` copies every file under the sandbox's `~/reports` to the local
+`review-collect.sh` copies every file under the sandbox's `~/reports` to the local
 directory and fails if no reports exist (a review turn that produced nothing
 is a failure, not an empty success).
 

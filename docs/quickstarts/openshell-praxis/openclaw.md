@@ -6,9 +6,10 @@ uses the `dev` profile and `openclaw agent exec`, not a browser or gateway servi
 
 Use a checkout containing this integration, or a bootc image built from it.
 Previously published `v0.1` images do not gain the new scripts automatically.
-See the [current upgrade qualification](../../testing/upgrade-0.1.3.md) for
-pins, AWS tests, and limits. The [earlier real-model evidence](../../testing/openclaw-praxis.md)
-uses the previous versions.
+See the [0.1.4 pin review](../../testing/upgrade-0.1.4.md) for the active pins
+and release compatibility. The [0.1.3 fixture qualification](../../testing/upgrade-0.1.3.md)
+and [earlier real-model evidence](../../testing/openclaw-praxis.md) are
+historical records; rerun an opt-in real-model task before promotion.
 
 ## Prepare model access
 
@@ -61,9 +62,11 @@ The runner sends the task through stdin and directs SQLite temporary files to
 policy-permitted `/tmp`. It creates disposable per-call agent state; it does
 not retain a conversation between invocations.
 
-The cloud development policy also permits selected GitHub/npm traffic.
-The vLLM policy permits only the Praxis model endpoint. Neither permits direct
-cloud model access. Do not combine this mode with automatic provider injection.
+The cloud development policy also permits selected GitHub/npm traffic. The vLLM
+policy permits only `GET /vllm/v1/models` and
+`POST /vllm/v1/chat/completions` on the Praxis model endpoint. Neither permits
+direct cloud model access. Do not combine this mode with automatic provider
+injection.
 
 ## Bootc deployment
 
@@ -105,10 +108,11 @@ sandbox SSH. Do not enable `exec` until that cleanup contract is qualified.
 Automated tests cover authenticated and credentialless synthetic upstreams,
 streamed tool execution, continuation, invalid upstream credentials, and
 OpenShell allow/deny enforcement. AWS also exercises the pinned workload and
-bootc container build. These [current upgrade checks](../../testing/upgrade-0.1.3.md)
-use a controlled model fixture. The upgraded pins also passed
+bootc container build. These [0.1.3 upgrade checks](../../testing/upgrade-0.1.3.md)
+used a controlled model fixture, and the same pins passed
 [real OpenAI model tasks on manual and booted bootc deployments](../../testing/upgrade-0.1.3-e2e.md).
-The earlier Qwen GPU results remain historical.
+The earlier Qwen GPU results and both records are historical for 0.1.4; the
+active pins require separate opt-in qualification.
 A synthetic credential test does not qualify a paid OpenAI account or every
 OpenAI-compatible service. Browser login, gateway service deployment, retained
 sessions, and `--backend` remain outside this tested path.

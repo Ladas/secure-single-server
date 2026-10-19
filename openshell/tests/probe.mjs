@@ -1,6 +1,9 @@
 // HTTP errors prove reachability. Only a distinct, evidenced proxy denial may pass.
 try {
-  const response = await fetch(process.argv[2], {signal: AbortSignal.timeout(10000)});
+  const response = await fetch(process.argv[2], {
+    method: process.argv[3] || 'GET',
+    signal: AbortSignal.timeout(10000)
+  });
   const body = await response.text();
   console.log(JSON.stringify({kind: 'http', status: response.status, body}));
 } catch (error) {
