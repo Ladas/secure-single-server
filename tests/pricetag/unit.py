@@ -47,10 +47,10 @@ class PreparationTest(unittest.TestCase):
         self.assertIn("datname='maas'", sql)
 
     def test_gateway_quadlet_keeps_required_lines_without_provider_secrets(self):
-        body = prepare.gateway_quadlet_body('sha256:' + 'a' * 64, [], 'Volume=/etc/praxis:/etc/praxis:ro\n', True)
+        body = prepare.gateway_quadlet_body('sha256:' + 'a' * 64, [], 'Volume=/tmp/pricetag-fixture:/etc/praxis:ro,Z\n', True)
         for required in ('Image=sha256:', 'Pull=never', 'NetworkAlias=pricetag-gateway',
                          'Secret=pricetag-m2m,', 'PublishPort=0.0.0.0:8443:8443',
-                         'Network=pricetag-mock.network', 'Volume=/etc/praxis:/etc/praxis:ro',
+                         'Network=pricetag-mock.network', 'Volume=/tmp/pricetag-fixture:/etc/praxis:ro,Z',
                          'Exec=-c /etc/praxis/gateway.json'):
             self.assertIn(required, body)
         with_secret = prepare.gateway_quadlet_body('sha256:' + 'a' * 64,
