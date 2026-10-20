@@ -45,6 +45,7 @@ repository; the guides below are separated by the question they answer.
 | Deploy the OS image | [bootc guide](../bootc/README.md) |
 | Configure harnesses, providers, or quotas | [Common configuration index](quickstarts/common/README.md) |
 | Inspect OpenShell policies and boundaries | [OpenShell documentation](../openshell/docs/README.md) |
+| Review OpenShell upstream release deltas | [OpenShell upstream tracking](development/openshell-upstream.md) |
 | Reproduce validation or add a new combination | [Testing guide](testing/README.md) |
 | Understand future scope and acceptance | [Roadmap](roadmap.md) |
 

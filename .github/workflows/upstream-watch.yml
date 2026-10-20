@@ -1,0 +1,29 @@
+name: Watch upstream OpenShell releases
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  track:
+    name: Track newer OpenShell releases
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Create or update the release delta issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENSHELL_UPSTREAM_REPOSITORY: NVIDIA/OpenShell
+        run: python3 scripts/github/upstream_watch.py
