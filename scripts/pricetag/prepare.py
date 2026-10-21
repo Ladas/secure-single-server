@@ -36,7 +36,7 @@ def vllm_only(original, models):
 
 
 def mock_inputs():
-    models = [{'id': 'demo-model', 'provider': 'vllm', 'model': 'fixture',
+    models = [{'id': 'fixture', 'provider': 'vllm', 'model': 'fixture',
                'apis': ['openai', 'anthropic'], 'context': 32768, 'output': 4096}]
     config = {'filter_chains': [{'name': api, 'filters': [
         {'filter': 'headers', 'request_remove': ['Authorization', 'X-Api-Key']},
@@ -64,12 +64,41 @@ def bootstrap(models, sources, budget):
     return '\n'.join(statements) + '\n'
 
 
+def postgres_bootstrap(metering_password, maas_password):
+    """Create the application roles/databases idempotently through psql."""
+    statements = []
+    for role, password, database in (
+            ('metering', metering_password, 'metering'),
+            ('maas', maas_password, 'maas')):
+        statements += [
+            f"SELECT format('CREATE ROLE {role} LOGIN PASSWORD %L', {literal(password)}) "
+            f"WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname={literal(role)}) \\gexec",
+            f'ALTER ROLE {role} LOGIN PASSWORD {literal(password)};',
+            f"SELECT 'CREATE DATABASE {database} OWNER {role}' "
+            f"WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname={literal(database)}) \\gexec",
+        ]
+    return '\n'.join(statements) + '\n'
+
+
+def gateway_quadlet_body(image, provider_secrets, mount, mock_provider):
+    mock_network = 'Network=pricetag-mock.network\n' if mock_provider else ''
+    return (
+        f'Image={image}\nPull=never\nNetworkAlias=pricetag-gateway\n'
+        + mock_network
+        + 'Secret=pricetag-m2m,type=mount,target=/run/secrets/pricetag-m2m,uid=1001,gid=1001,mode=0400\n'
+        + 'PublishPort=0.0.0.0:8443:8443\n'
+        + '\n'.join(provider_secrets) + '\n'
+        + mount + 'Exec=-c /etc/praxis/gateway.json\n'
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--providers', type=Path, default=Path('/etc/praxis/shared-gateway.yaml'))
     parser.add_argument('--models', type=Path, default=Path('/etc/praxis/unified-models.json'))
     parser.add_argument('--provider-unit', type=Path)
-    parser.add_argument('--praxis-image', required=True, help='local immutable image ID containing manual_jwt')
+    parser.add_argument('--praxis-image', required=True, help='local immutable image ID containing MaaS auth and metering filters')
+    parser.add_argument('--maas-image', required=True, help='local immutable cluster-free MaaS API image ID')
     parser.add_argument('--metering-image', required=True, help='local image ID sha256:... in praxis-svc storage')
     parser.add_argument('--hostname', required=True)
     mode = parser.add_mutually_exclusive_group()
@@ -87,7 +116,8 @@ def main():
         parser.error('run as root on the RHEL host')
     if not args.mock_provider and args.provider_unit is None:
         parser.error('--provider-unit is required unless --mock-provider is selected')
-    if not all(re.fullmatch(r'sha256:[0-9a-f]{64}', image) for image in (args.metering_image, args.praxis_image)):
+    if not all(re.fullmatch(r'sha256:[0-9a-f]{64}', image)
+               for image in (args.metering_image, args.praxis_image, args.maas_image)):
         parser.error('image arguments must be immutable local sha256 image IDs')
     if not 1 <= args.monthly_usd <= 10000:
         parser.error('monthly-usd must be 1–10000')
@@ -132,72 +162,87 @@ def main():
     def credentials(*options):
         subprocess.run([str(credential), *map(str, options)], check=True, stdout=subprocess.DEVNULL)
 
-    credentials('init-jwt', '--directory', args.admin_directory / 'issuer')
     credentials('lab-tls', '--directory', args.admin_directory / 'tls', '--hostname', args.hostname,
                 '--alt-hostname', 'localhost', '--alt-hostname', '127.0.0.1')
-    manual = ROOT / 'scripts/pricetag/credentials'
-    subprocess.run([str(manual), 'init', '--registry', str(bundle / 'users.json')], check=True)
-    for subject in ('admin', 'alice', 'bob'):
-        subprocess.run([str(manual), 'issue', '--key', str(args.admin_directory / 'issuer/private.pem'),
-            '--registry', str(bundle / 'users.json'), '--subject', subject,
-            '--output', str(args.admin_directory / (subject + '.jwt'))], check=True)
-    for source, target in [(args.admin_directory / 'issuer/public.pem', 'jwt-public.pem'),
-                           (args.admin_directory / 'tls/server.pem', 'tls.pem'),
+    for source, target in [(args.admin_directory / 'tls/server.pem', 'tls.pem'),
                            (args.admin_directory / 'tls/server-key.pem', 'tls-key.pem')]:
         shutil.copyfile(source, bundle / target)
     (bundle / 'gateway.json').write_text(json.dumps(config, indent=2) + '\n')
     shutil.copyfile(args.admin_directory / 'tls/ca.pem', args.directory / 'ca.pem')
-    password, m2m = secrets.token_hex(32), secrets.token_hex(32)
+    postgres_password, metering_password, maas_password = (secrets.token_urlsafe(32) for _ in range(3))
 
     def env(name, values):
         (args.directory / name).write_text(''.join(f'{k}={v}\n' for k, v in values.items()))
 
-    env('postgres.env', {'POSTGRES_USER': 'metering', 'POSTGRES_DB': 'metering',
-                        'POSTGRES_PASSWORD': password, 'TZ': 'UTC', 'PGTZ': 'UTC'})
-    env('metering.env', {'DATABASE_URL': f'postgres://metering:{password}@pricetag-db:5432/metering?sslmode=disable',
-        'M2M_AUTH_REQUIRED': 'true', 'M2M_SHARED_SECRET': m2m, 'SESSION_SECRET': secrets.token_hex(32),
+    initdb = args.directory / 'initdb'
+    initdb.mkdir(mode=0o750)
+    env('postgres.env', {'POSTGRES_USER': 'postgres', 'POSTGRES_DB': 'postgres',
+                        'POSTGRES_PASSWORD': postgres_password, 'TZ': 'UTC', 'PGTZ': 'UTC'})
+    (initdb / '10-create-databases.sql').write_text(
+        postgres_bootstrap(metering_password, maas_password))
+    m2m_secret = secrets.token_urlsafe(48)
+    env('metering.env', {'DATABASE_URL': f'postgres://metering:{metering_password}@pricetag-db:5432/metering?sslmode=disable',
+        'M2M_AUTH_REQUIRED': 'true', 'M2M_SHARED_SECRET': m2m_secret,
+        'SESSION_SECRET': secrets.token_urlsafe(48),
         'SUPERADMIN_USERS': 'admin', 'MONTHLY_TOKEN_QUOTA': '10000000000', 'TZ': 'UTC',
-        'MAAS_VALIDATE_URL': 'http://pricetag-gateway:18084/validate'})
-    env('gateway.env', {'M2M_SHARED_SECRET': m2m})
+        'MAAS_VALIDATE_URL': 'http://pricetag-maas:8080/internal/v1/api-keys/validate'})
+    (args.directory / 'm2m-secret').write_text(m2m_secret + '\n')
+    (args.directory / 'maas-db-url').write_text(
+        f'postgres://maas:{maas_password}@pricetag-db:5432/maas?sslmode=disable\n')
+    (args.directory / 'admin-directory').write_text(str(args.admin_directory) + '\n')
     (args.directory / 'bootstrap.sql').write_text(bootstrap(models, sources, args.monthly_usd))
     (args.directory / 'models.json').write_text(json.dumps(models, indent=2) + '\n')
     (args.directory / 'price-sources.json').write_text(json.dumps(sources, indent=2) + '\n')
-    (units / 'pricetag.network').write_text('[Network]\nNetworkName=pricetag-private\nDriver=bridge\n')
+    (units / 'pricetag.network').write_text(
+        '[Network]\nNetworkName=pricetag-private\nDriver=bridge\nSubnet=10.77.0.0/24\n')
     (units / 'pricetag-db.volume').write_text('[Volume]\nVolumeName=pricetag-data\n')
     common = 'ReadOnly=true\nNoNewPrivileges=true\n'
     app = common + 'User=1001\nGroup=1001\nUserNS=keep-id:uid=1001,gid=1001\nDropCapability=all\n'
     mount = f'Volume={bundle}:/etc/praxis:ro\n'
 
-    def container(name, description, dependencies, body, memory):
+    def container(name, description, dependencies, body, memory, network='pricetag.network'):
         (units / (name + '.container')).write_text(
             f'[Unit]\nDescription={description}\nWants=network-online.target\nAfter=network-online.target {dependencies}\n'
-            f'Requires={dependencies}\n\n[Container]\nContainerName={name}\nNetwork=pricetag.network\n'
+            f'Requires={dependencies}\n\n[Container]\nContainerName={name}\nNetwork={network}\n'
             f'{body}\n[Service]\nRestart=on-failure\nRestartSec=5\nTimeoutStartSec=900\n'
             f'MemoryMax={memory}\n\n[Install]\nWantedBy=default.target\n')
 
-    container('pricetag-db', 'PriceTag PostgreSQL', '',
+    container('pricetag-db', 'MaaS and PriceTag PostgreSQL', '',
         f'Image={POSTGRES}\nEnvironmentFile={args.directory}/postgres.env\n'
         'Volume=pricetag-db.volume:/var/lib/postgresql/data\n'
         'Tmpfs=/var/run/postgresql:rw,mode=3775\nTmpfs=/tmp\n'
-        'HealthCmd=pg_isready -U metering -d metering\nHealthInterval=10s\n' + common, '1G')
+        'HealthCmd=pg_isready -U postgres -d postgres\nHealthInterval=10s\n' + common, '1G')
+    container('pricetag-maas', 'MaaS standalone key API', 'pricetag-db.service',
+        f'Image={args.maas_image}\nPull=never\nNetworkAlias=pricetag-maas\n'
+        'IP=10.77.0.10\n'
+        'PublishPort=127.0.0.1:18086:8080\n'
+        f'Volume={args.directory}/maas-db-url:/run/secrets/maas-db-url:ro\n'
+        'Environment=MAAS_RUNTIME_MODE=standalone\nEnvironment=MAAS_SUBSCRIPTION_MODE=standalone\n'
+        'Environment=ADDRESS=:8080\nEnvironment=SECURE=false\n'
+        'Environment=DB_CONNECTION_URL_FILE=/run/secrets/maas-db-url\n'
+        'Environment=API_KEY_MAX_EXPIRATION_DAYS=90\nEnvironment=MAAS_ADMIN_GROUPS=single-server-admin\n'
+        'Environment=MAAS_TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.77.0.10/32,10.77.0.11/32,10.77.0.12/32\n'
+        'Environment=METRICS_SECURE=false\nEnvironment=METRICS_ADDRESS=127.0.0.1:9090\n' + app, '1G')
     container('pricetag-metering', 'PriceTag metering and dashboards', 'pricetag-db.service',
         f'Image={args.metering_image}\nPull=never\nNetworkAlias=pricetag-metering\n'
-        f'EnvironmentFile={args.directory}/metering.env\n' + app, '2G')
-    network = '' if args.mock_provider else 'Network=praxis.network\n'
+        f'EnvironmentFile={args.directory}/metering.env\n' + app, '2G',
+        network='pricetag.network:ip=10.77.0.12')
     dependencies = 'pricetag-metering.service'
     if args.mock_provider:
+        (units / 'pricetag-mock.network').write_text(
+            '[Network]\nNetworkName=pricetag-mock\nDriver=bridge\nSubnet=10.78.0.0/24\n')
         fixtures = args.directory / 'fixtures'
         fixtures.mkdir()
         shutil.copyfile(ROOT / 'tests/common/provider.py', fixtures / 'provider.py')
         shutil.copyfile(ROOT / 'tests/pricetag/provider.py', fixtures / 'run.py')
         container('pricetag-provider', 'Synthetic LLM for performance testing only', '',
             f'Image={PYTHON}\nVolume={fixtures}:/fixtures:ro\nEnvironment=MOCK_STREAM_DELAY=1\n'
-            'Exec=python3 /fixtures/run.py\n' + app, '1G')
+            'Exec=python3 /fixtures/run.py\n' + app, '1G', network='pricetag-mock.network')
         dependencies += ' pricetag-provider.service'
-    container('pricetag-gateway', 'Praxis HTTPS gateway with per-user USD budgets', dependencies,
-        f'Image={args.praxis_image}\nPull=never\nNetworkAlias=pricetag-gateway\n{network}PublishPort=0.0.0.0:8443:8443\n'
-        f'EnvironmentFile={args.directory}/gateway.env\n' + '\n'.join(provider_secrets) + '\n' +
-        mount + 'Exec=-c /etc/praxis/gateway.json\n' + app, '1G')
+    container('pricetag-gateway', 'Praxis HTTPS gateway with MaaS identity and USD budgets',
+        'pricetag-metering.service pricetag-maas.service',
+        gateway_quadlet_body(args.praxis_image, provider_secrets, mount, args.mock_provider) + app,
+        '1G', network='pricetag.network:ip=10.77.0.11')
     for path in [args.directory, *args.directory.rglob('*')]:
         os.chown(path, 0, owner.pw_gid)
         path.chmod(0o750 if path.is_dir() else 0o640)

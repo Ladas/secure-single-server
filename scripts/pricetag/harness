@@ -19,27 +19,63 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError('gateway redirected the authenticated catalog request')
 
 
+def opencode_configuration(catalog, selected, api, base, caller):
+    """Expose every advertised model through its native OpenAI or Messages API."""
+    providers = {}
+    grouped = {'openai': {}, 'anthropic': {}}
+    for entry in catalog:
+        if not isinstance(entry, dict) or not isinstance(entry.get('id'), str):
+            continue
+        meta = entry.get('praxis')
+        if not isinstance(meta, dict):
+            continue
+        context, output = meta.get('context'), meta.get('output')
+        apis = meta.get('apis')
+        if (type(context) is not int or type(output) is not int
+                or not 0 < output < context <= 2000000 or not isinstance(apis, list)):
+            continue
+        model = {'name': entry['id'], 'limit': {'context': context, 'output': output}}
+        for model_api in set(apis) & grouped.keys():
+            grouped[model_api][entry['id']] = model
+    for model_api, models in grouped.items():
+        if not models:
+            continue
+        name = 'praxis-' + model_api
+        provider = {'name': 'Praxis ' + model_api,
+            'npm': '@ai-sdk/anthropic' if model_api == 'anthropic' else '@ai-sdk/openai-compatible',
+            'options': {'baseURL': base.rstrip('/') + '/v1', 'apiKey': caller},
+            'models': models}
+        providers[name] = provider
+    selected_provider = 'praxis-' + api
+    if selected_provider not in providers or selected not in providers[selected_provider]['models']:
+        raise ValueError('selected model is absent from the chosen API catalog')
+    return {'model': selected_provider + '/' + selected,
+            'provider': providers,
+            'enabled_providers': list(providers),
+            'disabled_providers': []}
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('harness', choices=['opencode', 'codex', 'claude-code'])
     p.add_argument('--url', required=True)
-    p.add_argument('--token-file', type=Path, required=True)
+    p.add_argument('--key-file', type=Path, required=True,
+                   help='private MaaS API key file')
     p.add_argument('--ca-file', type=Path)
-    p.add_argument('--model', required=True, help='gateway alias, including its provider prefix')
+    p.add_argument('--model', required=True, help='default gateway alias; OpenCode can switch to every advertised model')
     p.add_argument('--api', choices=['openai', 'anthropic'], help='OpenCode dialect when both are available')
     p.add_argument('--print-config', action='store_true', help='redacted preview; do not launch')
     a = p.parse_args()
     origin = urlsplit(a.url)
     if origin.scheme != 'https' or not origin.hostname or origin.username or origin.password or origin.path not in ('', '/') or origin.query or origin.fragment:
         p.error('url must be an HTTPS origin')
-    if a.token_file.is_symlink() or not a.token_file.is_file() or a.token_file.stat().st_mode & 0o077:
-        p.error('token-file must be a private regular file (0600 or 0400)')
-    caller = a.token_file.read_text().strip()
-    if not re.fullmatch(r'[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', caller):
-        p.error('token-file must contain a caller JWT')
+    if a.key_file.is_symlink() or not a.key_file.is_file() or a.key_file.stat().st_mode & 0o077:
+        p.error('key-file must be a private regular file (0600 or 0400)')
+    caller = a.key_file.read_text().strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{24,512}', caller):
+        p.error('key-file must contain one opaque MaaS API key')
     context = ssl.create_default_context(cafile=str(a.ca_file) if a.ca_file else None)
-    request = urllib.request.Request(a.url.rstrip('/') + '/v1/models',
-                                     headers={'Authorization': 'Bearer ' + caller})
+    request = urllib.request.Request(a.url.rstrip('/') + '/v1/models')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
                                          urllib.request.HTTPSHandler(context=context))
     with opener.open(request, timeout=15) as response:
@@ -59,12 +95,16 @@ def main():
         p.error('invalid model limits in gateway catalog')
     provider = 'vllm' if meta['provider'] == 'vllm' and not (name == 'opencode' and api == 'anthropic') else api
     local_catalog = write_codex_catalog(a.model, Path.home() / '.cache/pricetag-harness', limits) if name == 'codex' and provider == 'vllm' else None
-    command, additions = configuration(name, provider, a.model, a.url, caller,
-        unified=True, model_limits=limits, upstream_model=meta['upstream_model'], catalog_path=local_catalog)
     if name == 'opencode':
-        config = json.loads(additions['OPENCODE_CONFIG_CONTENT'])
-        config.update(enabled_providers=['praxis'], disabled_providers=[])
-        additions['OPENCODE_CONFIG_CONTENT'] = json.dumps(config)
+        config = opencode_configuration(catalog, a.model, api, a.url, caller)
+        command = ['opencode']
+        additions = {'OPENCODE_CONFIG_CONTENT': json.dumps(config)}
+    else:
+        command, additions = configuration(name, provider, a.model, a.url, caller,
+            unified=True, model_limits=limits, upstream_model=meta['upstream_model'], catalog_path=local_catalog)
+    if name == 'claude':
+        additions.pop('ANTHROPIC_AUTH_TOKEN', None)
+        additions['ANTHROPIC_API_KEY'] = caller
     if name == 'codex' and provider != 'vllm':
         command += ['-c', f'model_context_window={limits[0]}', '-c', f'model_auto_compact_token_limit={limits[0]-limits[1]}']
     if name == 'claude':

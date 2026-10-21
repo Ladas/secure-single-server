@@ -25,7 +25,6 @@ DASHBOARD_PREFIXES = ['/api/v1/admin/people/', '/api/v1/org/quota-requests']
 
 
 def render(original, models, origins=None):
-    origins = origins or ['https://localhost:8443']
     models = validate(models)
     public_catalog = catalog(models, 'openai')
     for entry, model in zip(public_catalog['data'], models):
@@ -37,81 +36,72 @@ def render(original, models, origins=None):
         {'name': 'https', 'address': '0.0.0.0:8443', 'filter_chains': ['edge'],
          'tls': {'certificates': [{'cert_path': '/etc/praxis/tls.pem',
                                   'key_path': '/etc/praxis/tls-key.pem'}]}},
-        {'name': 'native-openai', 'address': '127.0.0.1:18080', 'filter_chains': ['openai']},
-        {'name': 'native-anthropic', 'address': '127.0.0.1:18081', 'filter_chains': ['anthropic']},
-        {'name': 'authenticated-inference', 'address': '127.0.0.1:18082', 'filter_chains': ['authenticated']},
-        {'name': 'metering-callout', 'address': '127.0.0.1:18083', 'filter_chains': ['callout']},
-        {'name': 'credential-validation', 'address': '0.0.0.0:18084', 'filter_chains': ['validation']},
+        {'name': 'authenticated-openai', 'address': '127.0.0.1:18082', 'filter_chains': ['openai']},
+        {'name': 'authenticated-anthropic', 'address': '127.0.0.1:18083', 'filter_chains': ['anthropic']},
         {'name': 'dashboard-boundary', 'address': '127.0.0.1:18085', 'filter_chains': ['dashboard']}]
     for chain in result['filter_chains']:
+        api = chain['name']
         filters = [f for f in chain['filters'] if f['filter'] not in ('token_rate_limit', 'policy', 'rate_limit')]
+        request_headers = next((f for f in filters if f['filter'] == 'headers'), None)
+        if request_headers is not None:
+            filters.remove(request_headers)
+        key_filter = {'filter': 'api_key_auth',
+            'validate_url': 'http://pricetag-maas:8080/internal/v1/api-keys/validate',
+            'token_header': 'authorization' if api == 'openai' else 'x-api-key',
+            'cache_ttl_seconds': 0, 'timeout_seconds': 5}
+        filters.insert(0, key_filter)
+        filters.insert(1, {'filter': 'identity_header_guard', 'prefix': 'x-tenant-'})
+        filters.insert(2, {'filter': 'model_access', 'mode': 'allowlist',
+                           'models': [model['id'] for model in models if api in model['apis']],
+                           'group_metadata_key': 'x-tenant-group', 'max_body_bytes': 33554432})
         for i, item in enumerate(filters):
             if item['filter'] == 'token_count':
                 filters.insert(i, {'filter': 'external_metering',
-                    'metering_url': 'http://127.0.0.1:18083', 'allow_private_endpoint': True,
+                    'metering_url': 'http://pricetag-metering:8080', 'allow_private_endpoint': True,
+                    'internal_auth_file': '/run/secrets/pricetag-m2m',
                     'fail_open': False, 'timeout_seconds': 5, 'source': 'secure-single-server',
-                    # An empty fallback still calls metering, whose missing
-                    # customer response fails closed. None would skip metering.
-                    'default_username': '', 'feature_key': 'inference-tokens'})
+                    'default_username': '', 'default_model': 'unknown',
+                    'identity_header_prefix': 'x-tenant-', 'feature_key': 'inference-tokens'})
                 break
+        if request_headers is not None:
+            load_balancer = next((i for i, item in enumerate(filters)
+                                  if item['filter'] == 'load_balancer'), len(filters))
+            filters.insert(load_balancer, request_headers)
         chain['filters'] = filters
 
-    post = [{'when': {'path_prefix': '/v1/', 'methods': ['POST']}}]
     allowed = [{'path': p} for p in DASHBOARD] + [{'path_prefix': p} for p in DASHBOARD_PREFIXES] + [
         {'path': '/v1/models', 'methods': ['GET']}] + [
-        {'path': p, 'methods': ['POST']} for p in INFERENCE]
-    def auth(mode):
-        return {'filter': 'manual_jwt', 'mode': mode,
-                'public_key_file': '/etc/praxis/jwt-public.pem',
-                'registry_file': '/etc/praxis/users.json',
-                'issuer': 'https://secure-single-server.local', 'audience': 'praxis-gateway',
-                'allowed_origins': origins if mode == 'dashboard' else []}
-
-    authenticated = [
-        {'filter': 'request_id'},
-        auth('inference'),
-        {'filter': 'static_response', 'status': 200, 'body': json.dumps(public_catalog),
-         'headers': [{'name': 'Content-Type', 'value': 'application/json'}],
-         'conditions': [{'when': {'path': '/v1/models', 'methods': ['GET']}}]},
-        {'filter': 'model_to_header', 'header': 'X-Tenant-Model', 'conditions': post},
-        {'filter': 'json_body', 'on_invalid': 'reject', 'max_body_bytes': 10485760,
-         'request_extract': [{'pointer': '/model', 'header': 'X-Tenant-Model'}], 'conditions': post},
-        {'filter': 'router', 'routes': [
-            {'path': p, 'cluster': 'native-anthropic' if p == '/v1/messages' else 'native-openai'}
-            for p in INFERENCE]},
-        {'filter': 'load_balancer', 'clusters': [
-            {'name': 'native-openai', 'endpoints': ['127.0.0.1:18080']},
-            {'name': 'native-anthropic', 'endpoints': ['127.0.0.1:18081']}]}]
-    callout = [
-        {'filter': 'router', 'routes': [
-            {'path': '/api/v1/events', 'cluster': 'metering'},
-            {'path_prefix': '/api/v1/customers/', 'cluster': 'metering'}]},
-        {'filter': 'credential_injection', 'clusters': [{'name': 'metering',
-            'header': 'Authorization', 'header_prefix': 'Bearer ', 'env_var': 'M2M_SHARED_SECRET'}]},
-        {'filter': 'load_balancer', 'clusters': [
-            {'name': 'metering', 'endpoints': ['pricetag-metering:8080']}]}]
-    # Each authentication role has its own unconditional chain. The callback
-    # listener is reachable only on the private container network.
+        {'path': p, 'methods': ['POST']} for p in [*INFERENCE, '/v1/messages/count_tokens']]
+    # The public listener routes protocol paths to different private chains so
+    # OpenAI Bearer keys and Anthropic x-api-key credentials validate on
+    # separate private chains. The public model catalog contains no secrets.
     public = [
         {'filter': 'request_id'},
         {'filter': 'static_response', 'status': 404, 'body': 'Route not available',
          'conditions': [{'unless': match} for match in allowed]},
-        # Dashboard navigation fans out to several authenticated API reads.
         {'filter': 'rate_limit', 'mode': 'global', 'rate': 30, 'burst': 120},
-        {'filter': 'router', 'routes': [
-            {'path': p, 'cluster': 'authenticated'} for p in [*INFERENCE, '/v1/models']] + [
-            {'path': p, 'cluster': 'dashboard'} for p in DASHBOARD] + [
-            {'path_prefix': p, 'cluster': 'dashboard'} for p in DASHBOARD_PREFIXES]},
+        {'filter': 'static_response', 'status': 200, 'body': json.dumps(public_catalog),
+         'headers': [{'name': 'Content-Type', 'value': 'application/json'}],
+         'conditions': [{'when': {'path': '/v1/models', 'methods': ['GET']}}]},
+        {'filter': 'router', 'routes':
+            [{'path': p, 'cluster': 'authenticated-anthropic'}
+             for p in ('/v1/messages', '/v1/messages/count_tokens')] +
+            [{'path': p, 'cluster': 'authenticated-openai'}
+             for p in ('/v1/responses', '/v1/chat/completions')] +
+            [{'path': p, 'cluster': 'dashboard'} for p in DASHBOARD] +
+            [{'path_prefix': p, 'cluster': 'dashboard'} for p in DASHBOARD_PREFIXES]},
         {'filter': 'load_balancer', 'clusters': [
-            {'name': 'authenticated', 'endpoints': ['127.0.0.1:18082']},
+            {'name': 'authenticated-openai', 'endpoints': ['127.0.0.1:18082']},
+            {'name': 'authenticated-anthropic', 'endpoints': ['127.0.0.1:18083']},
             {'name': 'dashboard', 'endpoints': ['127.0.0.1:18085']}]}]
-    result['filter_chains'] += [{'name': 'edge', 'filters': public},
-        {'name': 'authenticated', 'filters': authenticated}, {'name': 'callout', 'filters': callout},
-        {'name': 'validation', 'filters': [auth('callback')]},
-        {'name': 'dashboard', 'filters': [auth('dashboard'),
+    dashboard = [
+            {'filter': 'headers', 'request_remove': ['Authorization', 'X-Api-Key', 'X-MaaS-Username',
+                'X-MaaS-Group', 'X-MaaS-Subscription', 'X-Tenant-Username', 'X-Tenant-Group',
+                'X-Tenant-Subscription', 'X-Tenant-Model', 'X-Forwarded-User']},
             {'filter': 'router', 'routes': [{'path_prefix': '/', 'cluster': 'metering'}]},
             {'filter': 'load_balancer', 'clusters': [
-                {'name': 'metering', 'endpoints': ['pricetag-metering:8080']}]}]}]
+                {'name': 'metering', 'endpoints': ['pricetag-metering:8080']}]}]
+    result['filter_chains'] += [{'name': 'edge', 'filters': public}, {'name': 'dashboard', 'filters': dashboard}]
     return result
 
 
