@@ -93,7 +93,7 @@ then repeat. This transfers tracked and new, non-ignored source files from the
 current checkout, including local edits. Review the diff before copying; do not
 include credential files or `.state` data.
 
-## 3. Prepare RHEL and build pinned images
+## 3. Prepare RHEL and obtain pinned images
 
 Run on each RHEL host after copying the source:
 
@@ -106,34 +106,36 @@ sudo scripts/common/install --prepare
 
 Build the MaaS API from the reviewed standalone-runtime commit and build
 unmodified PriceTag metering from the revision pinned by this repository. The
-MaaS checkout must include `maas-api/Dockerfile` and `maas-api/`:
+MaaS checkout must include `maas-api/Dockerfile` and `maas-api/`.
+The minimal runtime branch includes the prerequisite
+[standalone API-key PR #1548](https://github.com/opendatahub-io/models-as-a-service/pull/1548)
+plus the runtime adaptation for operation without Kubernetes.
+The commands pin the [reviewed runtime commit](https://github.com/Ladas/models-as-a-service/commit/6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d); they do not build from a moving branch tip:
 
 ```console
-git clone --branch feat/standalone-runtime-config \
+git clone --branch feat/standalone-runtime-minimal \
   https://github.com/Ladas/models-as-a-service.git ~/models-as-a-service
-git -C ~/models-as-a-service checkout --detach REVIEWED_MAAS_COMMIT
+git -C ~/models-as-a-service checkout --detach 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
 sudo scripts/pricetag/build-maas --source ~/models-as-a-service \
-  --expected-commit REVIEWED_MAAS_COMMIT
+  --expected-commit 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
 git clone https://github.com/redhat-et/pricetag-metering.git ~/pricetag-metering
 sudo scripts/pricetag/build-metering --source ~/pricetag-metering
 ```
 
-Build the combined Praxis image from the reviewed experimental revision. It
-pins the reviewed `redhat-et/praxis-ai` source and includes this repository's
-filters. `--format docker` preserves the health check declared by its
-Containerfile.
+Pull the published combined Praxis image. This multi-architecture digest
+contains the reviewed `redhat-et/praxis-ai` integration and experimental
+filters from source revision `5667c4acecd0981ae5114cbbf2ee3dcccec9c248`.
+Praxis no longer needs a local image build; MaaS and metering still do.
 
 ```console
-git clone --branch feat/single-server-et-praxis \
-  https://github.com/Ladas/experimental.git ~/praxis-experimental
-git -C ~/praxis-experimental checkout --detach REVIEWED_EXPERIMENTAL_COMMIT
-sudo podman build --pull=always --format docker \
-  --label org.opencontainers.image.revision=REVIEWED_EXPERIMENTAL_COMMIT \
-  --tag localhost/praxis-experimental:reviewed \
-  --file ~/praxis-experimental/Containerfile ~/praxis-experimental
+PRAXIS_IMAGE=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8
+sudo podman pull "$PRAXIS_IMAGE"
+sudo podman image inspect "$PRAXIS_IMAGE" \
+  --format '{{index .Labels "org.opencontainers.image.revision"}}'
 ```
 
-Record the full image ID; do not deploy from a floating tag.
+The revision must match the source above. See the
+[publication and smoke-test workflow](https://github.com/opendatahub-io/praxis-experimental/actions/runs/39430750786).
 
 Import all three local images into the rootless service account and capture
 their immutable IDs. Set `PRAXIS_IMAGE` to the image built or pulled above:
@@ -146,7 +148,7 @@ svc() {
     XDG_RUNTIME_DIR="/run/user/$PRICETAG_UID" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$PRICETAG_UID/bus" "$@")
 }
-PRAXIS_IMAGE=localhost/praxis-experimental:reviewed
+PRAXIS_IMAGE=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8
 sudo podman save "$PRAXIS_IMAGE" | svc podman load
 sudo podman save localhost/pricetag-maas:standalone | svc podman load
 sudo podman save localhost/pricetag-metering:upstream-557ceb1 | svc podman load
