@@ -41,6 +41,7 @@ repository; the guides below are separated by the question they answer.
 | Combine OpenShell with Praxis | [OpenShell + Praxis guide](quickstarts/openshell-praxis/README.md) |
 | Serve users from accounts on one RHEL host | [All-in-one gateway](quickstarts/all-in-one/README.md) |
 | Connect harnesses on remote client machines | [Remote HTTPS/JWT gateway](quickstarts/remote-gateway/README.md) |
+| Deploy a remote gateway with user keys and USD budgets | [MaaS and PriceTag deployment](quickstarts/remote-gateway-pricetag/README.md), [providers](quickstarts/remote-gateway-pricetag/providers.md), [user administration](quickstarts/remote-gateway-pricetag/users.md) |
 | Try a post-deployment workflow | [Example scenarios](examples/README.md) |
 | Deploy the OS image | [bootc guide](../bootc/README.md) |
 | Configure harnesses, providers, or quotas | [Common configuration index](quickstarts/common/README.md) |
@@ -56,6 +57,7 @@ repository; the guides below are separated by the question they answer.
 | OpenShell gateway | Policy-controlled execution boundary and sandbox lifecycle for every harness | [OpenShell docs](../openshell/docs/README.md), [threat model](../openshell/docs/threat-model.md) |
 | Harness sandboxes | Coding agents packaged as digest-pinned images with four profiles: [OpenCode](../openshell/harnesses/opencode/README.md), [OpenClaw](../openshell/harnesses/openclaw/README.md) | [Single-server guide](quickstarts/openshell-single-server/README.md) |
 | Praxis | Provider credential custody, model routing, and shared token quotas | [OpenShell + Praxis guide](quickstarts/openshell-praxis/README.md), [token quotas](quickstarts/common/token-quotas.md) |
+| MaaS and PriceTag | Finite-lived API keys, per-user USD allowances, spending and dashboards for the remote gateway | [Deployment and operations](quickstarts/remote-gateway-pricetag/README.md) |
 | vLLM | Private local model inference on a separate CPU or GPU server | [Private vLLM workflow](quickstarts/common/vllm.md) |
 | Valkey | Durable quota ledger for the managed gateway | [All-in-one Valkey profile](quickstarts/all-in-one/valkey.md) |
 | bootc images | Repeatable RHEL 9 OS deployment carrying the selected harness | [bootc images](../bootc/README.md) |

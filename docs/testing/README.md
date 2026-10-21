@@ -3,6 +3,13 @@
 > **Where this fits:** The evidence stop. Return here after every deployment or
 > configuration change.
 
+## MaaS and PriceTag benchmarks
+
+[Set up a mock host and run benchmarks](pricetag-perf.md) with configurable
+concurrency and request counts, accounting verification and resource sampling.
+For real-provider installation and administration, use the official
+[MaaS and PriceTag guide](../quickstarts/remote-gateway-pricetag/README.md).
+
 ## AWS RHEL workflow
 
 For a fresh VM and manual use, follow the [official installation sequence](aws.md#6-install-services-and-test)

@@ -90,6 +90,21 @@ Bash session without editing the harness script, use:
 os_run "$repo/openshell/harnesses/opencode/connect.sh" --name opencode-dev bash
 ```
 
+## Remote gateway with user budgets
+
+To connect local harnesses to a shared RHEL gateway, follow the
+[MaaS and PriceTag deployment guide](docs/quickstarts/remote-gateway-pricetag/README.md).
+It covers AWS or an existing RHEL host, one-command or manual installation,
+real providers, USD budgets, dashboards and local OpenCode. Praxis routes
+inference, MaaS manages finite-lived user keys, and PriceTag meters spending.
+
+- [Provider configuration](docs/quickstarts/remote-gateway-pricetag/providers.md): endpoints,
+  hidden credential prompts, protected-file automation and replacement.
+- [User and key administration](docs/quickstarts/remote-gateway-pricetag/users.md): budgets,
+  key lifecycle and available UI/API operations.
+- [Mock benchmarks](docs/testing/pricetag-perf.md): separate test-host setup,
+  configurable load and accounting/resource checks.
+
 ## What can I do with this setup?
 
 For the shortest introduction to OpenShell's value, try the

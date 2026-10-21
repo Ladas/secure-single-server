@@ -75,7 +75,7 @@ admin roles to demonstrate it.
 
 ## Deploy and test
 
-Use the [AWS-to-RHEL runbook](aws-pricetag.md) for fresh real and performance
+Use the [AWS-to-RHEL runbook](../quickstarts/remote-gateway-pricetag/README.md) for fresh real and performance
 hosts. It covers VM launch, source transfer, image builds, Quadlet setup,
 provider configuration, key/budget provisioning, browser login and OpenCode.
 The performance VM uses a synthetic provider and a separate MaaS issuer/database.

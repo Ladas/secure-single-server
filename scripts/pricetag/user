@@ -35,7 +35,8 @@ def main():
     p.add_argument('--name', help='display name when creating a new PriceTag person')
     p.add_argument('--monthly-usd', type=float, help='optional per-person override; rotation otherwise leaves it unchanged')
     p.add_argument('--rotate', action='store_true', help='replace the same named MaaS key')
-    p.add_argument('--output', type=Path, required=True, help='new private path for the one-time MaaS key')
+    p.add_argument('--output', type=Path, help='new private path for the one-time MaaS key')
+    p.add_argument('--no-key', action='store_true', help='create/update the PriceTag identity and budget without issuing or rotating a key')
     p.add_argument('--admin-key', type=Path, default=Path('/root/pricetag-admin/admin.key'))
     p.add_argument('--gateway', default='https://localhost:8443')
     p.add_argument('--ca', type=Path, default=Path('/etc/praxis-pricetag/ca.pem'))
@@ -46,7 +47,11 @@ def main():
         p.error('invalid subject')
     if args.monthly_usd is not None and (not math.isfinite(args.monthly_usd) or not 0 < args.monthly_usd <= 10000):
         p.error('monthly-usd must be greater than zero and at most 10000')
-    if args.output.exists() or args.output.is_symlink():
+    if args.no_key and (args.rotate or args.output):
+        p.error('--no-key cannot be combined with --rotate or --output')
+    if not args.no_key and args.output is None:
+        p.error('key creation requires --output; use --no-key for identity/budget changes only')
+    if args.output and (args.output.exists() or args.output.is_symlink()):
         p.error('choose a new output path; existing credentials are never overwritten')
     if args.ca.is_symlink() or not args.ca.is_file():
         p.error('--ca must be an existing regular certificate file')
@@ -102,7 +107,8 @@ def main():
         '--url', args.maas_url, '--output', str(args.output)]
     if args.subject == 'admin':
         command.append('--admin')
-    subprocess.run(command, check=True)
+    if not args.no_key:
+        subprocess.run(command, check=True)
     print(f'PriceTag identity {slug} is linked to MaaS subject {args.subject}.')
     if args.monthly_usd is not None:
         print(f'Monthly USD override set to ${args.monthly_usd:.2f}.')

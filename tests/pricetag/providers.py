@@ -5,6 +5,7 @@ import importlib.util
 import importlib.machinery
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -23,6 +24,44 @@ from gateway import render as gateway
 
 
 class SetupTest(unittest.TestCase):
+    def test_unattended_key_is_sent_only_through_secret_stdin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = Path(directory) / 'key'
+            key.write_text('SECRET_SENTINEL')
+            key.chmod(0o600)
+            output = io.StringIO()
+            with patch.object(setup, 'STATE', Path(directory)), \
+                    patch.object(setup.sys.stdin, 'isatty', return_value=False), \
+                    patch.object(setup.getpass, 'getpass', side_effect=AssertionError('unexpected prompt')), \
+                    patch.object(setup, 'provider_settings', return_value={'secret': 'example', 'model': {'id': 'model-a'}}), \
+                    patch.object(setup, 'service', return_value=SimpleNamespace(returncode=0)) as secret, \
+                    contextlib.redirect_stdout(output):
+                setup.add_provider('openai', key_file=key)
+            self.assertEqual(secret.call_args.kwargs['input'], b'SECRET_SENTINEL')
+            self.assertNotIn('SECRET_SENTINEL', output.getvalue())
+            self.assertNotIn('SECRET_SENTINEL', (Path(directory) / 'provider-openai.json').read_text())
+
+    def test_private_key_file_rejects_public_symlink_and_oversized_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = Path(directory) / 'key'
+            key.write_text('synthetic-secret\n')
+            key.chmod(0o600)
+            self.assertEqual(setup.read_key_file(key), 'synthetic-secret')
+            key.chmod(0o644)
+            with self.assertRaises(ValueError):
+                setup.read_key_file(key)
+            key.chmod(0o600)
+            link = Path(directory) / 'link'
+            link.symlink_to(key)
+            with self.assertRaises(OSError):
+                setup.read_key_file(link)
+            key.write_text('x' * 16386)
+            with self.assertRaises(ValueError):
+                setup.read_key_file(key)
+            with patch.object(setup.os, 'geteuid', return_value=os.geteuid() + 1):
+                with self.assertRaises(ValueError):
+                    setup.read_key_file(key)
+
     def test_gateway_activation_accepts_public_catalog_and_requires_auth_for_inference(self):
         requests = []
 

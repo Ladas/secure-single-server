@@ -10,6 +10,7 @@ from pathlib import Path
 import pwd
 import re
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
@@ -562,8 +563,29 @@ def install_replacement(files, price_sql=None):
     print('Old Podman secrets retained for rollback. Verify a real inference request with your harness.')
 
 
-def add_provider(name, urls=None, replace=False, check_auth=False, check_inference=None, refresh=False):
-    if not sys.stdin.isatty():
+def read_key_file(path):
+    """Read a bounded private regular file without following its final symlink."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise ValueError('Credential file must be a private regular file owned by the invoking user (root under sudo)')
+        data = source.read(16386)
+    if len(data) > 16385:
+        raise ValueError('Credential file exceeds the size limit')
+    try:
+        key = data.decode('ascii').strip()
+    except UnicodeDecodeError:
+        raise ValueError('Expected one ASCII credential line') from None
+    if not key or len(key) > 16384 or not re.fullmatch(r'[\x21-\x7e]+', key):
+        raise ValueError('Expected one nonempty credential line')
+    return key
+
+
+def add_provider(name, urls=None, replace=False, check_auth=False, check_inference=None, refresh=False, key_file=None):
+    if key_file and name == 'pricetag' and not any((urls or {}).values()):
+        raise ValueError('--key-file with pricetag requires --anthropic-url or --openai-url')
+    if not key_file and not sys.stdin.isatty():
         raise ValueError('Run interactively over SSH; never pipe provider keys')
     STATE.mkdir(mode=0o700, exist_ok=True)
     destination = STATE / ('provider-' + name + '.json')
@@ -587,7 +609,7 @@ def add_provider(name, urls=None, replace=False, check_auth=False, check_inferen
     url = next(iter(urls.values()))
     if len(urls) > 1:
         print('Use one PriceTag key authorized for both URLs.')
-    key = getpass.getpass(name + ' provider key (hidden): ').strip()
+    key = read_key_file(key_file) if key_file else getpass.getpass(name + ' provider key (hidden): ').strip()
     if not key or len(key) > 16384 or not re.fullmatch(r'[\x21-\x7e]+', key):
         raise ValueError('Expected one nonempty credential line')
     if check_auth:
@@ -655,6 +677,7 @@ def main():
     parser.add_argument('command', choices=['openai', 'pricetag', 'export'])
     parser.add_argument('--openai-url', help='optional hosted PriceTag OpenAI endpoint override; HTTPS added if omitted')
     parser.add_argument('--anthropic-url', help='optional hosted PriceTag Messages endpoint override')
+    parser.add_argument('--key-file', type=Path, help='root-owned mode 0400/0600 credential file; never put a key in argv')
     parser.add_argument('--replace', action='store_true', help='replace saved inputs; on an active gateway, updates this provider endpoint/key with rollback and restarts only Praxis')
     parser.add_argument('--refresh-models', action='store_true',
                         help='with pricetag --replace: replace its routes/catalog with discovered presets plus explicit pins; retain historical pricing/usage')
@@ -674,6 +697,8 @@ def main():
     parser.add_argument('--pin-model', action='append', default=[], metavar='API:MODEL',
                         help='PriceTag only: include a reviewed preset even if omitted from a successful catalog')
     args = parser.parse_args()
+    if args.key_file and args.command == 'export':
+        parser.error('--key-file is only for provider setup or diagnostics')
     if args.refresh_models and (args.command != 'pricetag' or not args.replace or args.check_auth or args.check_inference):
         parser.error('--refresh-models requires pricetag --replace without diagnostics')
     if args.check_auth and args.check_inference:
@@ -719,7 +744,7 @@ def main():
             if value:
                 urls[api] = value
         add_provider(args.command, urls=urls, replace=args.replace, check_auth=args.check_auth,
-                     check_inference=probe, refresh=args.refresh_models)
+                     check_inference=probe, refresh=args.refresh_models, key_file=args.key_file)
 
 
 if __name__ == '__main__':
