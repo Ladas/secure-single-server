@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Prove shipped OpenShell policies remain within reviewed access boundaries."""
+"""Prove shipped OpenShell policies remain within reviewed access boundaries.
+
+Containment is proven in two layers. The pinned prover checks every authority
+shape its initial model can express. The one extension the runtime needs that
+the prover refuses by design — allow_encoded_slash, required for npm scoped
+packages — is contained structurally: it may appear only on enforced,
+rule-less, read-only rest endpoints, and only where the reviewed boundary
+carries it too. Anything else fails closed, inside the prover or here.
+"""
 import json
 import os
 from pathlib import Path
@@ -26,6 +34,15 @@ REQUIRED_COVERAGE = {
     "process",
     "landlock",
 }
+# The prover's initial model refuses endpoint extensions outright (upstream
+# crates/openshell-prover/src/containment.rs, validate_supported_endpoint_extensions):
+# allow_encoded_slash, tls, the credential rewrites, and allow_uninspected_credentials.
+# The runtime needs allow_encoded_slash on the npm registry — scoped packages
+# request /@scope%2Fname paths — so this check strips that single extension and
+# contains it structurally instead. Any other extension still fails closed
+# inside the prover; extend this tuple only after proving containment for the
+# new extension's runtime semantics.
+PROVER_OPAQUE_EXTENSIONS = ("allow_encoded_slash",)
 
 
 def discover_policies():
@@ -75,6 +92,57 @@ def assert_coverage(result, context):
     print(f"PASS boundary: {context} (coverage: domains={','.join(sorted(domains))})")
 
 
+def collect_opaque_endpoints(policy, context):
+    """Map (host, port) to rule name for endpoints carrying a prover-opaque extension.
+
+    The extension only relaxes request-path parsing (it accepts %2F), so on an
+    enforced, rule-less, read-only rest endpoint it cannot widen authority:
+    every parsed request is still bounded by the read-only access preset on
+    the same host, port, and binaries. Enforce exactly that shape and fail
+    closed on anything the extension could interact with.
+    """
+    opaque = {}
+    for name, rule in (policy.get("network_policies") or {}).items():
+        for endpoint in rule.get("endpoints", []):
+            if not any(endpoint.get(extension) for extension in PROVER_OPAQUE_EXTENSIONS):
+                continue
+            assert endpoint.get("protocol") == "rest", (
+                f"{context} rule '{name}' carries a prover-opaque extension "
+                "outside a rest endpoint"
+            )
+            assert endpoint.get("enforcement") == "enforce", (
+                f"{context} rule '{name}' carries a prover-opaque extension "
+                "without enforcement"
+            )
+            assert endpoint.get("access") == "read-only", (
+                f"{context} rule '{name}' carries a prover-opaque extension "
+                "beyond read-only access"
+            )
+            assert "rules" not in endpoint and "deny_rules" not in endpoint, (
+                f"{context} rule '{name}' carries a prover-opaque extension on "
+                "an endpoint with path rules, where it could bypass "
+                "path-level authority"
+            )
+            opaque[(endpoint["host"], endpoint["port"])] = name
+    return opaque
+
+
+def assert_opaque_containment(candidate_opaque, boundary_opaque, context):
+    exceeded = set(candidate_opaque) - set(boundary_opaque)
+    assert not exceeded, (
+        f"{context} grants prover-opaque endpoint extensions beyond the "
+        f"boundary: {sorted(exceeded)}"
+    )
+
+
+def strip_opaque_extensions(policy):
+    for rule in (policy.get("network_policies") or {}).values():
+        for endpoint in rule.get("endpoints", []):
+            for extension in PROVER_OPAQUE_EXTENSIONS:
+                endpoint.pop(extension, None)
+    return policy
+
+
 def check_mutated_policy(prover, boundary, directory):
     source = ROOT / "openshell/harnesses/opencode/profiles/review/policy.yaml"
     policy = yaml.safe_load(source.read_text().replace("@@PRAXIS_PORT@@", "18080"))
@@ -96,6 +164,28 @@ def check_mutated_policy(prover, boundary, directory):
     assert_coverage(result, "mutation control")
 
 
+def check_mutated_opaque_extension(prover, boundary, boundary_opaque, directory):
+    """Prove the structural check catches an extension grant the solver cannot see."""
+    source = ROOT / "openshell/harnesses/opencode/profiles/dev/policy.yaml"
+    policy = yaml.safe_load(source.read_text().replace("@@PRAXIS_PORT@@", "18080"))
+    policy["network_policies"]["github_api"]["endpoints"][0]["allow_encoded_slash"] = True
+    candidate_opaque = collect_opaque_endpoints(policy, "extension mutation control")
+    try:
+        assert_opaque_containment(candidate_opaque, boundary_opaque, "extension mutation control")
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("extension mutation control unexpectedly allowed a rogue extension")
+    candidate = directory / "mutated-extension-policy.yaml"
+    candidate.write_text(yaml.safe_dump(strip_opaque_extensions(policy), sort_keys=False))
+    returncode, result = run_prover(prover, candidate, boundary)
+    assert returncode == 0 and result["result"] == "within_boundary", (
+        "extension mutation control expected the stripped rogue policy to pass "
+        f"the solver, showing the gap is real: {result}"
+    )
+    print("PASS extension mutation control: solver-blind extension rejected structurally")
+
+
 def main():
     prover = os.environ.get("OPENSHELL_PROVER_BIN", "openshell-prover")
     policies = discover_policies()
@@ -105,18 +195,32 @@ def main():
         boundaries = {}
         for index, source in enumerate(policies):
             family, boundary_name = boundary_for(source)
-            boundary = directory / boundary_name
             if boundary_name not in boundaries:
-                render_policy(ROOT / "tests/policy-boundary" / boundary_name, boundary)
-                boundaries[boundary_name] = boundary
-            candidate = directory / f"{family}-{index}.yaml"
-            render_policy(source, candidate)
-            returncode, result = run_prover(prover, candidate, boundary)
+                rendered = directory / boundary_name
+                render_policy(ROOT / "tests/policy-boundary" / boundary_name, rendered)
+                boundary_data = yaml.safe_load(rendered.read_text())
+                boundary_opaque = collect_opaque_endpoints(boundary_data, boundary_name)
+                proven = directory / f"{boundary_name}.proven.yaml"
+                proven.write_text(
+                    yaml.safe_dump(strip_opaque_extensions(boundary_data), sort_keys=False))
+                boundaries[boundary_name] = {"proven": proven, "opaque": boundary_opaque}
+            boundary = boundaries[boundary_name]
             context = source.relative_to(ROOT)
+            rendered = directory / f"{family}-{index}.yaml"
+            render_policy(source, rendered)
+            policy = yaml.safe_load(rendered.read_text())
+            candidate_opaque = collect_opaque_endpoints(policy, context)
+            assert_opaque_containment(candidate_opaque, boundary["opaque"], context)
+            candidate = directory / f"{family}-{index}.proven.yaml"
+            candidate.write_text(yaml.safe_dump(strip_opaque_extensions(policy), sort_keys=False))
+            returncode, result = run_prover(prover, candidate, boundary["proven"])
             assert returncode == 0, f"{context} exceeds or cannot be checked: {result}"
             assert result["result"] == "within_boundary", result
             assert_coverage(result, context)
-        check_mutated_policy(prover, boundaries["opencode.yaml"], directory)
+        check_mutated_policy(prover, boundaries["opencode.yaml"]["proven"], directory)
+        check_mutated_opaque_extension(
+            prover, boundaries["opencode.yaml"]["proven"],
+            boundaries["opencode.yaml"]["opaque"], directory)
     print("openshell-policy-boundary: all shipped policies within boundaries OK")
     return 0
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pinned OpenCode/Praxis streamed write and command contract, without OpenShell.
+"""Pinned OpenCode/Praxis streamed tool and command contract, without OpenShell.
 
 Actual OpenShell enforcement is covered separately on disposable RHEL runners.
 """
@@ -103,7 +103,7 @@ def main():
                         raise RuntimeError('Tool continuation or upstream credential contract failed')
                     evidence['cases'].append({'upstream': 'credentialless' if local else 'bearer-authenticated',
                                               'status': 'passed', 'records': records})
-                    print('PASS OpenCode streamed write and bash tools, continuation, and credentials:', evidence['cases'][-1]['upstream'])
+                    print('PASS OpenCode streamed its bash tool, continuation, and credentials:', evidence['cases'][-1]['upstream'])
             finally:
                 fixture.close()
                 run(ENGINE, 'rm', '-f', name)

@@ -33,6 +33,15 @@ the modeled filesystem, network, process, and Landlock domains, and rejects an
 extra endpoint through a mutation control. CI installs OpenShell prover
 `v0.1.4` by checksum and runs this check in the UBI static lane.
 
+The prover's initial model refuses endpoint extensions by design, while the
+npm registry rules need `allow_encoded_slash` for scoped-package paths. That
+single extension is therefore contained structurally instead of by the solver:
+it may appear only on enforced, rule-less, read-only rest endpoints, and only
+where the reviewed boundary carries it too. Everything else is solver-proven,
+a second mutation control proves the structural check rejects an extension
+grant the solver cannot see, and any other extension still fails closed inside
+the prover.
+
 When a profile intentionally widens access, update the matching boundary in the
 same reviewed change. Treat the boundary as the reviewed maximum, not something
 to regenerate automatically from the candidate. After the change, run:
