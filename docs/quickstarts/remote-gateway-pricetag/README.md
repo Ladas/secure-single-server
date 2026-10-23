@@ -39,18 +39,25 @@ SSH_OPTS=(-o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY")
     'mkdir -p ~/secure-single-server && tar -xf - -C ~/secure-single-server'
 ) &&
 ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
-  "cd ~/secure-single-server && sudo scripts/pricetag/install --mode real --hostname '$GATEWAY_HOST' --provider openai --provider pricetag --monthly-usd 5 --yes"
+  "cd ~/secure-single-server && sudo scripts/pricetag/install --mode real --hostname '$GATEWAY_HOST'"
 ```
 
-Enter the **OpenAI key**, then the **hosted PriceTag URL and key** when prompted.
-Keys are hidden and stored as Podman secrets. Remove either `--provider` option
-if you use only one provider. For a DNS certificate, set `GATEWAY_HOST` to that
-DNS name before installation.
+Choose **OpenAI directly**, an **external API provider**, or **both**. At least
+one is required. For the external provider, choose **OpenAI-compatible**,
+**Anthropic Messages**, or **both APIs**, then enter the endpoint(s) and key.
+Keys use hidden prompts. One external key must cover all selected external APIs.
 
-The installer builds pinned MaaS/PriceTag images, pulls Praxis and starts the
-services. It creates `admin`, `alice` and `bob`; Alice and Bob each get $5/month.
-It refuses existing deployments. [Manual installation](manual.md) ·
-[Credential-file automation and provider options](providers.md)
+The installer validates credentials and selects supported model presets before
+building anything. Review the displayed setup and type `install` to continue;
+no more prompts are needed. A rejected key stops setup without saving provider
+configuration—correct it and rerun the command.
+
+It creates `admin`, `alice` and `bob`; Alice and Bob each get $5/month. Real mode
+cannot defer provider setup or omit these initial users. For a different
+allowance, add `--monthly-usd 10`. For a DNS certificate, set `GATEWAY_HOST` to
+that DNS name before installation. Existing deployments are refused.
+
+[Manual installation](manual.md) · [Provider options and unattended setup](providers.md)
 
 ## 3. Open the dashboards
 

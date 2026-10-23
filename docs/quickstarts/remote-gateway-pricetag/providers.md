@@ -6,7 +6,7 @@ for later changes:
 ```console
 cd ~/secure-single-server
 sudo python3 scripts/pricetag/providers openai --replace
-sudo python3 scripts/pricetag/providers pricetag --replace
+sudo python3 scripts/pricetag/providers external --api both --replace
 ```
 
 Run only the command for the provider you want to change. Credentials use
@@ -15,9 +15,11 @@ hidden prompts; replacement preserves users, budgets and spending history.
 | Provider | Input | Model prefix |
 | --- | --- | --- |
 | OpenAI | OpenAI key | `openai/` |
-| Hosted PriceTag | Hostname/URL and one key authorized for both APIs | `pricetag/` |
+| External API provider | Endpoint(s) and a key for the selected API(s) | `external/` |
 
-PriceTag adds HTTPS and the OpenAI `/v1` path automatically. Check the printed
+External provider setup adds HTTPS and the OpenAI `/v1` path automatically.
+Choose `--api openai`, `--api anthropic`, or `--api both`. Only selected APIs
+are discovered and configured. Check the printed
 credential destinations before entering the key. [Back to installation](README.md)
 
 <details>
@@ -28,7 +30,7 @@ Run one or both setup commands, then export. Continue with
 
 ```console
 sudo python3 scripts/pricetag/providers openai
-sudo python3 scripts/pricetag/providers pricetag
+sudo python3 scripts/pricetag/providers external --api both
 sudo python3 scripts/pricetag/providers export
 ```
 
@@ -38,7 +40,7 @@ sudo python3 scripts/pricetag/providers export
 <summary>Separate Messages and OpenAI-compatible endpoints</summary>
 
 ```console
-sudo python3 scripts/pricetag/providers pricetag --replace \
+sudo python3 scripts/pricetag/providers external --api both --replace \
   --anthropic-url MESSAGES_HOST --openai-url OPENAI_COMPATIBLE_HOST
 ```
 
@@ -56,13 +58,14 @@ Pass paths, never key values:
 ```console
 cd ~/secure-single-server
 sudo scripts/pricetag/install --mode real --hostname GATEWAY_IP_OR_DNS \
-  --provider openai --provider pricetag \
+  --provider openai --provider external --external-api both \
   --openai-key-file /root/provider-keys/openai.key \
-  --pricetag-key-file /root/provider-keys/pricetag.key \
-  --pricetag-messages-url HOSTED_PROVIDER_HOST --monthly-usd 5 --yes
+  --external-key-file /root/provider-keys/external.key \
+  --external-messages-url MESSAGES_HOST --external-openai-url OPENAI_COMPATIBLE_HOST --monthly-usd 5 --yes
 ```
 
-Add `--pricetag-openai-url` when the provider uses a separate hostname.
+For a shared hostname, use it for both endpoint options. For a single API,
+select it with `--external-api` and provide only its endpoint.
 Input files remain under your control after import; remove staged copies through
 your secret-delivery process. Do not put credentials in Git or shell arguments.
 
@@ -76,9 +79,9 @@ Git, logs or environment assignments. Use an SSH session without agent forwardin
 ```console
 sudo python3 scripts/pricetag/providers openai \
   --key-file /root/provider-keys/openai.key
-sudo python3 scripts/pricetag/providers pricetag \
-  --anthropic-url HOSTED_PROVIDER_HOST \
-  --key-file /root/provider-keys/pricetag.key
+sudo python3 scripts/pricetag/providers external --api both \
+  --anthropic-url MESSAGES_HOST --openai-url OPENAI_COMPATIBLE_HOST \
+  --key-file /root/provider-keys/external.key
 sudo python3 scripts/pricetag/providers export
 ```
 
@@ -95,13 +98,15 @@ accepts the same protected files for a complete unattended fresh installation.
 
 ### Discovery options
 
-The helper selects reviewed presets, not every advertised model. A catalog may
+The helper selects reviewed presets, not every advertised model. Each selected
+external API must advertise at least one matching preset; choose only the APIs
+your endpoint supports. A catalog may
 omit models permitted for a key; missing entries do not prove inference is
 unavailable. Conversely, discovery success does not prove inference works.
 
 ```console
-sudo python3 scripts/pricetag/providers pricetag --check-auth --debug
-sudo python3 scripts/pricetag/providers pricetag --help
+sudo python3 scripts/pricetag/providers external --api both --check-auth --debug
+sudo python3 scripts/pricetag/providers external --help
 ```
 
 `--debug` prints URLs, header names and status codes without keys or response
@@ -118,14 +123,24 @@ pricing before being added. `--allow-unverified-models` permits presets after
 catalog HTTP 404/405/501 only; authentication and TLS failures still stop setup.
 
 
-To replace the PriceTag model selection as well as its endpoint/key:
+To replace the external model selection as well as its endpoint/key:
 
 ```console
-sudo python3 scripts/pricetag/providers pricetag --replace --refresh-models --debug
+sudo python3 scripts/pricetag/providers external --api both --replace --refresh-models --debug
 ```
 
 Review model limits and prices before sending real traffic. A failed activation
 attempts rollback; old secrets remain available for recovery. Do not rerun
 `prepare.py` for provider replacement. Historical usage is not repriced.
+
+</details>
+
+<details>
+<summary>Existing deployments using the pricetag provider name</summary>
+
+Use `scripts/pricetag/providers pricetag --replace` for a deployment originally
+created with `pricetag/` aliases. That legacy profile and its endpoint-pair
+normalization remain supported. New `external` profiles use `external/` aliases;
+changing the profile name is not an in-place key rotation.
 
 </details>

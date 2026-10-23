@@ -88,16 +88,14 @@ from the MaaS user keys. Choose one or both provider types:
 ```console
 cd ~/secure-single-server
 sudo python3 scripts/pricetag/providers openai
-sudo python3 scripts/pricetag/providers pricetag
+sudo python3 scripts/pricetag/providers external --api both
 sudo python3 scripts/pricetag/providers export
 ```
 
-For PriceTag, enter the Messages hostname once; the helper derives the paired
-OpenAI hostname when applicable and adds HTTPS and `/v1`. Use the explicit
-discovery options only when the provider documents a nonstandard catalog or
-omits an entitled model. A model listed locally is not proof that the provider
-will accept an inference request. Review the generated model IDs, API types,
-limits and price mappings before preparing the host.
+For the external provider, use `--api openai`, `--api anthropic`, or `--api both`.
+Enter only the selected API endpoint(s), then the credential. HTTPS and `/v1`
+normalization are automatic. At least one provider and a matching model preset
+are required. Review the printed aliases, limits and price mappings.
 
 See [provider setup and replacement](providers.md) for separate API
 endpoints, discovery diagnostics, protected-file automation and replacement.

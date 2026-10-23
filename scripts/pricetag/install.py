@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Install the pinned gateway, MaaS and PriceTag on a fresh RHEL host."""
 import argparse
+import fcntl
+import importlib.machinery
+import importlib.util
 import ipaddress
 import os
 from pathlib import Path
@@ -101,73 +104,154 @@ def preflight(mode):
     for path in (DEPLOY, ADMIN):
         if path.exists() or path.is_symlink():
             raise ValueError(f'{path} already exists; this is a fresh installer, not an upgrade command')
-    if mode == 'mock' and INPUTS.exists():
-        raise ValueError('mock installation refuses existing real-provider inputs')
+    if INPUTS.exists() or INPUTS.is_symlink():
+        raise ValueError('existing provider inputs; use the manual setup steps to resume')
     if CACHE.is_symlink() or (CACHE.exists() and (CACHE.stat().st_uid != 0 or CACHE.stat().st_mode & 0o022)):
         raise ValueError('source cache must be root-owned and not group/world writable')
+
+
+def choice(label, options, default):
+    print(label)
+    values = list(options)
+    for number, value in enumerate(values, 1):
+        print(f'  {number}. {options[value]}')
+    while True:
+        value = input(f'Choice [{values.index(default) + 1}]: ').strip().lower() or default
+        if value.isdigit() and 1 <= int(value) <= len(values):
+            value = values[int(value) - 1]
+        if value in options:
+            return value
+        print('Choose one of: ' + ', '.join(values))
 
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=('real', 'mock'))
     p.add_argument('--hostname', help='public IPv4 or DNS name; no scheme, path or port')
-    p.add_argument('--provider', action='append', choices=('openai', 'pricetag'), default=[],
-                   help='real mode: repeat for both providers; credentials are prompted securely')
+    p.add_argument('--provider', action='append', choices=('openai', 'external', 'pricetag'), default=[],
+                   help='real mode requires one or more providers; pricetag is the legacy external profile')
     p.add_argument('--openai-key-file', type=Path)
-    p.add_argument('--pricetag-key-file', type=Path)
-    p.add_argument('--pricetag-messages-url')
-    p.add_argument('--pricetag-openai-url')
-    p.add_argument('--monthly-usd', type=int, default=5)
-    p.add_argument('--yes', action='store_true', help='skip installation confirmation, not credential prompts')
-    p.add_argument('--plan', action='store_true', help='print the stages without changing the host')
+    p.add_argument('--external-key-file', type=Path)
+    p.add_argument('--external-api', choices=('openai', 'anthropic', 'both'),
+                   help='external endpoint protocol(s): OpenAI-compatible, Anthropic Messages or both')
+    p.add_argument('--external-messages-url')
+    p.add_argument('--external-openai-url')
+    p.add_argument('--external-messages-auth', choices=('x-api-key', 'bearer'), default='x-api-key')
+    p.add_argument('--pricetag-key-file', type=Path, help=argparse.SUPPRESS)
+    p.add_argument('--pricetag-messages-url', help=argparse.SUPPRESS)
+    p.add_argument('--pricetag-openai-url', help=argparse.SUPPRESS)
+    p.add_argument('--monthly-usd', type=int, default=5, help='Alice/Bob monthly USD allowance; default 5')
+    p.add_argument('--yes', action='store_true', help='skip final confirmation, not missing setup prompts')
+    p.add_argument('--plan', action='store_true', help='print stages without credentials, discovery or host changes')
     args = p.parse_args(argv)
-    if not args.mode and sys.stdin.isatty() and not args.plan:
-        args.mode = input('Deployment mode [real/mock]: ').strip()
-    if not args.hostname and sys.stdin.isatty() and not args.plan:
+    interactive = sys.stdin.isatty() and not args.plan
+    if not args.mode and interactive:
+        args.mode = choice('Deployment:', {'real': 'Real upstream providers', 'mock': 'Synthetic benchmark only'}, 'real')
+    if not args.hostname and interactive:
         args.hostname = input('Gateway public IPv4 or DNS name: ').strip()
     if args.mode not in ('real', 'mock') or not args.hostname or not valid_hostname(args.hostname):
         p.error('provide --mode real|mock and --hostname with a valid IPv4 or DNS name')
     if not 1 <= args.monthly_usd <= 10000:
         p.error('--monthly-usd must be 1–10000')
+    if args.mode == 'real' and not args.provider:
+        if interactive:
+            selected = choice('At least one provider is required:', {
+                'openai': 'OpenAI directly',
+                'external': 'External API provider',
+                'both': 'OpenAI directly + external API provider'}, 'both')
+            args.provider = ['openai', 'external'] if selected == 'both' else [selected]
+        else:
+            p.error('real mode requires --provider openai and/or --provider external')
     if args.mode == 'mock' and args.provider:
         p.error('mock mode cannot configure real providers')
-    if args.mode == 'real' and not args.provider:
-        if sys.stdin.isatty() and not args.plan:
-            choice = input('Providers [openai/pricetag/both]: ').strip()
-            args.provider = ['openai', 'pricetag'] if choice == 'both' else [choice]
-        if not args.provider or any(x not in ('openai', 'pricetag') for x in args.provider):
-            p.error('real mode requires --provider openai and/or --provider pricetag')
-    for provider in ('openai', 'pricetag'):
+    if 'external' in args.provider and not args.external_api:
+        if interactive:
+            args.external_api = choice('External provider APIs:', {
+                'openai': 'OpenAI-compatible (Chat/Responses)',
+                'anthropic': 'Anthropic Messages', 'both': 'Both APIs'}, 'both')
+        elif args.plan:
+            args.external_api = 'both'
+        else:
+            p.error('--provider external requires --external-api openai|anthropic|both')
+    if args.external_api == 'openai' and args.external_messages_url:
+        p.error('Messages URL requires --external-api anthropic or both')
+    if args.external_api == 'anthropic' and args.external_openai_url:
+        p.error('OpenAI URL requires --external-api openai or both')
+    for provider in ('openai', 'external', 'pricetag'):
         key_file = getattr(args, provider + '_key_file')
         if key_file and not key_file.is_absolute():
             p.error('credential file paths must be absolute')
         if key_file and provider not in args.provider:
             p.error('--' + provider + '-key-file requires that provider')
-    if args.pricetag_messages_url or args.pricetag_openai_url:
-        if 'pricetag' not in args.provider:
-            p.error('PriceTag URLs require --provider pricetag')
+    for provider in ('external', 'pricetag'):
+        if any(getattr(args, provider + '_' + field) for field in ('messages_url', 'openai_url')) and provider not in args.provider:
+            p.error(provider + ' URLs require --provider ' + provider)
+    if args.external_api and 'external' not in args.provider:
+        p.error('--external-api requires --provider external')
     if args.pricetag_key_file and not (args.pricetag_messages_url or args.pricetag_openai_url):
         p.error('--pricetag-key-file requires a PriceTag URL')
     if not args.plan and not sys.stdin.isatty() and args.mode == 'real':
+        if not args.yes:
+            p.error('noninteractive installation requires --yes')
         if any(not getattr(args, provider + '_key_file') for provider in args.provider):
             p.error('noninteractive real installation requires a private key file for each provider')
+        if 'external' in args.provider:
+            required = ['openai', 'messages'] if args.external_api == 'both' else [
+                'messages' if args.external_api == 'anthropic' else 'openai']
+            if any(not getattr(args, 'external_' + api + '_url') for api in required):
+                p.error('supply an endpoint for each selected external API')
     args.provider = list(dict.fromkeys(args.provider))
     return args
 
 
-def main():
-    args = parse_args()
+def provider_module():
+    sys.path.insert(0, str(ROOT / 'scripts/common'))
+    loader = importlib.machinery.SourceFileLoader('installer_providers', str(ROOT / 'scripts/pricetag/providers'))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    module.STATE = INPUTS
+    return module
+
+
+def collect_providers(args, helper):
+    """Collect and validate every provider before any installation work."""
+    collected = []
+    for name in args.provider:
+        overrides, apis = {}, None
+        if name != 'openai':
+            overrides = {'openai': getattr(args, name + '_openai_url'),
+                         'anthropic': getattr(args, name + '_messages_url')}
+        if name == 'external':
+            apis = ['openai', 'anthropic'] if args.external_api == 'both' else [args.external_api]
+        helper.MESSAGES_AUTH = args.external_messages_auth if name == 'external' else 'x-api-key'
+        urls = helper.provider_urls(name, overrides, apis)
+        key = helper.collect_credential(name, urls, getattr(args, name + '_key_file'))
+        settings = helper.provider_settings(name, 'openai' if name == 'openai' else 'both',
+                    next(iter(urls.values())), key, urls=urls, allocate_secret=False)
+        collected.append((name, settings, key))
+    return collected
+
+
+def install(args):
     print(f'Fresh {args.mode} gateway: https://{args.hostname}:8443; monthly USD allowance: {args.monthly_usd}')
-    print('1. Install RHEL packages and prepare praxis-svc.')
-    print('2. Build pinned MaaS/PriceTag images; pull pinned Praxis; import into praxis-svc.')
-    print('3. Configure selected providers through hidden prompts or private files (mock: synthetic provider only).')
+    print('1. Collect provider endpoints/keys and validate model discovery before installing.')
+    print('2. Install RHEL packages and build/import pinned images.')
+    print('3. Save provider keys as Podman secrets and export the model configuration.')
     print('4. Generate TLS/configuration and start Quadlets; verify HTTPS readiness.')
     print('5. Print CA/key paths. Keys and provider credentials are not printed.')
     print('No AWS security-group changes, upgrades, backups or existing-data adoption.')
+    print('Creates admin, alice and bob; Alice/Bob monthly allowance: $' + str(args.monthly_usd))
+    print('Providers: ' + (', '.join(args.provider) or 'synthetic fixture only'))
+    if args.external_api:
+        print('External APIs: ' + args.external_api)
     if args.plan:
         print('MaaS commit: ' + MAAS_COMMIT + '\nPraxis image: ' + PRAXIS_IMAGE)
         return
     preflight(args.mode)
+    helper = provider_module()
+    prepared = collect_providers(args, helper)
+    print('Setup validated. Continue to build images and start services.')
     if not args.yes and input('Install on this host? Type install: ').strip() != 'install':
         raise ValueError('installation cancelled')
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
@@ -198,17 +282,9 @@ def main():
     if revision != PRAXIS_REVISION:
         raise ValueError('Praxis source label does not match the pinned release')
     ids = [import_image(image, prefix) for image in (PRAXIS_IMAGE, MAAS_IMAGE, METERING_IMAGE)]
-    for provider in args.provider:
-        setup = [sys.executable, ROOT / 'scripts/pricetag/providers', provider]
-        key_file = getattr(args, provider + '_key_file')
-        if key_file:
-            setup += ['--key-file', key_file]
-        if provider == 'pricetag':
-            for option, address in (('--anthropic-url', args.pricetag_messages_url),
-                                    ('--openai-url', args.pricetag_openai_url)):
-                if address:
-                    setup += [option, address]
-        run(setup)
+    for name, settings, key in prepared:
+        helper.save_provider(name, settings, key)
+    prepared.clear()
     command = [sys.executable, ROOT / 'scripts/pricetag/prepare.py', '--hostname', args.hostname,
                '--praxis-image', ids[0], '--maas-image', ids[1], '--metering-image', ids[2],
                '--monthly-usd', str(args.monthly_usd)]
@@ -229,6 +305,22 @@ def main():
     print('Continue with docs/quickstarts/remote-gateway-pricetag/users.md and the client steps in docs/quickstarts/remote-gateway-pricetag/README.md.')
     if args.mode == 'mock':
         print('Benchmark: sudo python3 scripts/pricetag/benchmark')
+
+
+def main():
+    args = parse_args()
+    if args.plan:
+        install(args)
+        return
+    preflight(args.mode)
+    os.umask(0o077)
+    fd = os.open('/run/pricetag-installer.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'w') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('Another installer is running') from None
+        install(args)
 
 
 if __name__ == '__main__':

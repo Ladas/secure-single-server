@@ -26,6 +26,43 @@ benchmark = module('benchmark')
 
 
 class InstallTest(unittest.TestCase):
+    def test_credentials_fail_before_installation_commands(self):
+        args = installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example',
+                                     '--provider', 'openai', '--openai-key-file', '/root/key', '--yes'])
+        with patch.object(installer, 'preflight'), patch.object(installer, 'provider_module'), \
+                patch.object(installer, 'collect_providers', side_effect=ValueError('HTTP 401')), \
+                patch.object(installer, 'run', side_effect=AssertionError('installation must not start')):
+            with self.assertRaisesRegex(ValueError, 'HTTP 401'):
+                installer.install(args)
+
+    def test_cancel_after_discovery_does_not_start_installation(self):
+        args = installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example',
+                                     '--provider', 'openai', '--plan'])
+        args.plan = False
+        with patch.object(installer, 'preflight'), patch.object(installer, 'provider_module'), \
+                patch.object(installer, 'collect_providers', return_value=[]), \
+                patch('builtins.input', return_value='cancel'), \
+                patch.object(installer, 'run', side_effect=AssertionError('installation must not start')):
+            with self.assertRaisesRegex(ValueError, 'cancelled'):
+                installer.install(args)
+
+    def test_interactive_selection_accepts_menu_numbers(self):
+        with patch.object(installer.sys.stdin, 'isatty', return_value=True), \
+                patch('builtins.input', side_effect=['2', '2']):
+            args = installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example'])
+        self.assertEqual(args.provider, ['external'])
+        self.assertEqual(args.external_api, 'anthropic')
+
+    def test_external_selection_requires_one_provider_and_records_api(self):
+        with patch.object(installer.sys.stdin, 'isatty', return_value=False):
+            with self.assertRaises(SystemExit):
+                installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example', '--yes'])
+            args = installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example',
+                '--provider', 'external', '--external-api', 'anthropic', '--external-key-file', '/root/key',
+                '--external-messages-url', 'provider.example', '--yes'])
+            self.assertEqual(args.external_api, 'anthropic')
+            self.assertEqual(args.provider, ['external'])
+
     def test_plan_runs_without_privileges_and_does_not_invoke_commands(self):
         with patch.object(sys, 'argv', ['install', '--mode', 'mock', '--hostname', 'gateway.example', '--plan']), \
                 patch.object(installer, 'run', side_effect=AssertionError('mutation')), \

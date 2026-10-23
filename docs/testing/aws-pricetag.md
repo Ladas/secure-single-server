@@ -43,12 +43,18 @@ The 32-GiB, 150-GiB instance profile is a test starting point, not a capacity
 claim. See [AWS operations](aws-operations.md) for restoring a launch session,
 printing both VM details, and changing ingress.
 
-Continue in the **same workstation shell**. `aws_test_verify` sets `RHEL_HOST`;
-`SSH_KEY` was set above. No IP or key path needs copying:
+## Continue in another terminal
+
+Run this in the workstation terminal used to create the VM. It prints only
+connection settings and paths, never AWS credentials, provider keys or SSH key
+contents. Copy its output into another Bash or Zsh terminal:
 
 ```console
-GATEWAY_HOST="${RHEL_HOST#*@}"
-REPO="$PWD"
+printf 'export RHEL_HOST=%q\nexport SSH_KEY=%q\nexport GATEWAY_HOST=%q\nexport REPO=%q\nexport RUN_PREFIX=%q\nexport REGION=%q\n' "$RHEL_HOST" "$SSH_KEY" "${RHEL_HOST#*@}" "$AWS_TEST_REPO" "$RUN_PREFIX" "$REGION"
+printf 'cd "$REPO"\n'
 ```
 
 Continue at [copy and install](../quickstarts/remote-gateway-pricetag/README.md#2-copy-and-install).
+The destination terminal does not need AWS administrator credentials for SSH,
+installation or OpenCode. If the SSH key is encrypted, unlock it there with
+`ssh-add "$SSH_KEY"` when needed.
