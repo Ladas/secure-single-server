@@ -44,6 +44,7 @@ and performance guides are linked from that overview.
 | Serve users from accounts on one RHEL host | [All-in-one gateway](quickstarts/all-in-one/README.md) |
 | Connect harnesses on remote client machines | [Remote HTTPS/JWT gateway](quickstarts/remote-gateway/README.md) |
 | Try a post-deployment workflow | [Example scenarios](examples/README.md) |
+| Inspect or adjust shared model-token allowances | [Praxis token quotas scenario](examples/praxis-quotas/README.md) |
 | Review the MaaS + PriceTag metering pilot | [Pilot overview](testing/pricetag.md), [AWS deployment runbook](testing/aws-pricetag.md), [performance procedure](testing/pricetag-perf.md) |
 | Deploy the OS image | [bootc guide](../bootc/README.md) |
 | Configure harnesses, providers, or quotas | [Common configuration index](quickstarts/common/README.md) |
@@ -58,7 +59,7 @@ and performance guides are linked from that overview.
 | --- | --- | --- |
 | OpenShell gateway | Policy-controlled execution boundary and sandbox lifecycle for every harness | [OpenShell Overview](../openshell/docs/README.md) |
 | Harness sandboxes | Coding agents packaged as digest-pinned images with four profiles: [OpenCode](../openshell/harnesses/opencode/README.md), [OpenClaw](../openshell/harnesses/openclaw/README.md) | [Single-server guide](quickstarts/openshell-single-server/README.md) |
-| Praxis | Provider credential custody, model routing, and shared token quotas | [OpenShell + Praxis guide](quickstarts/openshell-praxis/README.md), [token quotas](quickstarts/common/token-quotas.md) |
+| Praxis | Provider credential custody, model routing, and shared token quotas | [OpenShell + Praxis guide](quickstarts/openshell-praxis/README.md), [token quota reference](quickstarts/common/token-quotas.md), [quota operations scenario](examples/praxis-quotas/README.md) |
 | MaaS + PriceTag | Finite API keys, USD budgets, and usage metering for the experimental single-server pilot | [Pilot overview](testing/pricetag.md), [deployment runbook](testing/aws-pricetag.md), [performance procedure](testing/pricetag-perf.md) |
 | vLLM | Private local model inference on a separate CPU or GPU server | [Private vLLM workflow](quickstarts/common/vllm.md) |
 | Valkey | Durable quota ledger for the managed gateway | [All-in-one Valkey profile](quickstarts/all-in-one/valkey.md) |
@@ -115,7 +116,8 @@ python -m pip install -r requirements-docs.txt
 scripts/docs/serve
 ```
 
-Open <http://127.0.0.1:8000/>. The preview updates as repository files change.
+Open <http://127.0.0.1:8000/>. To refresh the preview after editing docs, run
+`python3 scripts/docs/stage.py`; MkDocs rebuilds when `.docs-build/` changes.
 To create a static site in `site/`, run `scripts/docs/serve build` instead. The
 `mkdocs.yml` navigation includes the PriceTag pilot overview, AWS runbook, and
 performance procedure.

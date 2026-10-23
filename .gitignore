@@ -1,10 +1,10 @@
 .state/
 evidence/
+.docs-build/
+site/
+.venv-docs/
 *.local
 *.secret
 __pycache__/
 *.pyc
 .playwright-cli/
-.docs-build/
-.venv-docs/
-site/

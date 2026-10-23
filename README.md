@@ -1,5 +1,11 @@
 # Secure single-server AI harness
 
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://redhat-et.github.io/secure-single-server/)
+[![Deploy documentation](https://github.com/redhat-et/secure-single-server/actions/workflows/pages.yml/badge.svg)](https://github.com/redhat-et/secure-single-server/actions/workflows/pages.yml)
+
+> **Published documentation.** The rendered guides are available at
+> [redhat-et.github.io/secure-single-server](https://redhat-et.github.io/secure-single-server/).
+
 Secure single-server AI harness runs [OpenCode](https://github.com/anomalyco/opencode)
 and [OpenClaw](https://github.com/openclaw/openclaw) on one dedicated RHEL 9
 x86_64 host. [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.4/docs)
@@ -75,7 +81,7 @@ For risk-focused security demos, explore these scenarios:
   unrestricted model choice with the approved gateway catalog, which refuses
   an unapproved model before credentials are used.
 
-All post-deployment scenarios are indexed in
+For quota administration, see the [Praxis token quotas scenario](docs/examples/praxis-quotas/README.md). All post-deployment scenarios are indexed in
 [Example scenarios](docs/examples/README.md). Run them from the deployed
 repository checkout: on a bootc image, use
 `/usr/share/secure-single-server`; on a manual deployment, use

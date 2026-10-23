@@ -2,11 +2,12 @@ site_name: Secure single-server AI harness
 site_description: >-
   Run OpenCode and OpenClaw on one dedicated RHEL 9 host with OpenShell,
   Praxis, and bootc.
-site_url: http://127.0.0.1:8000/
+site_url: https://redhat-et.github.io/secure-single-server/
 repo_url: https://github.com/redhat-et/secure-single-server
 repo_name: redhat-et/secure-single-server
 edit_uri: edit/main/
 copyright: Experimental demonstration, not a production-ready platform.
+
 docs_dir: .docs-build
 site_dir: site
 use_directory_urls: true
@@ -60,9 +61,13 @@ nav:
       - OpenShell + Praxis:
           - Overview: docs/quickstarts/openshell-praxis/README.md
           - Install: docs/quickstarts/openshell-praxis/install.md
-          - Harness configuration: docs/quickstarts/common/harness-configuration.md
           - OpenClaw bounded tasks: docs/quickstarts/openshell-praxis/openclaw.md
           - Integration matrix: docs/quickstarts/openshell-praxis/users.md
+      - Common gateway configuration:
+          - Overview: docs/quickstarts/common/README.md
+          - Harness configuration: docs/quickstarts/common/harness-configuration.md
+          - Provider setup: docs/quickstarts/common/providers.md
+          - Token quota reference: docs/quickstarts/common/token-quotas.md
       - All-in-one gateway:
           - Overview: docs/quickstarts/all-in-one/README.md
           - In-memory deployment: docs/quickstarts/all-in-one/in-memory.md
@@ -83,6 +88,7 @@ nav:
           - Performance procedure: docs/testing/pricetag-perf.md
   - Scenarios:
       - Overview: docs/examples/README.md
+      - Praxis token quotas: docs/examples/praxis-quotas/README.md
       - OpenCode PR-candidate queue: docs/examples/opencode-pr-queue/README.md
       - Demo task prompt: docs/examples/opencode-pr-queue/demo-task.md
       - API key theft: docs/examples/api-key-theft/README.md
@@ -94,6 +100,21 @@ nav:
       - Compatibility matrix: docs/testing/compatibility.md
       - Validation records: bootc/VALIDATION.md
       - vLLM validation: bootc/VLLM-VALIDATION.md
+
+not_in_nav: |
+  bootc/README.md
+  docs/quickstarts/bootc/README.md
+  docs/quickstarts/podman/README.md
+  docs/roadmap.md
+  docs/development/documentation-site.md
+  docs/development/openshell-upstream.md
+  openshell/docs/policy-walkthrough.md
+  openshell/docs/threat-model.md
+  openshell/harnesses/openclaw/README.md
+  openshell/harnesses/opencode/README.md
+  openshell/harnesses/opencode/review-agents.md
+  openshell/harnesses/opencode/pr-queue/instructions.md
+  openshell/demos/streamlit-security/README.md
 
 markdown_extensions:
   - admonition
@@ -125,3 +146,10 @@ plugins:
 
 hooks:
   - scripts/docs/mkdocs_hooks.py
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/redhat-et/secure-single-server
+      name: Secure single-server AI harness on GitHub
