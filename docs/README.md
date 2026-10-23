@@ -74,6 +74,8 @@ harness README lists its profiles and entry points.
 
 ## Reading rules
 
+For maintainers: [build and publish standalone MaaS and PriceTag images](development/pricetag-images.md).
+
 - The recommended route is the sandboxed **harness → OpenShell → Praxis →
   inference** path. Other guides describe alternate deployment shapes, not
   interchangeable substitutes.
