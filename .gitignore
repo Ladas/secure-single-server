@@ -8,3 +8,5 @@ site/
 __pycache__/
 *.pyc
 .playwright-cli/
+.worktrees/
+.DS_Store
