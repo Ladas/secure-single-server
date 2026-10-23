@@ -1,8 +1,10 @@
 # Manual single-server container deployment
 
 Install OpenShell and a harness sandbox on a dedicated RHEL 9 x86_64 VM or
-bare-metal host. Run from a reviewed repository checkout in a Bash session.
-For the OS-image route, use the separate [bootc guide](bootc.md).
+bare-metal host. Run every shell block in Bash on that host, logged in as the
+administrator, unless a command uses `sudo` or `os_run`. Keep one shell session
+open from the repository checkout through the setup so `repo` and `os_run`
+remain available. For the OS-image route, use the separate [bootc guide](bootc.md).
 
 OpenShell runs under a locked service account with rootless Podman. Praxis is
 an optional, separately installed model gateway. Review the
@@ -25,14 +27,16 @@ printf '%s  /tmp/rg.tar.gz\n' "${rg_sha256}" | sha256sum -c - &&
   sudo install -m 0755 "/tmp/ripgrep-${rg_version}-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
 ```
 
-Clone the reviewed repository to a durable, service-readable location, review
-the checked-out revision, and run the installer from that directory:
+In the same host shell, create a checkout under `/opt` and review the commit
+before installing. The checkout and its parent directory are readable by
+`openshell-svc`, so service-owner commands can use the scripts there:
 
 ```bash
 sudo install -d -o "$(id -un)" -m 0755 /opt/secure-single-server
 git clone https://github.com/redhat-et/secure-single-server /opt/secure-single-server
 cd /opt/secure-single-server
 repo="$PWD"
+git log -1 --oneline
 ```
 
 ```bash

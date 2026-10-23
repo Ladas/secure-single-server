@@ -47,7 +47,7 @@ hardware estimates and Flash variants, see [instance sizing](../../testing/aws.m
 The 27B preset uses quantized weights rather than the roughly 54 GB BF16
 weights. Total runtime memory also includes cache and working buffers;
 quantized model size alone is not a RAM/VRAM requirement.
-[Model definition](../../../configs/vllm/qwen3.8-27b-int4.env),
+[Model definition](https://github.com/redhat-et/secure-single-server/blob/main/configs/vllm/qwen3.8-27b-int4.env),
 [upstream quantization](https://huggingface.co/RedHatAI/Qwen3.8-27B-INT4).
 
 ## 1. Transfer the deployment files

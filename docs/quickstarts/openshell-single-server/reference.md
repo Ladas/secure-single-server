@@ -45,7 +45,7 @@ harness, and policies into one repeatable deployment.
 The current deployment is for a **trusted single operator**. It is not
 multi-tenant authorization, and it does not inspect prompts or guarantee that
 code produced by a model is trustworthy. Read the
-[threat model](../../../openshell/docs/threat-model.md) before exposure to
+[OpenShell Overview](../../../openshell/docs/README.md) before exposure to
 valuable data or shared use.
 
 ## What the policy protects
@@ -70,9 +70,9 @@ The default development endpoints are:
 The exact endpoint and filesystem rules differ by profile. Review the policy
 before deployment rather than inferring it from the profile name:
 
-- [OpenCode policies](../../../openshell/harnesses/opencode/profiles/dev/policy.yaml)
-- [OpenClaw policies](../../../openshell/harnesses/openclaw/profiles/dev/policy.yaml)
-- [Full policy qualification contract](../../../openshell/docs/policy-walkthrough.md)
+- [OpenCode policies](https://github.com/redhat-et/secure-single-server/blob/main/openshell/harnesses/opencode/profiles/dev/policy.yaml)
+- [OpenClaw policies](https://github.com/redhat-et/secure-single-server/blob/main/openshell/harnesses/openclaw/profiles/dev/policy.yaml)
+- [Full policy qualification contract](../../../openshell/docs/README.md#policy-enforcement-and-qualification)
 
 Start with the `dev` profile for the first smoke test. It is intentionally wide
 enough for the CLI to operate; the manual section records current harness

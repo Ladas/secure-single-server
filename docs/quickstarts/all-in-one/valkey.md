@@ -9,7 +9,7 @@ Valkey stores only token-quota state. Request-rate buckets remain in Praxis
 memory and reset with Praxis. This profile does not include Switchyard.
 
 Configuration:
-[`shared-gateway-valkey.yaml`](../../../configs/all-in-one/shared-gateway-valkey.yaml).
+[`shared-gateway-valkey.yaml`](https://github.com/redhat-et/secure-single-server/blob/main/configs/all-in-one/shared-gateway-valkey.yaml).
 
 The administrator runs the deployment scripts. Ordinary users do not receive
 the scripts, configuration, or repository. The scripts validate the host,

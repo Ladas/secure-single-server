@@ -251,7 +251,7 @@ class StreamlitSecurityTests(unittest.TestCase):
 
     def test_documentation_explains_where_to_run_the_demo(self):
         guide = (ROOT / "docs/examples/streamlit-security/README.md").read_text()
-        self.assertIn("AWS is not required", guide)
+        self.assertIn("dedicated RHEL 9 x86_64 Linux host", guide)
         self.assertIn("/opt/secure-single-server", guide)
         self.assertIn("Landlock ABI 3", guide)
         self.assertIn("not a supported OpenShell host", guide)

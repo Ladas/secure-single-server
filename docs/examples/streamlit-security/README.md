@@ -1,10 +1,11 @@
 # Streamlit before and after OpenShell
 
-Run the same Streamlit support-copilot twice. First it runs in an ordinary
-container with the real model key in the application process. Then it runs in
-OpenShell with an attached provider, a read-only application directory, and a
-hard-required Landlock policy. The provider profile authorizes the credential
-only for `POST /v1/chat/completions`.
+This scenario is a simple way to show the benefits of the same application
+with and without OpenShell. It runs first in an ordinary container with the
+real model key in the application process, then in OpenShell with an attached
+provider, a read-only application directory, and a hard-required Landlock
+policy. The provider profile authorizes the credential only for
+`POST /v1/chat/completions`.
 
 ```text
 ordinary container
@@ -23,22 +24,22 @@ OpenShell sandbox
 
 ### Where to run it
 
-AWS is not required. The commands below use a dedicated RHEL 9 x86_64 Linux
-host, such as a local or cloud VM or bare-metal machine; an ordinary nested
-container is not a supported OpenShell host. Before running the demo, complete
-steps 1 and 2 of the [manual OpenShell deployment guide](../../quickstarts/openshell-single-server/manual.md):
+Run the commands on a dedicated RHEL 9 x86_64 Linux host, such as a local or
+cloud VM or bare-metal machine; an ordinary nested container is not a supported
+OpenShell host. Before running the demo, complete the
+[manual gateway setup in OpenShell Overview](../../../openshell/docs/README.md#manual-gateway-setup-on-rhel):
 install OpenShell, verify Landlock ABI 3 or newer, start the gateway, and define
-the `repo` and `os_run` shell helper. The manual guide's checkout path is
-`/opt/secure-single-server`. Stop before its harness-creation steps: this demo
+the `repo` and `os_run` shell helper. Stop before creating a harness: this demo
 runs a Streamlit container directly and does not need a harness or Praxis. Run
-all commands below in that same Bash session; a new shell will not have the
-`repo` variable or `os_run` helper.
+all commands below in the same Bash session so the `repo` variable and
+`os_run` helper remain available.
 
 The unsafe half uses your login account's rootless Podman. The OpenShell half
 uses the `openshell-svc` account's OpenShell CLI and rootless Podman, so use the
-guide's `os_run` helper for its profile, provider, sandbox, service, and verify
-commands. If you use a different OpenShell deployment, it must provide the
-same service-account CLI and rootless Podman context for `run-safe.sh`.
+OpenShell setup's `os_run` helper for its profile, provider, sandbox, service,
+and verify commands. If you use a different OpenShell deployment, it must
+provide the same service-account CLI and rootless Podman context for
+`run-safe.sh`.
 
 If the host is remote, open the matching SSH tunnel before starting each
 version, then open Streamlit in your local browser. The unsafe container uses
@@ -60,8 +61,17 @@ request.
 
 ### OpenAI
 
-Import the demo provider profile from the repository root, using the `os_run`
-helper defined in the manual deployment guide:
+First export the provider and model values in the Bash session you will use for
+both runs. The ordinary run requires the endpoint and model; the OpenShell run
+also requires the provider name:
+
+```console
+export STREAMLIT_DEMO_PROVIDER=streamlit-demo-openai
+export MODEL_BASE_URL=https://api.openai.com/v1
+export OPENAI_MODEL=gpt-5.5
+```
+
+Import the demo provider profile from the repository root with `os_run`:
 
 ```console
 os_run openshell profile lint -f "$repo/openshell/demos/streamlit-security/providers/openai.yaml"
@@ -74,14 +84,6 @@ with these Streamlit-specific values: `--name streamlit-demo-openai`,
 `--type streamlit-openai`, and `--credential OPENAI_API_KEY`. Keep the command
 in the service-owner shell so the real key is entered at a hidden prompt.
 
-Select this provider and model for both runs:
-
-```console
-export STREAMLIT_DEMO_PROVIDER=streamlit-demo-openai
-export MODEL_BASE_URL=https://api.openai.com/v1
-export OPENAI_MODEL=gpt-5.5
-```
-
 ### OpenAI-compatible endpoint
 
 For endpoint setup details, see the
@@ -89,7 +91,16 @@ For endpoint setup details, see the
 Edit the host and port in
 `openshell/demos/streamlit-security/providers/openai-compatible.yaml`. The
 profile host and port must match the HTTPS host and port in `MODEL_BASE_URL`.
-Lint and import the profile:
+Export the provider and model values before importing the profile or running
+either app:
+
+```console
+export STREAMLIT_DEMO_PROVIDER=streamlit-demo-compatible
+export MODEL_BASE_URL=https://inference.internal/v1
+export OPENAI_MODEL=your-model-id
+```
+
+Lint and import the profile with `os_run`:
 
 ```console
 os_run openshell profile lint -f "$repo/openshell/demos/streamlit-security/providers/openai-compatible.yaml"
@@ -99,13 +110,6 @@ os_run openshell profile import -f "$repo/openshell/demos/streamlit-security/pro
 Register the provider by reusing the hidden-prompt procedure linked above, with
 `--name streamlit-demo-compatible`,
 `--type streamlit-openai-compatible`, and `--credential OPENAI_API_KEY`.
-Then select it for both runs:
-
-```console
-export STREAMLIT_DEMO_PROVIDER=streamlit-demo-compatible
-export MODEL_BASE_URL=https://inference.internal/v1
-export OPENAI_MODEL=your-model-id
-```
 
 ## Run the unsafe version
 
@@ -120,8 +124,9 @@ openshell/demos/streamlit-security/run-unsafe.sh
 unset OPENAI_API_KEY
 ```
 
-Use the same key, endpoint, and model you configured in the selected provider
-section above so the two runs differ only in their execution boundary.
+Use the key, endpoint, and model from the selected provider section above.
+Keep the exported endpoint and model values set; the unsafe script inherits
+them from this shell.
 
 Open `http://localhost:8501`. Choose **Summarize with model**, then choose both
 diagnostics. The model call succeeds, the app writes a fake marker to
@@ -133,10 +138,10 @@ the diagnostics remain the only local actions.
 
 ## Run the OpenShell version
 
-After completing one of the provider sections above and the unsafe run, the
-same variables still select the matching profile, endpoint, and model. If the
-host is remote, open the tunnel below in a second terminal and keep it open
-while the demo runs:
+After completing one of the provider sections above and the unsafe run, keep
+its exported variables set. The safe run requires all three and passes them
+into the service-owner environment. If the host is remote, open the tunnel
+below in a second terminal and keep it open while the demo runs:
 
 ```console
 ssh -N -L 8090:127.0.0.1:8090 user@open-shell-host

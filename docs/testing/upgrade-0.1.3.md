@@ -3,7 +3,7 @@
 This upgrade replaces the coordinated OpenShell runtime with the public upstream
 v0.1.3 gateway, supervisor, and isolation images. OpenClaw uses the public upstream
 v2026.9.9 image. All image digests and architecture-specific CLI checksums are
-committed in [images.env](../../openshell/configs/images.env).
+committed in [images.env](https://github.com/redhat-et/secure-single-server/blob/main/openshell/configs/images.env).
 The previously used downstream repositories had not published these versions at
 the time of qualification. The new workload containers use upstream Debian-based
 runtimes; the deployment host and bootc OS remain RHEL 9.
@@ -70,7 +70,7 @@ Repeat native client/gateway checks with
 host, run `sudo bash tests/openshell-praxis/openclaw-runtime.sh`, then
 `sudo bash tests/openshell-praxis/opencode-runtime.sh`. Wait for each command to
 finish cleanup before starting the next: they share loopback fixture ports. The hosted
-[OpenShell workflow](../../.github/workflows/openshell-validate.yml) uses the new
+[OpenShell workflow](https://github.com/redhat-et/secure-single-server/blob/main/.github/workflows/openshell-validate.yml) uses the new
 prover, verified CLI, offline download controls, and native OpenClaw and OpenCode contracts.
 The privileged OpenShell runtime job runs both harnesses and remains opt-in on
 `main` only. The offline fixture test covers OpenCode's streamed write → bash →

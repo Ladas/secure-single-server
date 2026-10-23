@@ -21,9 +21,9 @@ not tested.
 
 RHEL base digest:
 `sha256:cfe6b13fa436d39088cc525254f5de9f4e0c7da8b8f0b44b926acd11cdeb42d7`.
-Workload digests are recorded in [vLLM pins](../configs/vllm/images.env),
-[OpenShell pins](../openshell/configs/images.env), and the existing
-[Praxis defaults](../scripts/common/lib.sh).
+Workload digests are recorded in [vLLM pins](https://github.com/redhat-et/secure-single-server/blob/main/configs/vllm/images.env),
+[OpenShell pins](https://github.com/redhat-et/secure-single-server/blob/main/openshell/configs/images.env), and the existing
+[Praxis defaults](https://github.com/redhat-et/secure-single-server/blob/main/scripts/common/lib.sh).
 
 Final **booted** OCI manifests reported by `bootc status`:
 

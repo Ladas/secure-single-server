@@ -59,4 +59,4 @@ workflow has not yet received a real-provider runtime qualification.
 
 A timeout, SSH failure, or HTTP 401 does not prove a policy denial.
 Delete test sandboxes with `openshell sandbox delete NAME`; do not source libraries
-into your terminal. See [threat model](../../../openshell/docs/threat-model.md).
+into your terminal. See the [OpenShell Overview](../../../openshell/docs/README.md).

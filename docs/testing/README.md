@@ -33,6 +33,10 @@ References, as needed:
 - [AWS operations](aws-operations.md): access choices, custom hardware, recovery and cleanup.
 - [vLLM administration](../quickstarts/common/vllm.md): installation without the smoke runner and maintenance.
 - [vLLM debugging](vllm-debugging.md): known failures, upstream leads and fix qualification.
+- [MaaS + PriceTag pilot](pricetag.md): finite MaaS API keys, USD budgets,
+  deployment, and metering. The linked [AWS runbook](aws-pricetag.md) and
+  [performance procedure](pricetag-perf.md) retain the pilot's operational and
+  measured quota details.
 
 ## OpenShell harness model and tool checks
 
@@ -88,7 +92,7 @@ The pinned Praxis and Valkey images include amd64 and arm64. Container tests
 compare the image architecture with the engine host; emulation does not qualify
 native deployment. The mutable vLLM workflow requires RHEL 9 x86_64.
 
-[CI](../../.github/workflows/validate.yml) runs static checks and container
+[CI](https://github.com/redhat-et/secure-single-server/blob/main/.github/workflows/validate.yml) runs static checks and container
 contracts on native amd64 and arm64 Linux runners with synthetic credentials.
 It does not run the RHEL installer or paid provider calls. Qualify each intended
 RHEL architecture, profile and harness/model combination separately.

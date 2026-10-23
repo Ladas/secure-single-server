@@ -23,7 +23,7 @@ The agent cannot push, comment, open or close issues or PRs (denied by the
 L7 policy before reaching GitHub, regardless of credentials), cannot reach
 any other host, and works inside landlock-enforced filesystem policy with a
 read-only `/usr`. The profile stays within the reviewed
-[opencode boundary](../../tests/policy-boundary/opencode.yaml); OpenShell's
+[opencode boundary](https://github.com/redhat-et/secure-single-server/blob/main/tests/policy-boundary/opencode.yaml); OpenShell's
 audit log records every denied attempt.
 
 Unlike the `review` profile (whose read-only workdir expects code pushed in
@@ -73,7 +73,7 @@ sudo sss-bootc harness review-collect --name opencode-pr-review
 
 To pilot from a checkout that predates the running image, sync the branch to
 the host with
-[`scripts/dev/sync-branch.sh`](../../scripts/dev/sync-branch.sh)
+[`scripts/dev/sync-branch.sh`](https://github.com/redhat-et/secure-single-server/blob/main/scripts/dev/sync-branch.sh)
 (per-file `scp -p` with add/modify/delete handling — the bootc host ships no
 rsync), stage the checkout where `openshell-svc` can read it
 (`sudo chmod -R a+rX` on a copy under `/var/tmp`, following the

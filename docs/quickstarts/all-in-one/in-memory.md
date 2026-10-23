@@ -9,7 +9,7 @@ Request and token-quota state is kept in Praxis memory and resets whenever
 Praxis restarts.
 
 Configuration:
-[`shared-gateway.yaml`](../../../configs/all-in-one/shared-gateway.yaml).
+[`shared-gateway.yaml`](https://github.com/redhat-et/secure-single-server/blob/main/configs/all-in-one/shared-gateway.yaml).
 
 The administrator runs the deployment scripts. Ordinary users do not receive
 the scripts, configuration, or repository. The scripts validate the host,

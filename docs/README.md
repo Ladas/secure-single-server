@@ -6,10 +6,9 @@ repository; the guides below are separated by the question they answer.
 
 ## Recommended route
 
-1. **Understand the architecture.** Read
-   [why this architecture exists](quickstarts/architecture-walkthrough/README.md)
-   before choosing a deployment. It explains what each layer protects, what it
-   does not protect, and which evidence is accepted.
+1. **Review the architecture.** Read the
+   [Architecture overview](quickstarts/architecture-walkthrough/README.md) to
+   understand the component roles, model access paths, and system boundaries.
 2. **Deploy a sandboxed harness.** Use
    [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.4/docs) through the
    [manual container guide](quickstarts/openshell-single-server/manual.md) or
@@ -30,21 +29,25 @@ repository; the guides below are separated by the question they answer.
 6. **Plan the next capability.** Use the [roadmap](roadmap.md) to separate
    accepted behavior from work still in progress.
 
+The separate experimental [MaaS + PriceTag pilot](testing/pricetag.md) documents
+finite MaaS API keys, USD usage budgets, and PriceTag metering. Its deployment
+and performance guides are linked from that overview.
+
 ## Choose by outcome
 
 | If you need to… | Use |
 | --- | --- |
-| Explain or review the complete system | [Architecture walkthrough](quickstarts/architecture-walkthrough/README.md) |
+| Review component roles and model paths | [Architecture overview](quickstarts/architecture-walkthrough/README.md) |
 | Install OpenShell and harness containers separately | [Manual single-server deployment](quickstarts/openshell-single-server/manual.md) |
-| Deploy or evaluate OpenShell quickly | [Single-server bootc quickstart](quickstarts/bootc/README.md) |
-| Inspect the bootc image or make a model call with Podman | [Podman quickstart](quickstarts/podman/README.md) |
+| Choose a deployment method | [Deployment methods](deployment-methods.md) |
 | Combine OpenShell with Praxis | [OpenShell + Praxis guide](quickstarts/openshell-praxis/README.md) |
 | Serve users from accounts on one RHEL host | [All-in-one gateway](quickstarts/all-in-one/README.md) |
 | Connect harnesses on remote client machines | [Remote HTTPS/JWT gateway](quickstarts/remote-gateway/README.md) |
 | Try a post-deployment workflow | [Example scenarios](examples/README.md) |
+| Review the MaaS + PriceTag metering pilot | [Pilot overview](testing/pricetag.md), [AWS deployment runbook](testing/aws-pricetag.md), [performance procedure](testing/pricetag-perf.md) |
 | Deploy the OS image | [bootc guide](../bootc/README.md) |
 | Configure harnesses, providers, or quotas | [Common configuration index](quickstarts/common/README.md) |
-| Inspect OpenShell policies and boundaries | [OpenShell documentation](../openshell/docs/README.md) |
+| Inspect OpenShell policies and boundaries | [OpenShell Overview](../openshell/docs/README.md) |
 | Review OpenShell upstream release deltas | [OpenShell upstream tracking](development/openshell-upstream.md) |
 | Reproduce validation or add a new combination | [Testing guide](testing/README.md) |
 | Understand future scope and acceptance | [Roadmap](roadmap.md) |
@@ -53,9 +56,10 @@ repository; the guides below are separated by the question they answer.
 
 | Component | What it provides | Start here |
 | --- | --- | --- |
-| OpenShell gateway | Policy-controlled execution boundary and sandbox lifecycle for every harness | [OpenShell docs](../openshell/docs/README.md), [threat model](../openshell/docs/threat-model.md) |
+| OpenShell gateway | Policy-controlled execution boundary and sandbox lifecycle for every harness | [OpenShell Overview](../openshell/docs/README.md) |
 | Harness sandboxes | Coding agents packaged as digest-pinned images with four profiles: [OpenCode](../openshell/harnesses/opencode/README.md), [OpenClaw](../openshell/harnesses/openclaw/README.md) | [Single-server guide](quickstarts/openshell-single-server/README.md) |
 | Praxis | Provider credential custody, model routing, and shared token quotas | [OpenShell + Praxis guide](quickstarts/openshell-praxis/README.md), [token quotas](quickstarts/common/token-quotas.md) |
+| MaaS + PriceTag | Finite API keys, USD budgets, and usage metering for the experimental single-server pilot | [Pilot overview](testing/pricetag.md), [deployment runbook](testing/aws-pricetag.md), [performance procedure](testing/pricetag-perf.md) |
 | vLLM | Private local model inference on a separate CPU or GPU server | [Private vLLM workflow](quickstarts/common/vllm.md) |
 | Valkey | Durable quota ledger for the managed gateway | [All-in-one Valkey profile](quickstarts/all-in-one/valkey.md) |
 | bootc images | Repeatable RHEL 9 OS deployment carrying the selected harness | [bootc images](../bootc/README.md) |
@@ -95,6 +99,23 @@ this deployment does not qualify.
 
 ## Next step
 
-Start with the [architecture walkthrough](quickstarts/architecture-walkthrough/README.md).
+Start with the [Architecture overview](quickstarts/architecture-walkthrough/README.md).
 If you already understand the system and only need a disposable evaluation,
 use the [bootc quickstart](quickstarts/bootc/README.md).
+
+## Preview the documentation locally
+
+From the repository root, install the pinned documentation dependencies and
+start the local preview:
+
+```console
+python3 -m venv .venv-docs
+. .venv-docs/bin/activate
+python -m pip install -r requirements-docs.txt
+scripts/docs/serve
+```
+
+Open <http://127.0.0.1:8000/>. The preview updates as repository files change.
+To create a static site in `site/`, run `scripts/docs/serve build` instead. The
+`mkdocs.yml` navigation includes the PriceTag pilot overview, AWS runbook, and
+performance procedure.
