@@ -40,7 +40,8 @@ sudo scripts/pricetag/build-metering --source ~/pricetag-metering
 Pull the published combined Praxis image. This multi-architecture digest
 contains the reviewed `redhat-et/praxis-ai` integration and experimental
 filters from source revision `5667c4acecd0981ae5114cbbf2ee3dcccec9c248`.
-Praxis no longer needs a local image build; MaaS and metering still do.
+This manual path builds MaaS and metering locally. The installer also supports
+[pulling published application images by digest](images.md).
 
 ```console
 PRAXIS_IMAGE=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8

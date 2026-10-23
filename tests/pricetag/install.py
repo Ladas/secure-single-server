@@ -2,6 +2,8 @@
 """Fresh-install and benchmark safety boundaries; no host mutations."""
 import importlib.machinery
 import importlib.util
+import contextlib
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -26,6 +28,78 @@ benchmark = module('benchmark')
 
 
 class InstallTest(unittest.TestCase):
+    def image_args(self, *extra):
+        return installer.parse_args(['--mode', 'mock', '--hostname', 'gateway.example', '--plan', *extra])
+
+    def test_published_images_require_digests_and_skip_source_builds(self):
+        for reference in ('quay.io/example/maas:latest', 'sha256:' + 'a' * 64):
+            with self.assertRaises(SystemExit):
+                self.image_args('--image-mode', 'published', '--maas-image', reference)
+        args = self.image_args('--image-mode', 'published',
+                               '--maas-image', 'quay.io/example/maas@sha256:' + 'a' * 64,
+                               '--metering-image', 'quay.io/example/metering@sha256:' + 'b' * 64)
+        def execute(command, capture=False, **kwargs):
+            self.assertEqual(command[0], 'podman')
+            if capture:
+                if command[-1] == '{{.Architecture}}':
+                    return 'amd64'
+                return {installer.PRAXIS_IMAGE: installer.PRAXIS_REVISION,
+                        args.maas_image: args.maas_revision,
+                        args.metering_image: args.metering_revision}[command[3]]
+        with patch.object(installer, 'run', side_effect=execute), \
+                patch.object(installer, 'checkout', side_effect=AssertionError('source checkout')):
+            self.assertEqual(installer.acquire_images(args, 'amd64'), (args.maas_image, args.metering_image))
+        with patch.object(installer, 'run', return_value='wrong-source'):
+            with self.assertRaisesRegex(ValueError, 'source revision'):
+                installer.acquire_images(args, 'amd64')
+
+    def test_source_revision_overrides_reach_checkout_and_build(self):
+        args = self.image_args('--image-mode', 'source', '--maas-revision', 'a' * 40,
+                               '--metering-revision', 'b' * 40)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(installer, 'CACHE', Path(directory)), \
+                patch.object(installer, 'checkout') as checkout:
+            def execute(command, capture=False, **kwargs):
+                if capture:
+                    if command[-1] == '{{.Architecture}}':
+                        return 'amd64'
+                    return {installer.PRAXIS_IMAGE: installer.PRAXIS_REVISION,
+                            installer.MAAS_IMAGE: args.maas_revision,
+                            installer.METERING_IMAGE: args.metering_revision}[command[3]]
+            with patch.object(installer, 'run', side_effect=execute) as run:
+                installer.acquire_images(args, 'amd64')
+            self.assertEqual([call.args[2] for call in checkout.call_args_list], ['a' * 40, 'b' * 40])
+            commands = [list(map(str, call.args[0])) for call in run.call_args_list]
+            self.assertTrue(any('--revision' in c and 'b' * 40 in c for c in commands))
+            self.assertTrue(any('--expected-commit' in c and 'a' * 40 in c for c in commands))
+
+    def test_build_output_is_private_and_capture_still_returns_values(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(installer, 'LOG', None), patch.object(installer, 'LOG_PATH', None):
+            screen = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(screen):
+                    installer.open_log(directory)
+                    installer.run([sys.executable, '-c', 'print("build detail")'])
+                    value = installer.run([sys.executable, '-c', 'print("image-id")'], capture=True)
+                self.assertEqual(value, 'image-id')
+                self.assertNotIn('build detail', screen.getvalue())
+                self.assertIn('build detail', installer.LOG_PATH.read_text())
+                self.assertEqual(installer.LOG_PATH.stat().st_mode & 0o777, 0o600)
+                with self.assertRaises(subprocess.CalledProcessError):
+                    installer.run([sys.executable, '-c', 'raise SystemExit(7)'])
+            finally:
+                installer.LOG.close()
+
+    def test_long_command_reports_progress_without_losing_exit_status(self):
+        from unittest.mock import Mock
+        process = Mock()
+        process.wait.side_effect = [subprocess.TimeoutExpired('build', 15), 7]
+        screen = io.StringIO()
+        with contextlib.redirect_stdout(screen):
+            self.assertEqual(installer.wait_for(process), 7)
+        self.assertIn('Working...', screen.getvalue())
+
     def test_credentials_fail_before_installation_commands(self):
         args = installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example',
                                      '--provider', 'openai', '--openai-key-file', '/root/key', '--yes'])
@@ -48,7 +122,7 @@ class InstallTest(unittest.TestCase):
 
     def test_interactive_selection_accepts_menu_numbers(self):
         with patch.object(installer.sys.stdin, 'isatty', return_value=True), \
-                patch('builtins.input', side_effect=['2', '2']):
+                patch('builtins.input', side_effect=['2', '2', '1']):
             args = installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example'])
         self.assertEqual(args.provider, ['external'])
         self.assertEqual(args.external_api, 'anthropic')

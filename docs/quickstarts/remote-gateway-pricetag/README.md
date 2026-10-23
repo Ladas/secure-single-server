@@ -52,6 +52,15 @@ building anything. Review the displayed setup and type `install` to continue;
 no more prompts are needed. A rejected key stops setup without saving provider
 configuration—correct it and rerun the command.
 
+Installation shows six stages and progress messages. Detailed command output
+goes to the private `/var/log/praxis-install-*.log` file printed at startup;
+use the displayed `sudo tail -f` command in another SSH session to follow it.
+On failure, the installer prints the failed stage and log command. Keep the
+log private; review it before sharing. Choose **Build from pinned source** until
+published MaaS and PriceTag digests are available, or **Pull published images**
+and paste both digest references. Source builds can take several minutes.
+[Image options and testing new versions](images.md)
+
 It creates `admin`, `alice` and `bob`; Alice and Bob each get $5/month. Real mode
 cannot defer provider setup or omit these initial users. For a different
 allowance, add `--monthly-usd 10`. For a DNS certificate, set `GATEWAY_HOST` to

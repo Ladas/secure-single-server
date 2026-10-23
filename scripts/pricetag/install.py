@@ -13,9 +13,12 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 MAAS_COMMIT = '6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d'
+METERING_COMMIT = '557ceb1cbe1316d93e0f682baa8301455956fe18'
 MAAS_REPO = 'https://github.com/Ladas/models-as-a-service.git'
 METERING_REPO = 'https://github.com/redhat-et/pricetag-metering.git'
 PRAXIS_IMAGE = 'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
@@ -26,6 +29,33 @@ CACHE = Path('/var/cache/pricetag-installer')
 DEPLOY = Path('/etc/praxis-pricetag')
 ADMIN = Path('/root/pricetag-admin')
 INPUTS = Path('/root/pricetag-provider-inputs')
+LOG = None
+LOG_PATH = None
+STAGE = 'Setup'
+
+
+def stage(number, title):
+    global STAGE
+    STAGE = title
+    print(f'\n[{number}/6] {title}\n' + '-' * 54, flush=True)
+
+
+def open_log(directory='/var/log'):
+    global LOG, LOG_PATH
+    fd, name = tempfile.mkstemp(prefix='praxis-install-', suffix='.log', dir=directory)
+    LOG_PATH = Path(name)
+    LOG = os.fdopen(fd, 'w', buffering=1)
+    print(f'\nDetailed log: {LOG_PATH} (private)\n'
+          f'Follow in another SSH session: sudo tail -f {LOG_PATH}', flush=True)
+
+
+def wait_for(process):
+    started = time.monotonic()
+    while True:
+        try:
+            return process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            print(f'  Working... {int(time.monotonic() - started)}s elapsed', flush=True)
 
 
 def valid_hostname(value):
@@ -37,11 +67,22 @@ def valid_hostname(value):
                                          for part in value.split('.'))
 
 
-def run(command, capture=False):
+def run(command, capture=False, label=None):
     command = [str(x) for x in command]
-    print('+ ' + shlex.join(command), flush=True)
+    if LOG is not None:
+        LOG.write('+ ' + shlex.join(command) + '\n')
+        if not capture:
+            print('  ' + (label or ('Running ' + Path(command[0]).name)) + '...', flush=True)
+            with subprocess.Popen(command, cwd='/tmp', text=True, stdout=LOG, stderr=LOG,
+                                  umask=0o022 if command[0] == 'git' else -1) as process:
+                code = wait_for(process)
+            if code:
+                raise subprocess.CalledProcessError(code, command)
+            print('  OK', flush=True)
+            return None
     result = subprocess.run(command, check=True, cwd='/tmp', text=True,
                             umask=0o022 if command[0] == 'git' else -1,
+                            stderr=LOG,
                             stdout=subprocess.PIPE if capture else None)
     return result.stdout.strip() if capture else None
 
@@ -55,14 +96,15 @@ def service_prefix():
 def import_image(image, prefix):
     # Stream between stores and check both processes; a failed save must not be
     # hidden by a successful load. Never use the administrator's cwd as praxis-svc.
-    print('Importing into praxis-svc: ' + image, flush=True)
+    print('  Importing image into service account...', flush=True)
     source_id = run(['podman', 'image', 'inspect', image, '--format', '{{.Id}}'], True)
     if not re.fullmatch(r'(?:sha256:)?[0-9a-f]{64}', source_id):
         raise RuntimeError('source image ID is invalid')
-    save = subprocess.Popen(['podman', 'save', image], stdout=subprocess.PIPE, cwd='/tmp')
+    save = subprocess.Popen(['podman', 'save', image], stdout=subprocess.PIPE, stderr=LOG, cwd='/tmp')
     try:
         with save.stdout:
-            loaded = subprocess.run(prefix + ['podman', 'load'], stdin=save.stdout, cwd='/tmp')
+            loaded = subprocess.run(prefix + ['podman', 'load'], stdin=save.stdout, cwd='/tmp',
+                                    stdout=LOG, stderr=LOG)
         saved = save.wait()
         if saved or loaded.returncode:
             raise RuntimeError('image export/import failed; no deployment prepared')
@@ -111,15 +153,16 @@ def preflight(mode):
 
 
 def choice(label, options, default):
-    print(label)
+    print('\n' + label)
     values = list(options)
     for number, value in enumerate(values, 1):
-        print(f'  {number}. {options[value]}')
+        print(f'  {number}. {options[value]}' + ('  (default)' if value == default else ''))
     while True:
         value = input(f'Choice [{values.index(default) + 1}]: ').strip().lower() or default
         if value.isdigit() and 1 <= int(value) <= len(values):
             value = values[int(value) - 1]
         if value in options:
+            print('Selected: ' + options[value])
             return value
         print('Choose one of: ' + ', '.join(values))
 
@@ -143,6 +186,11 @@ def parse_args(argv=None):
     p.add_argument('--monthly-usd', type=int, default=5, help='Alice/Bob monthly USD allowance; default 5')
     p.add_argument('--yes', action='store_true', help='skip final confirmation, not missing setup prompts')
     p.add_argument('--plan', action='store_true', help='print stages without credentials, discovery or host changes')
+    p.add_argument('--image-mode', choices=('source', 'published'), help='build source or pull digest-pinned images')
+    p.add_argument('--maas-image', help='published MaaS image, including @sha256 digest')
+    p.add_argument('--metering-image', help='published PriceTag image, including @sha256 digest')
+    p.add_argument('--maas-revision', default=MAAS_COMMIT, help='full MaaS source SHA to build or verify')
+    p.add_argument('--metering-revision', default=METERING_COMMIT, help='full PriceTag source SHA to build or verify')
     args = p.parse_args(argv)
     interactive = sys.stdin.isatty() and not args.plan
     if not args.mode and interactive:
@@ -200,6 +248,27 @@ def parse_args(argv=None):
                 'messages' if args.external_api == 'anthropic' else 'openai']
             if any(not getattr(args, 'external_' + api + '_url') for api in required):
                 p.error('supply an endpoint for each selected external API')
+    if not args.image_mode:
+        if args.maas_image or args.metering_image:
+            args.image_mode = 'published'
+        elif interactive and not args.yes:
+            args.image_mode = choice('Application images:', {
+                'source': 'Build from pinned source (available now; slower)',
+                'published': 'Pull published images (requires both image digests)'}, 'source')
+        else:
+            args.image_mode = 'source'
+    for component in ('maas', 'metering'):
+        if not re.fullmatch(r'[0-9a-f]{40}', getattr(args, component + '_revision')):
+            p.error('--' + component + '-revision must be a full lowercase Git commit SHA')
+        image = getattr(args, component + '_image')
+        if args.image_mode == 'source' and image:
+            p.error('image references require --image-mode published')
+        if args.image_mode == 'published':
+            if not image and interactive:
+                image = input(component.title() + ' published image (repository@sha256:digest): ').strip()
+                setattr(args, component + '_image', image)
+            if not image or not re.fullmatch(r'[a-z0-9][a-z0-9.:-]*/[a-z0-9_./-]+@sha256:[0-9a-f]{64}', image):
+                p.error('--' + component + '-image must include a registry/repository and sha256 digest')
     args.provider = list(dict.fromkeys(args.provider))
     return args
 
@@ -233,31 +302,67 @@ def collect_providers(args, helper):
     return collected
 
 
+def acquire_images(args, arch):
+    stage(3, 'Acquire application images')
+    if args.image_mode == 'source':
+        print('  Building pinned sources; this can take several minutes.', flush=True)
+        CACHE.mkdir(mode=0o700, parents=True, exist_ok=True)
+        checkout(MAAS_REPO, CACHE / 'maas', args.maas_revision)
+        checkout(METERING_REPO, CACHE / 'metering', args.metering_revision)
+        run([ROOT / 'scripts/pricetag/build-maas', '--source', CACHE / 'maas',
+             '--expected-commit', args.maas_revision, '--platform', 'linux/' + arch], label='Building MaaS')
+        run([sys.executable, ROOT / 'scripts/pricetag/build-metering', '--source', CACHE / 'metering',
+             '--revision', args.metering_revision, '--platform', 'linux/' + arch], label='Building PriceTag')
+        images = (MAAS_IMAGE, METERING_IMAGE)
+    else:
+        images = (args.maas_image, args.metering_image)
+        for image in images:
+            run(['podman', 'pull', image], label='Pulling application image')
+    run(['podman', 'pull', PRAXIS_IMAGE], label='Pulling Praxis')
+    for image, expected in zip((PRAXIS_IMAGE, *images),
+                               (PRAXIS_REVISION, args.maas_revision, args.metering_revision)):
+        revision = run(['podman', 'image', 'inspect', image, '--format',
+                        '{{index .Labels "org.opencontainers.image.revision"}}'], True)
+        if revision != expected:
+            raise ValueError('Image source revision does not match expected commit: ' + image)
+        actual_arch = run(['podman', 'image', 'inspect', image, '--format', '{{.Architecture}}'], True)
+        if actual_arch != arch:
+            raise ValueError('Image architecture does not match this host: ' + image)
+    return images
+
+
 def install(args):
-    print(f'Fresh {args.mode} gateway: https://{args.hostname}:8443; monthly USD allowance: {args.monthly_usd}')
-    print('1. Collect provider endpoints/keys and validate model discovery before installing.')
-    print('2. Install RHEL packages and build/import pinned images.')
-    print('3. Save provider keys as Podman secrets and export the model configuration.')
-    print('4. Generate TLS/configuration and start Quadlets; verify HTTPS readiness.')
-    print('5. Print CA/key paths. Keys and provider credentials are not printed.')
-    print('No AWS security-group changes, upgrades, backups or existing-data adoption.')
-    print('Creates admin, alice and bob; Alice/Bob monthly allowance: $' + str(args.monthly_usd))
-    print('Providers: ' + (', '.join(args.provider) or 'synthetic fixture only'))
+    print('\nRemote gateway with PriceTag\n' + '=' * 54)
+    print(f'  Gateway    https://{args.hostname}:8443')
+    print(f'  Mode       {args.mode}')
+    print(f'  Images     {args.image_mode}')
+    if args.image_mode == 'published':
+        print('  MaaS       ' + args.maas_image)
+        print('  PriceTag   ' + args.metering_image)
+    print('  Providers  ' + (', '.join(args.provider) or 'synthetic fixture only'))
     if args.external_api:
-        print('External APIs: ' + args.external_api)
+        print('  APIs       ' + args.external_api)
+    print(f'  Users      admin, alice, bob (Alice/Bob: ${args.monthly_usd}/month each)')
+    print('\n  1. Validate provider setup   4. Import images')
+    print('  2. Prepare RHEL             5. Configure gateway')
+    print('  3. Build/pull images        6. Start and verify services')
     if args.plan:
-        print('MaaS commit: ' + MAAS_COMMIT + '\nPraxis image: ' + PRAXIS_IMAGE)
+        print('MaaS commit: ' + args.maas_revision + '\nPriceTag commit: ' + args.metering_revision)
+        print('Praxis image: ' + PRAXIS_IMAGE)
         return
     preflight(args.mode)
     helper = provider_module()
+    stage(1, 'Validate provider setup')
     prepared = collect_providers(args, helper)
-    print('Setup validated. Continue to build images and start services.')
+    print('\nSetup validated. Ready to install the configuration above.')
     if not args.yes and input('Install on this host? Type install: ').strip() != 'install':
         raise ValueError('installation cancelled')
     arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(platform.machine())
     if not arch:
         raise ValueError('supported architectures are x86_64 and aarch64')
     os.umask(0o077)
+    open_log()
+    stage(2, 'Prepare RHEL')
     run(['dnf', 'install', '-y', 'podman', 'git', 'python3', 'python3-pyyaml', 'openssl',
          'curl', 'sudo', 'policycoreutils-python-utils', 'shadow-utils'])
     run([ROOT / 'scripts/common/install', '--prepare'])
@@ -269,19 +374,10 @@ def install(args):
     units = Path(f'/etc/containers/systemd/users/{uid}')
     if list(units.glob('pricetag*')):
         raise ValueError('existing PriceTag Quadlets; review the host instead of reinstalling')
-    CACHE.mkdir(mode=0o700, parents=True, exist_ok=True)
-    checkout(MAAS_REPO, CACHE / 'maas', MAAS_COMMIT)
-    checkout(METERING_REPO, CACHE / 'metering')
-    run([ROOT / 'scripts/pricetag/build-maas', '--source', CACHE / 'maas',
-         '--expected-commit', MAAS_COMMIT, '--platform', 'linux/' + arch])
-    run([sys.executable, ROOT / 'scripts/pricetag/build-metering', '--source', CACHE / 'metering',
-         '--platform', 'linux/' + arch])
-    run(['podman', 'pull', PRAXIS_IMAGE])
-    revision = run(['podman', 'image', 'inspect', PRAXIS_IMAGE, '--format',
-                    '{{index .Labels "org.opencontainers.image.revision"}}'], True)
-    if revision != PRAXIS_REVISION:
-        raise ValueError('Praxis source label does not match the pinned release')
-    ids = [import_image(image, prefix) for image in (PRAXIS_IMAGE, MAAS_IMAGE, METERING_IMAGE)]
+    application_images = acquire_images(args, arch)
+    stage(4, 'Import images into the service account')
+    ids = [import_image(image, prefix) for image in (PRAXIS_IMAGE, *application_images)]
+    stage(5, 'Configure providers, TLS and budgets')
     for name, settings, key in prepared:
         helper.save_provider(name, settings, key)
     prepared.clear()
@@ -295,14 +391,17 @@ def install(args):
         for option, filename in (('--providers', 'providers.json'), ('--models', 'models.json'),
                                  ('--provider-unit', 'provider-secrets.container'), ('--price-sources', 'prices.json')):
             command += [option, INPUTS / filename]
-    run(command)
-    run([ROOT / 'scripts/pricetag/start'])
+    run(command, label='Preparing configuration')
+    stage(6, 'Start services and verify HTTPS')
+    run([ROOT / 'scripts/pricetag/start'], label='Starting PostgreSQL, MaaS, PriceTag and Praxis')
     run(['curl', '--noproxy', '*', '--fail', '--silent', '--show-error', '--cacert',
          DEPLOY / 'ca.pem', 'https://localhost:8443/login', '--output', '/dev/null'])
-    print('\nReady: https://' + args.hostname + ':8443/login')
+    print('\nInstallation complete\n' + '=' * 54)
+    print('Dashboard: https://' + args.hostname + ':8443/login')
     print('CA: /etc/praxis-pricetag/ca.pem')
     print('Keys: /root/pricetag-admin/{admin,alice,bob}.key')
-    print('Continue with docs/quickstarts/remote-gateway-pricetag/users.md and the client steps in docs/quickstarts/remote-gateway-pricetag/README.md.')
+    print('\nNext: open the dashboard, then connect OpenCode (quickstart steps 3–4).')
+    print('Guide: docs/quickstarts/remote-gateway-pricetag/README.md')
     if args.mode == 'mock':
         print('Benchmark: sudo python3 scripts/pricetag/benchmark')
 
@@ -327,7 +426,13 @@ if __name__ == '__main__':
     try:
         main()
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, EOFError, KeyboardInterrupt) as error:
-        print(f'Installation stopped: {error}', file=sys.stderr)
+        print(f'\nInstallation stopped during: {STAGE}', file=sys.stderr)
+        print(str(error) or type(error).__name__, file=sys.stderr)
+        if LOG_PATH:
+            print(f'Details: sudo tail -n 80 {LOG_PATH}', file=sys.stderr)
         print('No files or volumes were automatically deleted. Fix the failed stage and use the manual steps; '
               'if configuration was already prepared, inspect it before running scripts/pricetag/start.', file=sys.stderr)
         sys.exit(1)
+    finally:
+        if LOG is not None:
+            LOG.close()
