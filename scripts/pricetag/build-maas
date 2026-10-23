@@ -34,7 +34,7 @@ if [[ ! -f "$source_dir/maas-api/Dockerfile" || ! -f "$source_dir/maas-api/go.mo
 fi
 
 podman build --pull=always --platform "$platform" \
-  --label "org.opencontainers.image.source=https://github.com/opendatahub-io/models-as-a-service" \
+  --label "org.opencontainers.image.source=https://github.com/Ladas/models-as-a-service" \
   --label "org.opencontainers.image.revision=$commit" \
   -t "$tag" -f "$source_dir/maas-api/Dockerfile" "$source_dir/maas-api"
 podman image inspect "$tag" --format 'MaaS image {{.Id}} built from {{index .Labels "org.opencontainers.image.revision"}}'

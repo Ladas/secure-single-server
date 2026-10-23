@@ -89,6 +89,8 @@ nav:
       - Document exfiltration: docs/examples/document-exfiltration/README.md
       - Model escalation: docs/examples/model-escalation/README.md
       - Review as a service: docs/development/review-service.md
+  - Development:
+      - MaaS and PriceTag image publication: docs/development/pricetag-images.md
   - Testing:
       - Testing guide: docs/testing/README.md
       - Compatibility matrix: docs/testing/compatibility.md
