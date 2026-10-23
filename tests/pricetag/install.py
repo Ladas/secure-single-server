@@ -31,6 +31,47 @@ class InstallTest(unittest.TestCase):
     def image_args(self, *extra):
         return installer.parse_args(['--mode', 'mock', '--hostname', 'gateway.example', '--plan', *extra])
 
+    def test_default_images_are_published_and_source_defaults_are_explicit(self):
+        args = self.image_args()
+        self.assertEqual(args.image_mode, 'published')
+        self.assertEqual(args.maas_image, installer.PUBLISHED_MAAS_IMAGE)
+        self.assertEqual(args.metering_image, installer.PUBLISHED_METERING_IMAGE)
+        source = self.image_args('--image-mode', 'source')
+        self.assertEqual(source.maas_branch, installer.MAAS_BRANCH)
+        self.assertIsNone(source.metering_branch)
+        self.assertEqual(source.metering_revision, installer.METERING_COMMIT)
+        for flags in (['--maas-branch', 'feature'],
+                      ['--image-mode', 'source', '--maas-branch', '../bad'],
+                      ['--image-mode', 'source', '--maas-branch', 'feature', '--maas-revision', 'a' * 40]):
+            with self.assertRaises(SystemExit):
+                self.image_args(*flags)
+
+    def test_branch_build_records_resolved_commit(self):
+        args = self.image_args('--image-mode', 'source', '--maas-branch', 'feature/test')
+        resolved = 'c' * 40
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(installer, 'CACHE', Path(directory)), patch.object(installer, 'checkout') as checkout:
+            def execute(command, capture=False, **kwargs):
+                if command[0] == 'git':
+                    return resolved
+                if capture:
+                    if command[-1] == '{{.Architecture}}':
+                        return 'amd64'
+                    return {installer.PRAXIS_IMAGE: installer.PRAXIS_REVISION,
+                            installer.MAAS_IMAGE: resolved,
+                            installer.METERING_IMAGE: args.metering_revision}[command[3]]
+            with patch.object(installer, 'run', side_effect=execute) as run:
+                installer.acquire_images(args, 'amd64')
+            self.assertEqual(checkout.call_args_list[0].args[2], 'refs/heads/feature/test')
+            self.assertEqual(args.maas_revision, resolved)
+            self.assertTrue(any('--expected-commit' in c.args[0] and resolved in c.args[0]
+                                for c in run.call_args_list))
+
+    def test_checkout_uses_fetched_head_not_stale_local_branch(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(installer, 'run') as run:
+            installer.checkout('https://example.invalid/repo', Path(directory) / 'new', 'refs/heads/feature')
+            self.assertEqual(run.call_args.args[0][-3:], ['checkout', '--detach', 'FETCH_HEAD'])
+
     def test_published_images_require_digests_and_skip_source_builds(self):
         for reference in ('quay.io/example/maas:latest', 'sha256:' + 'a' * 64):
             with self.assertRaises(SystemExit):

@@ -6,27 +6,28 @@ published images.
 
 | Mode | MaaS and PriceTag |
 | --- | --- |
-| `--image-mode source` | Build the pinned application revisions on RHEL. Current default; useful before publication and for testing new revisions. |
-| `--image-mode published` | Pull two explicit `repository@sha256:digest` references. No application source checkout or Go build. |
+| `--image-mode published` (default) | Pull the qualified MaaS and PriceTag images by digest. No application source checkout or Go build. |
+| `--image-mode source` | Build from a branch or commit on RHEL to test a new version. |
 
-The interactive installer offers this choice. Noninteractive commands default
-to source builds unless image references are supplied. It verifies application
+The interactive installer recommends published images. Noninteractive commands
+also default to published images. It verifies application
 source labels and CPU architecture before preparing the deployment.
 
 ## Published images
 
-Use the two digest references printed by a successful image-publication run.
-The planned repositories are:
+The installer pins both images from the [qualified publication run](https://github.com/redhat-et/secure-single-server/actions/runs/40008921330).
+No image arguments are needed for the default installation. The repositories are:
 
 ```text
 quay.io/redhat-et/secure-single-server-maas-standalone
 quay.io/redhat-et/secure-single-server-pricetag-metering
 ```
 
-Until the first publication succeeds, use source mode. No `latest` tag or
-placeholder digest is assumed. The initial publisher targets `linux/amd64`.
+The published images target `linux/amd64`. They are pinned in
+`scripts/pricetag/install.py`; no moving `latest` tag is used. Override them only
+to test another publication.
 
-On a fresh RHEL host, after copying the checkout:
+To override the default images on a fresh RHEL host, after copying the checkout:
 
 ```console
 cd ~/secure-single-server
@@ -41,9 +42,26 @@ Provider selection and hidden credential prompts follow. For unattended
 configuration, combine these options with the [private credential-file
 options](providers.md). Never put provider keys in command-line arguments.
 
-## Test a new source revision
+## Build from a branch or commit
 
-Use full 40-character Git commit SHAs reachable from the configured source
+Source mode defaults to `feat/standalone-runtime-minimal` in the MaaS fork.
+PriceTag keeps commit `557ceb1cbe1316d93e0f682baa8301455956fe18` by default;
+we do not maintain a modified PriceTag branch. Its newer upstream versions
+have compatibility changes and are not selected automatically.
+
+```console
+cd ~/secure-single-server
+read -r -p 'Gateway IP or DNS: ' GATEWAY_HOST
+sudo scripts/pricetag/install --mode real --hostname "$GATEWAY_HOST" --image-mode source
+```
+
+To test other branches, add `--maas-branch BRANCH` and/or
+`--metering-branch BRANCH`. Branches are fetched from the repositories below,
+resolved to full commit SHAs, and printed before building. The fetched commit
+is used even if the source cache contains an older local branch.
+
+For reproducible source selection, use full 40-character Git commit SHAs
+reachable from the configured source
 repositories: [MaaS fork](https://github.com/Ladas/models-as-a-service) and
 [PriceTag metering](https://github.com/redhat-et/pricetag-metering).
 
@@ -56,7 +74,9 @@ sudo scripts/pricetag/install --mode real --hostname "$GATEWAY_HOST" \
   --image-mode source --maas-revision "$MAAS_REVISION" --metering-revision "$METERING_REVISION"
 ```
 
-Omit either revision option to keep its qualified default. The MaaS checkout
+A branch and a revision cannot be specified together for the same component.
+Omit both MaaS selectors to use the fork branch; omit both PriceTag selectors
+to keep its qualified commit. The MaaS checkout
 must provide the standalone runtime; arbitrary upstream versions may not work.
 New PriceTag revisions may change schemas, authentication or dashboard routes;
 a successful build does not establish gateway compatibility.

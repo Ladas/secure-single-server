@@ -56,9 +56,9 @@ Installation shows six stages and progress messages. Detailed command output
 goes to the private `/var/log/praxis-install-*.log` file printed at startup;
 use the displayed `sudo tail -f` command in another SSH session to follow it.
 On failure, the installer prints the failed stage and log command. Keep the
-log private; review it before sharing. Choose **Build from pinned source** until
-published MaaS and PriceTag digests are available, or **Pull published images**
-and paste both digest references. Source builds can take several minutes.
+log private; review it before sharing. **Use published images** is the default:
+MaaS and PriceTag are pulled by their qualified digests, without compiling Go.
+Choose **Build from source** to test a branch or commit; builds can take several minutes.
 [Image options and testing new versions](images.md)
 
 It creates `admin`, `alice` and `bob`; Alice and Bob each get $5/month. Real mode
