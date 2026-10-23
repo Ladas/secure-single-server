@@ -66,6 +66,7 @@ nav:
           - Install: docs/quickstarts/openshell-praxis/install.md
           - OpenClaw bounded tasks: docs/quickstarts/openshell-praxis/openclaw.md
           - Integration matrix: docs/quickstarts/openshell-praxis/users.md
+      - Experimental llm-d-sc semantic routing: docs/quickstarts/llm-d-sc/README.md
       - Common gateway configuration:
           - Overview: docs/quickstarts/common/README.md
           - Harness configuration: docs/quickstarts/common/harness-configuration.md
