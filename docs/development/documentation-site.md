@@ -49,6 +49,20 @@ The navigation is declared explicitly in [`mkdocs.yml`](../../mkdocs.yml).
 Add a new documentation page to the `nav` section so it appears in the site
 sidebar.
 
+## Red Hat branding
+
+The theme uses Red Hat red (`#ee0000`, with `#a60000` and `#f56e6e` as the dark
+and light variants from the Red Hat Design System tokens) and the white fedora
+logo in the header. The theme keeps the Material default fonts. Branding assets
+live in [`overrides/`](../../overrides/), which `theme.custom_dir` in
+[`mkdocs.yml`](../../mkdocs.yml) publishes alongside the site:
+
+- `overrides/assets/images/redhat-fedora-white.svg` is the header logo.
+- `overrides/assets/images/redhat-favicon.svg` is the red fedora browser-tab
+  icon.
+- `overrides/assets/stylesheets/redhat.css` defines the brand colors for the
+  light and dark schemes.
+
 ## File and URL references
 
 Every guide should make it clear whether a named file, command, image, or URL
