@@ -18,6 +18,8 @@ source revision alone does not imply a byte-for-byte reproducible image.
 Create both repositories as public in the `redhat-et` Quay organization. Grant
 the existing publishing account **Write** on each. The workflow uses the same
 `QUAY_USERNAME` and `QUAY_TOKEN` GitHub secrets as the bootc image publisher.
+These are stored in the `bootc-image-main` GitHub environment; only upstream
+`main` publication runs select it. Other runs select `bootc-image-pr`.
 No registry credentials are required by clients pulling these public images.
 
 ## Build, test and publish
