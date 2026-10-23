@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
-from unified_config import catalog, render as unified, validate
+from unified_config import active, catalog, render as unified, validate
 
 INFERENCE = ['/v1/chat/completions', '/v1/responses', '/v1/messages']
 DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me', '/welcome',
@@ -51,9 +51,14 @@ def render(original, models, origins=None):
             'cache_ttl_seconds': 0, 'timeout_seconds': 5}
         filters.insert(0, key_filter)
         filters.insert(1, {'filter': 'identity_header_guard', 'prefix': 'x-tenant-'})
-        filters.insert(2, {'filter': 'model_access', 'mode': 'allowlist',
-                           'models': [model['id'] for model in models if api in model['apis']],
-                           'group_metadata_key': 'x-tenant-group', 'max_body_bytes': 33554432})
+        selected = active(models, original, api)
+        # The unified renderer already denies inference for an unused API.
+        # model_access rejects an empty allowlist at startup; retain auth and
+        # the terminal 404 instead of constructing an invalid filter.
+        if selected:
+            filters.insert(2, {'filter': 'model_access', 'mode': 'allowlist',
+                               'models': [model['id'] for model in selected],
+                               'group_metadata_key': 'x-tenant-group', 'max_body_bytes': 33554432})
         for i, item in enumerate(filters):
             if item['filter'] == 'token_count':
                 filters.insert(i, {'filter': 'external_metering',
@@ -63,7 +68,7 @@ def render(original, models, origins=None):
                     'default_username': '', 'default_model': 'unknown',
                     'identity_header_prefix': 'x-tenant-', 'feature_key': 'inference-tokens'})
                 break
-        if request_headers is not None:
+        if request_headers is not None and selected:
             load_balancer = next((i for i, item in enumerate(filters)
                                   if item['filter'] == 'load_balancer'), len(filters))
             filters.insert(load_balancer, request_headers)

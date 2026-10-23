@@ -125,6 +125,30 @@ class PreparationTest(unittest.TestCase):
         self.assertEqual(routes['/v1/responses'], 'authenticated-openai')
         self.assertTrue(models)
 
+    def test_single_api_keeps_other_api_authenticated_and_disabled(self):
+        for enabled in ('openai', 'anthropic'):
+            with self.subTest(enabled=enabled):
+                original, models = prepare.mock_inputs()
+                for model in models:
+                    model['apis'] = [enabled]
+                rendered = prepare.render(original, models)
+                chains = {c['name']: c['filters'] for c in rendered['filter_chains']}
+                for api in ('openai', 'anthropic'):
+                    filters = chains[api]
+                    self.assertEqual(filters[0]['filter'], 'api_key_auth')
+                    access = [f for f in filters if f['filter'] == 'model_access']
+                    if api == enabled:
+                        self.assertEqual(access[0]['models'], [m['id'] for m in models])
+                    else:
+                        self.assertEqual(access, [])
+                        self.assertEqual(filters[-1]['filter'], 'static_response')
+                        self.assertEqual(filters[-1]['status'], 404)
+                        self.assertTrue(any(f['filter'] == 'static_response' and
+                                            f.get('status') == 404 and not f.get('conditions')
+                                            for f in filters))
+                        self.assertFalse(any(f['filter'] in ('router', 'load_balancer', 'external_metering')
+                                             for f in filters))
+
     def test_internal_model_headers_survive_router_selection_then_are_removed_before_upstream(self):
         original, models = prepare.mock_inputs()
         rendered = prepare.render(original, models)
