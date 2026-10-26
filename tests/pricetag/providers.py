@@ -54,20 +54,17 @@ class SetupTest(unittest.TestCase):
             self.assertNotIn('SECRET_SENTINEL', output.getvalue())
             self.assertEqual(saved.read_text(), 'existing configuration')
 
-    def test_listing_limits_sources_and_unknown_json_omission(self):
+    def test_listing_only_prints_ids_and_configuration_path(self):
         catalogs = {'openai': [{'id': 'unknown'}, {'id': 'gpt-6-luna'},
-            {'id': 'custom', 'praxis': {'context': 10000, 'output': 1000}}],
-            'anthropic': [{'id': 'native', 'max_input_tokens': 200000, 'max_tokens': 16000}]}
-        self.assertEqual(setup.model_limits(catalogs['openai'][0], 'openai')[0], None)
-        self.assertEqual(setup.model_limits(catalogs['anthropic'][0], 'anthropic'), ([200000, 16000], 'provider'))
+            {'id': 'custom', 'praxis': {'context': 10000, 'output': 1000}}]}
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            setup.print_model_catalog(catalogs, all_models=True, output_format='config')
+            setup.print_model_catalog(catalogs, all_models=True)
         text = output.getvalue()
-        payload = json.loads(text[text.index('{'):])
-        self.assertEqual(payload['openai'], [['custom', 10000, 1000], ['gpt-6-luna', 1050000, 128000]])
-        self.assertEqual(payload['anthropic'], [['native', 200000, 16000]])
-        self.assertIn('Omitted (unknown limits): openai:unknown', text)
+        for model in ('unknown', 'gpt-6-luna', 'custom'):
+            self.assertIn('openai: ' + model, text)
+        self.assertNotIn('1050000', text)
+        self.assertNotIn('10000', text)
         self.assertIn(str(ROOT / 'configs/pricetag/provider-models.json'), text)
 
     def test_listing_search_and_page_do_not_drop_matching_rows(self):
@@ -92,13 +89,6 @@ class SetupTest(unittest.TestCase):
             setup.print_model_catalog(rows, page_size=1)
         self.assertIn('model-0', output.getvalue())
         self.assertNotIn('model-1', output.getvalue())
-
-    def test_listing_invalid_metadata_does_not_invent_limits(self):
-        for pair in [(True, 5), (1000, 2000), (1000, None), (3000000, 100)]:
-            row = {'id': 'new', 'praxis': dict(zip(('context', 'output'), pair))}
-            self.assertIsNone(setup.model_limits(row, 'openai')[0])
-        row = {'id': 'gpt-6-luna', 'praxis': {'context': 200000, 'output': 16000}}
-        self.assertEqual(setup.model_limits(row, 'openai')[0], [200000, 16000])
 
     def test_external_export_messages_uses_generic_secret_and_routes(self):
         with tempfile.TemporaryDirectory() as directory:
