@@ -92,13 +92,13 @@ nav:
           - Performance procedure: docs/testing/pricetag-perf.md
   - Scenarios:
       - Overview: docs/examples/README.md
-      - Praxis token quotas: docs/examples/praxis-quotas/README.md
       - OpenCode PR-candidate queue: docs/examples/opencode-pr-queue/README.md
       - Demo task prompt: docs/examples/opencode-pr-queue/demo-task.md
+      - Review as a service: docs/examples/review-service/README.md
+      - Praxis token quotas: docs/examples/praxis-quotas/README.md
       - API key theft: docs/examples/api-key-theft/README.md
       - Document exfiltration: docs/examples/document-exfiltration/README.md
       - Model escalation: docs/examples/model-escalation/README.md
-      - Review as a service: docs/development/review-service.md
   - Development:
       - MaaS and PriceTag image publication: docs/development/pricetag-images.md
   - Testing:
