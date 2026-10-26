@@ -93,7 +93,6 @@ nav:
   - Scenarios:
       - Overview: docs/examples/README.md
       - OpenCode PR-candidate queue: docs/examples/opencode-pr-queue/README.md
-      - Demo task prompt: docs/examples/opencode-pr-queue/demo-task.md
       - Review as a service: docs/examples/review-service/README.md
       - Praxis token quotas: docs/examples/praxis-quotas/README.md
       - API key theft: docs/examples/api-key-theft/README.md

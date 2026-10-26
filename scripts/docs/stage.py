@@ -48,6 +48,7 @@ EXCLUDED_SOURCES = (
     ROOT / "docs/development/review-turn-stdin-hang.md",
     ROOT / "docs/development/documentation-site.md",
     ROOT / "docs/slides/secure-single-server-overview.md",
+    ROOT / "docs/examples/opencode-pr-queue/demo-task.md",
 )
 
 

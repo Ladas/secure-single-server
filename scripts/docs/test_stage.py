@@ -101,6 +101,9 @@ class StageTests(unittest.TestCase):
             "docs/development/review-turn-stdin-hang.md", staged_paths
         )
         self.assertNotIn("docs/development/documentation-site.md", staged_paths)
+        self.assertNotIn(
+            "docs/examples/opencode-pr-queue/demo-task.md", staged_paths
+        )
 
 
 if __name__ == "__main__":
