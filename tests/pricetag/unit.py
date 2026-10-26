@@ -37,6 +37,19 @@ maas_loader.exec_module(maas_key)
 
 
 class PreparationTest(unittest.TestCase):
+    def test_access_policy_checks_rewritten_model_and_routes_require_alias(self):
+        original, models = prepare.mock_inputs()
+        models[0]['id'] = 'mock/fixture'
+        result = prepare.render(original, models)
+        for chain in result['filter_chains']:
+            if chain['name'] not in ('openai', 'anthropic'):
+                continue
+            access = next(f for f in chain['filters'] if f['filter'] == 'model_access')
+            self.assertEqual(access['models'], ['fixture'])
+            rejection = next(f for f in chain['filters'] if f.get('body') == 'Unknown model')
+            self.assertEqual(rejection['conditions'],
+                             [{'unless': {'headers': {'X-Gateway-Model': 'mock/fixture'}}}])
+
     def test_postgres_bootstrap_is_idempotent_and_quotes_generated_passwords(self):
         sql = prepare.postgres_bootstrap("metering'pw", 'maas-pw')
         self.assertEqual(sql.count('\\gexec'), 4)

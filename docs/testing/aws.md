@@ -4,10 +4,10 @@ Start here. Deploy any of the VMs below; each has its own plan, launch
 and journal. They can run at the same time. AWS deployment prepares the host;
 [smoke tests](rhel-smoke.md) install and test the services afterward.
 
-For the PriceTag metering pilot, reuse an existing VM with the procedure below.
-Provision a new VM only if you want a separate environment; the gateway,
-metering/dashboard and PostgreSQL are independent containers, and metering does
-not require a GPU. [PriceTag deployment and local Podman dashboards](pricetag.md).
+For the PriceTag metering pilot, see the
+[pilot overview](pricetag.md) and its [AWS deployment runbook](aws-pricetag.md).
+The gateway, metering service, dashboard and PostgreSQL run as independent
+containers; the metering service does not require a GPU.
 
 ## PriceTag on an existing VM
 
@@ -48,7 +48,8 @@ services. If you use an AWS named profile, add `--profile NAME` to both commands
 Your browser and local OpenCode use the public HTTPS address. Harnesses on the
 VM use `https://localhost:8443` with the same JWT authentication and CA checks.
 The VM's public IP does **not** need a separate ingress rule for those tests.
-Continue with [PriceTag service preparation and startup](pricetag.md#prepare-the-existing-rhel-vm).
+Continue with the [PriceTag deployment runbook](aws-pricetag.md) for the pinned
+images, service setup, key provisioning and dashboard workflow.
 
 For a separate gateway host, use the **all-in-one without vLLM** recipe below
 to prepare the private provider configuration this pilot consumes. Complete

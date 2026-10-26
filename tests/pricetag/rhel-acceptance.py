@@ -6,6 +6,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import pwd
 from pathlib import Path
 import ssl
 import subprocess
@@ -84,23 +85,34 @@ def main():
     browser = login(key)
     admin = login(Path('/root/pricetag-admin/admin.key').read_text().strip())
     check('admin page loads', request(admin, '/admin')[0] == 200)
-    check('standalone UI group picker is empty',
-          request(admin, '/api/v1/admin/org/valid-groups')[1] == {'groups': []})
-    check('personal dashboard loads', request(browser, '/dashboard')[0] == 200)
-    check('ordinary user cannot open admin page', request(browser, '/admin')[0] in (302, 403))
-    check('ordinary user cannot list admin people', request(browser, '/api/v1/admin/people')[0] in (302, 403))
-    check('ordinary user cannot edit quota policy', request(browser, '/api/v1/admin/quota/policy',
-                                                          {'default_monthly_usd': 10000}, 'PATCH')[0] == 403)
-    for path in ('/me/keys', '/api/v1/admin/keys', '/routing'):
-        check('unconfigured UI route denied: ' + path, request(admin, path)[0] == 404)
-    status, identities = request(admin, '/api/v1/admin/identities')
-    matches = [row for row in identities if row['username'] == subject]
-    check('SSH user is linked in PriceTag identities', status == 200 and len(matches) == 1)
-    slug = matches[0]['person_slug']
-    check('admin can read the person', request(admin, '/api/v1/admin/people/' + slug)[0] == 200)
-    check('admin can edit person display name', request(admin, '/api/v1/admin/people/' + slug,
-                                                      {'fields': {'full_name': 'Acceptance renamed'}}, 'PATCH')[0] == 200)
-    check('personal allowance is five dollars', request(browser, '/api/v1/me/quota')[1]['limit_usd'] == 5)
+    check('personal dashboard explicitly pending upstream',
+          'Dashboard coming soon' in request(browser, '/dashboard')[1])
+    check('ordinary user cannot read dashboard API', request(browser, '/api/v1/dashboard/overview')[0] == 403)
+    check('ordinary user cannot open admin page', request(browser, '/admin')[0] == 403)
+    check('ordinary user cannot list partner users', request(browser, '/api/v1/admin/partner-users')[0] == 403)
+    check('ordinary user cannot edit safety net', request(browser, '/api/v1/admin/safety-net',
+                                                          {'default_monthly_usd': 10000}, 'PUT')[0] == 403)
+    for path in ('/me/keys', '/api/v1/admin/keys', '/routing', '/api/v1/users'):
+        check('unconfigured or private route denied: ' + path, request(admin, path)[0] == 404)
+    check('admin dashboard API available', request(admin, '/api/v1/dashboard/overview')[0] == 200)
+    check('admin safety net available', request(admin, '/api/v1/admin/safety-net')[0] == 200)
+
+    def sql(query):
+        uid = pwd.getpwnam('praxis-svc').pw_uid
+        result = subprocess.run(['sudo', '-u', 'praxis-svc', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}',
+                    'podman', 'exec', 'pricetag-db', 'psql', '-X', '-qAt', '-U', 'metering', '-d', 'metering',
+                    '-v', 'ON_ERROR_STOP=1', '-c', query], cwd='/tmp', check=True, text=True, capture_output=True)
+        return result.stdout.strip()
+
+    def allowance():
+        return float(sql(f"SELECT monthly_usd FROM quota_overrides WHERE scope='user' AND principal='{subject}'"))
+
+    def spend():
+        return int(sql(f"SELECT count(*) FROM usage_events WHERE username='{subject}' AND status_code < 400"))
+
+    check('SSH user has exactly one partner login', int(sql(
+        f"SELECT count(*) FROM partner_user_logins WHERE username='{subject}'")) == 1)
+    check('personal allowance is five dollars', allowance() == 5)
 
     def maas(path, body=None, who=subject, method=None):
         req = urllib.request.Request('http://127.0.0.1:18086' + path,
@@ -119,10 +131,7 @@ def main():
     before = keys()
     user('--subject', subject, '--monthly-usd', '7', '--no-key')
     check('budget-only update does not issue a key', keys() == before)
-    check('budget-only update reaches personal view', request(browser, '/api/v1/me/quota')[1]['limit_usd'] == 7)
-    check('UI budget API updates allowance', request(admin, '/api/v1/admin/quota/overrides',
-          {'scope': 'user', 'principal': slug, 'monthly_usd': 8}, 'PUT')[0] == 200)
-    check('personal view reflects UI budget edit', request(browser, '/api/v1/me/quota')[1]['limit_usd'] == 8)
+    check('budget-only update reaches the login allowance', allowance() == 7)
     check('another subject cannot inspect the key', maas('/v1/api-keys/' + before[0]['id'],
                                                         who=subject + '-other')[0] in (403, 404))
     check('lifetime above 90 days rejected', maas('/v1/api-keys', {'name': 'too-long', 'expiresIn': '91d'})[0] == 400)
@@ -130,8 +139,49 @@ def main():
     check('anonymous inference rejected', request(noauth, '/v1/chat/completions', body)[0] == 401)
     check('key inference succeeds', request(noauth, '/v1/chat/completions', body,
                                           headers={'Authorization': 'Bearer ' + key})[0] == 200)
+    # Exercise distinct client and upstream names against the actual image.
+    sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
+    import prepare
+    import gateway
+    gateway_file = Path('/etc/praxis-pricetag/gateway/gateway.json')
+    previous = gateway_file.read_text()
+    uid = pwd.getpwnam('praxis-svc').pw_uid
+    def restart_gateway():
+        subprocess.run(['sudo', '-u', 'praxis-svc', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}',
+                        f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus',
+                        'systemctl', '--user', 'restart', 'pricetag-gateway.service'], check=True, cwd='/tmp')
+        for _ in range(30):
+            try:
+                if request(noauth, '/v1/models')[0] == 200:
+                    return
+            except OSError:
+                pass
+            time.sleep(1)
+        raise RuntimeError('gateway readiness after alias change')
+
+    try:
+        config, alias_models = prepare.mock_inputs()
+        alias_models[0]['id'] = 'mock/fixture'
+        sql("INSERT INTO model_pricing(model,provider,input_cost_per_mtok,output_cost_per_mtok) "
+            "SELECT 'mock/fixture',provider,input_cost_per_mtok,output_cost_per_mtok FROM model_pricing "
+            "WHERE model='fixture' ON CONFLICT(model) DO NOTHING")
+        gateway_file.write_text(json.dumps(gateway.render(config, alias_models), indent=2) + '\n')
+        restart_gateway()
+        for path, auth_headers in [('/v1/chat/completions', {'Authorization': 'Bearer ' + key}),
+                                   ('/v1/messages', {'x-api-key': key, 'anthropic-version': '2023-06-01'})]:
+            alias_body = dict(body, model='mock/fixture')
+            check('registered alias accepted: ' + path, request(noauth, path, alias_body, headers=auth_headers)[0] == 200)
+            check('bare upstream ID denied: ' + path, request(noauth, path, body, headers=auth_headers)[0] in (403, 404))
+            check('spoofed model header denied: ' + path, request(noauth, path, body,
+                  headers={**auth_headers, 'X-Gateway-Model': 'mock/fixture'})[0] in (403, 404))
+            check('unknown alias denied: ' + path, request(noauth, path, dict(body, model='unknown/model'),
+                  headers=auth_headers)[0] in (403, 404))
+            check('alias still requires authentication: ' + path, request(noauth, path, alias_body)[0] == 401)
+    finally:
+        gateway_file.write_text(previous)
+        restart_gateway()
     for _ in range(30):
-        spending = request(browser, '/api/v1/me/quota')[1]['spent_usd']
+        spending = spend()
         if spending > 0:
             break
         time.sleep(1)
@@ -140,9 +190,7 @@ def main():
     check('rotation rejects old key', request(noauth, '/v1/chat/completions', body,
                                              headers={'Authorization': 'Bearer ' + key})[0] == 401)
     next_browser = login((args.output / 'next.key').read_text().strip())
-    quota = request(next_browser, '/api/v1/me/quota')[1]
-    check('rotation preserves subject, spend and allowance', quota['username'] == subject
-          and quota['spent_usd'] == spending and quota['limit_usd'] == 8)
+    check('rotation preserves spend and allowance', spend() == spending and allowance() == 7)
     active = keys()
     check('rotation leaves one active key', len(active) == 1)
     subprocess.run([sys.executable, str(ROOT / 'scripts/pricetag/maas-key'), 'revoke',
@@ -150,7 +198,7 @@ def main():
     check('revoked replacement rejected', request(noauth, '/v1/chat/completions', body,
           headers={'Authorization': 'Bearer ' + (args.output / 'next.key').read_text().strip()})[0] == 401)
     check('known gap: existing browser session survives key revocation',
-          request(next_browser, '/api/v1/me/quota')[0] == 200)
+          request(next_browser, '/whoami')[0] == 200)
     print('Evidence: ' + str(args.output / 'checks.json'))
 
 

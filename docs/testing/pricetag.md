@@ -70,8 +70,8 @@ Secure/HttpOnly session cookie. Inference-key expiry and browser-session expiry
 are independent. Revoking a MaaS key prevents later validation, while an
 already established browser cookie may remain valid until it expires. The admin
 dashboard is supported by the current metering profile. Ordinary-user personal
-dashboard isolation remains a separate required qualification; do not grant
-admin roles to demonstrate it.
+dashboards are pending upstream and currently show “coming soon”; do not grant
+admin roles to bypass that limitation.
 
 ## Deploy and test
 
@@ -93,8 +93,8 @@ ledger and backups; define and test a retention policy before long-lived use.
   the standard Kubernetes image still requires a cluster.
 - Praxis must contain ET `api_key_auth` and the reviewed external-metering
   integration. The combined experimental image must be pinned by digest.
-- Personal dashboard access, complete key/session offboarding and encrypted
-  off-host backup/restore need explicit end-to-end qualification.
+- Personal dashboards await upstream support. Complete key/session offboarding
+  and encrypted off-host backup/restore need separate implementation and testing.
 
 These are release gates. Do not treat a successful container start as proof
 that the complete single-server service is ready for users.

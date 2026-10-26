@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+MODE="${1:-serve}"
+
+stage_docs() {
+  "$ROOT/.venv-docs/bin/python" "$ROOT/scripts/docs/stage.py"
+}
+
+if [[ "$MODE" == build ]]; then
+  stage_docs
+  cd "$ROOT"
+  .venv-docs/bin/mkdocs build --strict --config-file mkdocs.yml
+  exit
+elif [[ "$MODE" != serve ]]; then
+  printf 'Usage: %s [serve|build]\n' "${BASH_SOURCE[0]}" >&2
+  exit 2
+fi
+
+cd "$ROOT"
+stage_docs
+.venv-docs/bin/mkdocs serve --config-file mkdocs.yml --dev-addr 127.0.0.1:8000

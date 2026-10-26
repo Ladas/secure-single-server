@@ -1,0 +1,10 @@
+[
+  {
+    "id": "gpt-4.1-mini",
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "apis": ["openai"],
+    "context": 1047576,
+    "output": 32768
+  }
+]

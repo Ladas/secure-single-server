@@ -11,27 +11,45 @@ import unittest
 import urllib.error
 import urllib.request
 
+import sys
+import unittest
+import urllib.error
+import urllib.request
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# openclaw-native (run by an earlier test in this suite) patches the shared
+# provider module's completion wrapper; keep the pristine function so the
+# opencode fixture can be exercised on its own, independent of test order.
+sys.path.insert(0, str(ROOT / "tests/common"))
+import provider as _provider
+_PRISTINE_COMPLETION = _provider.completion
+
 
 class OpenCodeFixtureTest(unittest.TestCase):
-    def test_streamed_write_command_and_final_continuation(self):
+    def test_streamed_bash_command_and_final_continuation(self):
+        # The pinned image's opencode has no separate write tool (apply_patch
+        # owns file edits), so the fixture drives the whole proof through the
+        # bash tool itself: one tool call writes the proof, then the
+        # continuation returns the marker.
+        _provider.completion = _PRISTINE_COMPLETION
         fixture = runpy.run_path(str(Path(__file__).with_name('opencode-provider.py')))
         body = {'model': 'fixture-model', 'messages': [], 'tools': [
-            {'type': 'function', 'function': {'name': name}} for name in ('write', 'bash')]}
+            {'type': 'function', 'function': {'name': 'bash'}}]}
         complete = fixture['completion']
         stream = fixture['provider'].events
-        for expected, call_id in [('write', 'call_write'), ('bash', 'call_bash')]:
-            result = complete('/v1/chat/completions', body)
-            call = result['choices'][0]['message']['tool_calls'][0]
-            self.assertEqual(call['function']['name'], expected)
-            self.assertEqual(call['id'], call_id)
-            frames = b''.join(stream('/v1/chat/completions', result))
-            self.assertIn(b'[DONE]', frames)
-            self.assertIn(expected.encode(), frames)
-            body['messages'].append({'role': 'tool', 'tool_call_id': call_id, 'content': 'success'})
+        result = complete('/v1/chat/completions', body)
+        call = result['choices'][0]['message']['tool_calls'][0]
+        self.assertEqual(call['function']['name'], 'bash')
+        self.assertEqual(call['id'], 'call_bash')
+        arguments = json.loads(call['function']['arguments'])
+        self.assertIn('opencode-exec-proof.txt', arguments['command'])
+        frames = b''.join(stream('/v1/chat/completions', result))
+        self.assertIn(b'[DONE]', frames)
+        self.assertIn(b'bash', frames)
+        body['messages'].append({'role': 'tool', 'tool_call_id': 'call_bash', 'content': 'success'})
         result = complete('/v1/chat/completions', body)
         self.assertEqual(result['choices'][0]['finish_reason'], 'stop')
         self.assertEqual(result['choices'][0]['message']['content'], 'OPENCODE_TOOL_OK')
@@ -271,6 +289,30 @@ if args[:2] == ["sandbox", "list"]:
                 self.assertEqual(provider["npm"], "@ai-sdk/openai-compatible")
                 self.assertNotIn("options", provider["models"][model])
 
+    def test_llm_d_sc_harness_uses_catalog_template_and_strict_routes(self):
+        self.env.pop("OPENSHELL_MODEL_ID", None)
+        policy = self.create("opencode", "dev", integrated=True, config_dir="configs/llm-d-sc")
+        endpoint = policy["network_policies"]["praxis_gateway"]["endpoints"][0]
+        self.assertEqual(endpoint["port"], 18080)
+        self.assertEqual([rule["allow"] for rule in endpoint["rules"]], [
+            {"method": "GET", "path": "/v1/models"},
+            {"method": "POST", "path": "/v1/chat/completions"},
+        ])
+        self.assertNotIn("access", endpoint)
+        binaries = policy["network_policies"]["praxis_gateway"]["binaries"]
+        self.assertEqual({binary["path"] for binary in binaries},
+                         {"/usr/bin/node-26", "/usr/local/bin/opencode"})
+        provider = json.loads((self.work / "capture.provider").read_text())["provider"]["praxis"]
+        self.assertEqual(provider["options"]["baseURL"], "http://host.openshell.internal:18080/v1")
+        model = provider["models"]["Semantic-Qwen"]
+        self.assertEqual(model["name"], "Semantic-Qwen (complexity routed)")
+        self.assertEqual(model["limit"], {"context": 32768, "output": 4096})
+        self.assertTrue(model["reasoning"])
+        self.assertNotIn("interleaved", model)
+        args = json.loads((self.work / "capture.args").read_text())
+        template = json.loads((self.work / "capture.templates").read_text())[args[args.index("--template") + 1]]
+        self.assertEqual(template["labels"]["backend"], "llm-d-sc")
+
     def test_explicit_model_replaces_environment_default(self):
         self.create("opencode", "pr-queue", integrated=True, model="approved/model.v2")
         config = json.loads((self.work / "capture.provider").read_text())
@@ -316,6 +358,7 @@ if args[:2] == ["sandbox", "list"]:
         sources += [ROOT / "configs/openshell-praxis/openclaw/profiles/dev/policy.yaml"]
         sources += [ROOT / "configs/vllm/harness/profiles/dev/policy.yaml"]
         sources += [ROOT / "configs/vllm/openclaw/profiles/dev/policy.yaml"]
+        sources += [ROOT / "configs/llm-d-sc/profiles/dev/policy.yaml"]
         chat = [{"method": "GET", "path": "/v1/models"},
                 {"method": "POST", "path": "/v1/chat/completions"}]
         responses = chat + [{"method": "POST", "path": "/v1/responses"}]

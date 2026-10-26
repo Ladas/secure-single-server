@@ -1,7 +1,8 @@
 # Users, budgets and keys
 
 Run over SSH from `~/secure-single-server`. The installer creates `admin`,
-`alice` and `bob`; Alice and Bob get $5/month by default. Keys are opaque MaaS
+`alice` and `bob`; Alice and Bob inherit the default monthly allowance ($5
+unless changed during installation). Keys are opaque MaaS
 API keys, with a maximum lifetime of 90 days.
 
 ## Create a user
@@ -13,8 +14,9 @@ sudo python3 scripts/pricetag/user --subject carol --name Carol \
 sudo cat /root/pricetag-admin/carol.key
 ```
 
-Use this key for inference and personal dashboard login.
-[Local client setup](README.md#4-connect-local-opencode)
+Use this key for inference. Browser login also accepts it, but upstream
+personal dashboards are not available yet.
+[Local client setup](README.md#4-prepare-the-local-connection)
 
 ## Change a budget
 
@@ -22,7 +24,8 @@ Use this key for inference and personal dashboard login.
 sudo python3 scripts/pricetag/user --subject carol --monthly-usd 10 --no-key
 ```
 
-Existing keys and usage are preserved.
+Existing keys and usage are preserved. Allow up to 15 seconds for cached
+admission decisions to expire.
 
 ## List, rotate or revoke keys
 
@@ -69,46 +72,41 @@ reported old IDs after checking their status.
 
 ## Dashboard or CLI?
 
-| Task | Dashboard | CLI/API |
-| --- | --- | --- |
-| View personal spend and quota | Personal dashboard | PriceTag personal APIs |
-| View spending, edit people and monthly budgets | Admin dashboard | PriceTag admin APIs; `user --no-key` for a user budget |
-| Create/link users | Use SSH; UI group picker is unavailable | `user` |
-| Issue, list, rotate, revoke keys | Key tabs unavailable | `maas-key` |
-| Set provider URLs/credentials | Unavailable | `providers` |
+| Task | Available interface |
+| --- | --- |
+| View aggregate and user spending | Administrator dashboard |
+| View local users and change administrator roles or manager relationships | Administrator **Users** |
+| Set the default monthly allowance and post-limit model exceptions | Administrator **Safety Net** (`/api/v1/admin/safety-net`) |
+| Create users or change an individual allowance | SSH: `scripts/pricetag/user` |
+| Issue, list, rotate or revoke keys | SSH: `scripts/pricetag/maas-key` using the private MaaS API |
+| Configure providers, credentials and advertised models | SSH: `scripts/pricetag/providers` |
+| View your own spending as an ordinary user | Pending upstream; login currently shows “coming soon” |
+
+The default monthly allowance applies separately to each user. An individual
+allowance overrides that default. This deployment starts with an empty
+post-limit exception list, so no model bypasses the USD limit.
 
 <details>
-<summary>API details and UI integration gaps</summary>
+<summary>Administration boundaries and upstream API gaps</summary>
 
-### API reference
+MaaS owns keys; metering owns partner identities, usage and budgets. The public
+gateway exposes authenticated dashboard routes, not MaaS management or metering
+partner credentials. Browser key-management tabs and Kubernetes routing controls
+remain unavailable. The Pricing Discounts tab is also not exposed; alias-price
+refresh and historical repricing require separate qualification. Use the SSH
+commands above for supported management.
 
-CLI/API operations are the administrative superset; no browser action is
-required for initial providers, identities, monthly overrides or key lifecycle.
-The scripts authenticate and call these APIs rather than modifying database rows:
+The pinned metering revision removed the legacy people, identities and quota
+admin APIs. Its partner-user API expects email-based identities and does not
+expose individual budget edits. The SSH `user` command uses a small, transactional
+PostgreSQL adapter for local subjects and budget overrides, recording changes in
+`org_audit`. This adapter is tied to the metering schema and must be tested on
+upgrades. It does not call the removed APIs or require Kubernetes.
 
-| Operation | CLI or API | Browser |
-| --- | --- | --- |
-| Provider endpoints, upstream keys, catalog | `scripts/pricetag/providers` | Not configured |
-| Create/link a user | `scripts/pricetag/user` → PriceTag people and identities APIs | Add user form is blocked by the empty group picker |
-| Set a user's monthly USD allowance | `user --no-key --monthly-usd` → quota overrides API | Admin Quotas |
-| Read/edit person details | PriceTag `/api/v1/admin/people` and `/api/v1/admin/people/{slug}` | Admin People |
-| Read identities / link an identity | PriceTag `/api/v1/admin/identities` | Admin identity views |
-| Read/edit monthly quota policy | PriceTag `/api/v1/admin/quota/policy` | Admin Quotas |
-| Issue/list/rotate/revoke keys | `scripts/pricetag/maas-key` → private MaaS API | Not configured |
-| Read own usage and allowance | PriceTag `/api/v1/me/quota` and personal dashboard APIs | Personal dashboard |
-
-The table identifies API surfaces, not interchangeable request schemas. For
-custom automation, follow the pinned metering handlers and the tested calls in
-`scripts/pricetag/user` and `tests/pricetag/rhel-acceptance.py`. PriceTag admin APIs
-require an administrator session obtained through HTTPS `/login`, the deployment
-CA, and the matching Origin header on mutations. Keep session cookies private;
-never send a MaaS trusted-identity header to the public gateway as authentication.
-MaaS key operations remain on host loopback through the SSH scripts.
-
-Enabling the existing key-management tabs requires a reviewed adapter for MaaS
-ownership, roles, expiry and revocation; exposing their routes alone is not
-sufficient. A separate small UI would need the same authorization and session
-protections. This deployment deliberately leaves those routes unavailable.
+An initial `admin` partner record receives the `super_admin` role during startup.
+Ordinary users retain the `user` role. The built-in `admin` identity is quota-exempt because it has `super_admin`.
+Granting that role to another user also exempts their inference from quotas;
+distribute ordinary-user keys to clients.
 
 </details>
 

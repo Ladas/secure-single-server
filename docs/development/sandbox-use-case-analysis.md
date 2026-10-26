@@ -77,7 +77,7 @@ interactive debugging does not.
   manager in the workload image" design intent, because npm tarballs can carry
   binaries. For delegated-analysis use cases that is acceptable, even useful;
   for a hostile-agent threat model it deserves an explicit line in
-  [the threat model](../../openshell/docs/threat-model.md): registry egress
+  [the OpenShell Overview](../../openshell/docs/README.md): registry egress
   equals tool provisioning, planned or not.
 - **Profiles are task-shaped, not user-shaped.** The profile directory
   (`review`, `dev`, `automation`, `interactive`) is a capability envelope per

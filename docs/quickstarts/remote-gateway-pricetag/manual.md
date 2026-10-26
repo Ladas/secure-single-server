@@ -68,10 +68,10 @@ PRAXIS_IMAGE=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1
 PRAXIS_ID=$(sudo podman image inspect "$PRAXIS_IMAGE" --format '{{.Id}}')
 sudo podman save "$PRAXIS_IMAGE" | svc podman load
 sudo podman save localhost/pricetag-maas:standalone | svc podman load
-sudo podman save localhost/pricetag-metering:upstream-557ceb1 | svc podman load
+sudo podman save localhost/pricetag-metering:upstream-a33b90a | svc podman load
 PRAXIS_IMAGE=$(svc podman image inspect "$PRAXIS_ID" --format '{{.Id}}')
 MAAS_IMAGE=$(svc podman image inspect localhost/pricetag-maas:standalone --format '{{.Id}}')
-METERING_IMAGE=$(svc podman image inspect localhost/pricetag-metering:upstream-557ceb1 --format '{{.Id}}')
+METERING_IMAGE=$(svc podman image inspect localhost/pricetag-metering:upstream-a33b90a --format '{{.Id}}')
 PRAXIS_IMAGE="sha256:${PRAXIS_IMAGE#sha256:}"
 MAAS_IMAGE="sha256:${MAAS_IMAGE#sha256:}"
 METERING_IMAGE="sha256:${METERING_IMAGE#sha256:}"

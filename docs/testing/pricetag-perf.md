@@ -16,8 +16,8 @@ cd ~/secure-single-server
 sudo scripts/pricetag/install --mode mock --hostname PERFORMANCE_VM_PUBLIC_IP_OR_DNS --yes
 ```
 
-This is a fresh installation, not an update command. It builds the pinned
-MaaS/metering images, pulls Praxis, configures the fixture and starts the
+This is a fresh installation, not an update command. It pulls the pinned
+MaaS, metering and Praxis images, configures the fixture and starts the
 Quadlet services. It needs no upstream provider credentials. For manual image
 preparation, follow [the image steps](../quickstarts/remote-gateway-pricetag/manual.md#1-prepare-rhel-and-images),
 then prepare the mock configuration using the image variables from those steps:
@@ -99,8 +99,7 @@ cd ~/secure-single-server
 PERF_RUN="perf-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
 sudo python3 scripts/pricetag/perf users \
   --tokens "/root/pricetag-admin/$PERF_RUN" --prefix "$PERF_RUN" --count 20 \
-  --gateway https://localhost:8443 --ca /etc/praxis-pricetag/ca.pem \
-  --admin-key /root/pricetag-admin/admin.key --maas-url http://127.0.0.1:18086
+  --maas-url http://127.0.0.1:18086
 sudo python3 scripts/pricetag/perf run --url https://localhost:8443 \
   --ca /etc/praxis-pricetag/ca.pem --tokens "/root/pricetag-admin/$PERF_RUN" \
   --concurrency 1 5 10 20 --requests 100 --think 0 \
@@ -157,19 +156,33 @@ are not substitutes for RHEL measurements.
 
 ## USD quota probe
 
-Run this only on the mock-only performance host. The probe used one MaaS user
-with a $0.01 monthly override and temporarily raised the `fixture` model price
-to $75/$450 per million input/output tokens so the quota could be reached with
-a small request count. It restored the original fixture price ($0.75/$4.50 per
-million) immediately after the probe. Never apply these prices to a real
-provider or the real gateway.
+Run after the load test on the mock-only host:
 
-Six mock requests accumulated $0.009 against the $0.01 allowance. After the
-15-second decision cache expired, a seventh request was admitted, bringing
-spend to $0.0105. After a second cache expiry, the eighth request was rejected
-with HTTP 429. This confirms the USD gate works but also measures a $0.0005
-overage in this serial probe. Faster or concurrent traffic can increase
-overage during the cache window; the budget is not an exact billing ceiling.
+```console
+sudo python3 tests/pricetag/rhel-quota.py --output /root/pricetag-admin/quota-check
+```
+
+Use a new output directory for each run. The test creates a dedicated user with
+a $0.01 monthly allowance and sends paced mock requests using the configured
+fixture price. It verifies recorded spend reached the allowance, subsequent
+inference returns HTTP 429, another user remains permitted, and increasing the
+allowance restores the same key. It does not alter model prices.
+
+Requests stay below the gateway's transport rate limit so a transport rejection
+cannot be mistaken for USD enforcement. Admission decisions are cached for up to
+15 seconds; concurrent requests and delayed events can exceed the allowance.
+This is admission control, not an exact billing ceiling.
+
+For role isolation, user/key lifecycle and model-alias checks:
+
+```console
+sudo python3 tests/pricetag/rhel-acceptance.py --output /root/pricetag-admin/acceptance-check
+```
+
+This test briefly restarts the mock gateway to check distinct client/upstream
+model names and spoofed headers. Run it separately from performance measurements.
+The original configuration is restored afterward. Test credentials stay private
+in the output directory; `checks.json` contains sanitized results.
 
 ## Acceptance and cleanup
 

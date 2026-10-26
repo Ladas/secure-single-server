@@ -125,7 +125,11 @@ def transaction(changes, manifest, gid, activate=restart, relabel=None, label="p
         if relabel:
             relabel()
         activate()
-        records = dict(line.split("  ", 1)[::-1] for line in previous[manifest][0].decode().splitlines())
+        # A deployment installed before the manifest existed has no records to merge.
+        records = {}
+        if previous[manifest]:
+            records = dict(line.split("  ", 1)[::-1]
+                           for line in previous[manifest][0].decode().splitlines())
         records.update({str(p): hashlib.sha256(data).hexdigest() for p, data in changes.items()})
         content = "".join(digest + "  " + path + "\n" for path, digest in records.items()).encode()
         atomic_write(manifest, content, os.geteuid(), gid, 0o640)

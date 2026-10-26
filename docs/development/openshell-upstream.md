@@ -1,6 +1,6 @@
 # OpenShell upstream tracking
 
-The [`upstream-watch`](../../.github/workflows/upstream-watch.yml) workflow runs
+The [`upstream-watch`](https://github.com/redhat-et/secure-single-server/blob/main/.github/workflows/upstream-watch.yml) workflow runs
 daily at 05:17 UTC. It reads `OPENSHELL_CLI_VERSION`, lists stable upstream
 releases newer than that pin, prints their release notes, and creates or updates
 one tracking issue labeled `openshell`. A stable marker in the issue body

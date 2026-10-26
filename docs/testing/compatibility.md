@@ -276,18 +276,18 @@ translation remains untested.
 - Praxis: `quay.io/opendatahub/praxis-experimental@sha256:227d421e963c477038a884dc51ec880c5d0afa30098ae31028ecf85e963e40d5`,
   source `019aa849a219e5c881d69e4a40a1fc190bd6c404`.
 - vLLM 0.30.0, **thinking enabled** for both Qwen presets;
-  [CPU/GPU images and Qwen3-8B pin](../../configs/vllm/images.env).
+  [CPU/GPU images and Qwen3-8B pin](https://github.com/redhat-et/secure-single-server/blob/main/configs/vllm/images.env).
 - Qwen3.8-27B INT4: `RedHatAI/Qwen3.8-27B-INT4` at
   `91bd022d5b49442a868bc35008f6c21e1860edfa`;
-  [preset](../../configs/vllm/qwen3.8-27b-int4.env). Text-only, native pinned
+  [preset](https://github.com/redhat-et/secure-single-server/blob/main/configs/vllm/qwen3.8-27b-int4.env). Text-only, native pinned
   template, `qwen3_xml` tool parser and `qwen3` reasoning parser.
   The existing bootc path still uses its separate Qwen3-8B configuration.
 - Direct CLIs: Claude Code 2.1.283, OpenCode 1.18.32
-  ([pins](../../configs/common/harness-versions.json)).
+  ([pins](https://github.com/redhat-et/secure-single-server/blob/main/configs/common/harness-versions.json)).
 - OpenShell 0.1.2-rhaiv.0; sandbox OpenCode 1.18.31 and Node.js 26.9.0
-  ([image pins](../../openshell/configs/images.env)).
+  ([image pins](https://github.com/redhat-et/secure-single-server/blob/main/openshell/configs/images.env)).
 
-Current-image [container contract tests](../../tests/mocked-provider.py) pass for
+Current-image [container contract tests](https://github.com/redhat-et/secure-single-server/blob/main/tests/mocked-provider.py) pass for
 both gateway roles with memory and Valkey, including TLS/JWT and mocked provider
 additions. They do not populate native CLI, menu or RHEL lifecycle cells.
 

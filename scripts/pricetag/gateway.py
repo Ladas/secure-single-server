@@ -12,16 +12,13 @@ INFERENCE = ['/v1/chat/completions', '/v1/responses', '/v1/messages']
 DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me', '/welcome',
              '/whoami', '/api/v1/whoami', '/api/v1/pricing',
              '/api/v1/dashboard/overview', '/api/v1/dashboard/groups',
-             '/api/v1/dashboard/users', '/api/v1/dashboard/models',
+             '/api/v1/dashboard/users', '/api/v1/dashboard/directory-users',
+             '/api/v1/dashboard/models', '/api/v1/dashboard/tools',
              '/api/v1/dashboard/timeline', '/api/v1/dashboard/recent',
-             '/api/v1/me/quota', '/api/v1/me/quota/request',
-             '/api/v1/admin/quota/policy', '/api/v1/admin/quota/overrides',
-             '/api/v1/admin/quota/models', '/api/v1/admin/quota/denials',
-             '/api/v1/admin/people', '/api/v1/admin/identities', '/api/v1/admin/models',
-             '/api/v1/admin/org/roles', '/api/v1/admin/org/valid-groups',
-             '/api/v1/admin/users', '/api/v1/org/scope', '/api/v1/org/tree',
+             '/api/v1/admin/safety-net', '/api/v1/admin/partner-users',
+             '/api/v1/admin/model-policies', '/api/v1/org/scope',
              '/api/v1/org/usage', '/api/v1/org/person', '/api/v1/org/charts']
-DASHBOARD_PREFIXES = ['/api/v1/admin/people/', '/api/v1/org/quota-requests']
+DASHBOARD_PREFIXES = ['/api/v1/admin/partner-users/']
 
 
 def render(original, models, origins=None):
@@ -56,8 +53,12 @@ def render(original, models, origins=None):
         # model_access rejects an empty allowlist at startup; retain auth and
         # the terminal 404 instead of constructing an invalid filter.
         if selected:
+            # json_body rewrites during body pre-read, before model_access's
+            # request hook. Check upstream IDs here; the unified renderer
+            # separately rejects any unregistered client alias using the
+            # original, body-derived X-Gateway-Model header.
             filters.insert(2, {'filter': 'model_access', 'mode': 'allowlist',
-                               'models': [model['id'] for model in selected],
+                               'models': sorted({model['model'] for model in selected}),
                                'group_metadata_key': 'x-tenant-group', 'max_body_bytes': 33554432})
         for i, item in enumerate(filters):
             if item['filter'] == 'token_count':

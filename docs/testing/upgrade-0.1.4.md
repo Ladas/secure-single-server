@@ -3,8 +3,8 @@
 This change moves the coordinated deployment from OpenShell v0.1.3 to v0.1.4.
 The gateway, supervisor, and sandbox images are pinned by manifest digest; the
 Linux CLI and policy prover are pinned to the release archives and SHA-256
-checksums in [images.env](../../openshell/configs/images.env) and the
-[OpenShell workflow](../../.github/workflows/openshell-validate.yml).
+checksums in [images.env](https://github.com/redhat-et/secure-single-server/blob/main/openshell/configs/images.env) and the
+[OpenShell workflow](https://github.com/redhat-et/secure-single-server/blob/main/.github/workflows/openshell-validate.yml).
 
 ## Release review
 
@@ -32,7 +32,7 @@ recreate sandboxes from the new pins.
 The release asset checksums and GHCR manifest digests were checked against the
 upstream v0.1.4 release. Repository static checks compare the gateway,
 supervisor, sandbox, CLI, and prover pins with the reviewed
-[v0.1.4 release manifest](../../openshell/configs/releases/v0.1.4.json), while the workflow
+[v0.1.4 release manifest](https://github.com/redhat-et/secure-single-server/blob/main/openshell/configs/releases/v0.1.4.json), while the workflow
 keeps an independent prover trust anchor. The final local validation passed the
 focused PR-queue suite (63 tests), bootc inference
 routing suite (17 tests), OpenShell regression

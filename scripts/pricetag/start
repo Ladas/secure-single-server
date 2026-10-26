@@ -101,6 +101,7 @@ for attempt in range(60):
 else:
     raise SystemExit("metering did not become ready")
 '
+python3 "${SCRIPT_DIR}/user" --subject admin --name Administrator --no-key --bootstrap-admin
 if [[ ! -f "${DEPLOY_DIR}/bootstrap.done" ]]; then
   rows="$(as_service podman exec pricetag-db psql -X -qAt -U metering -d metering -c 'SELECT count(*) FROM usage_events;')"
   if [[ "${rows}" != 0 && "${adopt_existing_database}" != 1 ]]; then
@@ -130,7 +131,7 @@ PY
 for subject in alice bob; do
   if [[ ! -f "${admin_dir}/${subject}.key" ]]; then
     python3 "${SCRIPT_DIR}/user" --subject "${subject}" --name "${subject^}" \
-      --monthly-usd 5 --admin-key "${admin_dir}/admin.key" --output "${admin_dir}/${subject}.key"
+      --output "${admin_dir}/${subject}.key"
   fi
 done
 note 'Praxis, MaaS and PriceTag are ready. Inference and dashboard login use finite MaaS keys.'

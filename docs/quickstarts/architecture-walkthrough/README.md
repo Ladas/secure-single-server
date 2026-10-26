@@ -1,196 +1,59 @@
-# Why use this architecture?
+# Architecture overview
 
-> **Where this fits:** Step 1 of the recommended route. Read this before
-> deploying anything.
+This page describes how the harness, OpenShell, model access, and host
+deployment fit together. It is informational; deployment, configuration, and
+validation procedures are in the linked guides.
 
-This walkthrough explains why the pieces exist and then follows the validated
-local path through them. It is written for an administrator deciding whether to
-run coding agents for a small team on one managed RHEL server.
+Coding harnesses are useful because they can read a workspace, run tools, and
+call a model. Those same capabilities raise questions about which files and
+commands are available, where model traffic goes, who holds provider
+credentials, and how a host is kept consistent. This design assigns those
+responsibilities to separate components.
 
-The short version is this: coding agents are useful because they can read a
-workspace, run tools, and call a model. Those same powers create the operational
-problems this repository tries to solve. The harness keeps the agent experience;
-OpenShell constrains the tools; Praxis owns model access and shared usage; vLLM
-serves an approved local model; bootc makes the host repeatable.
+## Components
 
-Every control below has a command or an explicit limitation attached to it. A
-healthy service or a model saying that it ran a command is not accepted as proof.
-
-## The problem it answers
-
-Suppose several people ask to run OpenCode, OpenClaw, or another coding harness on
-a shared server. A direct approach is to create accounts, copy a provider key
-into each harness, and let the agent use the shell. That can work on a trusted
-laptop, but it leaves five operational questions unanswered:
-
-| Question | What goes wrong without an architecture | Control used here |
+| Component | Role in the architecture | Boundary or limitation |
 | --- | --- | --- |
-| Which files and tools can the agent touch? | A broad shell can read unrelated home directories, SSH material, or service state. | OpenShell policies declare writable sandbox paths, read-only system paths, and approved binaries. |
-| Where can model traffic go? | An agent or tool can bypass the approved model and contact vLLM or a cloud provider directly. | The local OpenCode policy permits only `host.openshell.internal:8080`. |
-| Who holds provider credentials? | Keys copied into harness homes are hard to rotate and easy to expose through prompts, logs, or tools. | Praxis owns credentials in gateway profiles; this local path has no cloud credential or fallback. |
-| What happens when use grows? | One long-running task can consume a shared model; a cloud profile can also create a provider-bill surprise. | Praxis applies request and shared token limits before routing to the selected upstream. |
-| Can the result be reproduced? | Hand-edited servers drift and are difficult to reason about. | bootc packages pinned services and harness configuration into a reviewable OS image. |
+| Harness | Provides the user experience for coding tasks, including prompts, model selection, and tool calls. | The harness itself does not define the host's filesystem or network boundary. |
+| OpenShell | Runs harnesses and tools in sandboxes governed by filesystem and network policies. | The current deployment is operated by a trusted administrator; it is not a multi-tenant authorization system. |
+| Praxis | Provides an optional model gateway for routing, provider credential custody, and configured shared usage limits. | Limits and routing depend on the selected Praxis profile and upstream. |
+| vLLM | Serves a selected local model, such as Qwen, on a private inference host. | Its API should remain private and be reached through the configured model path. |
+| bootc | Provides an optional repeatable RHEL environment managed by a container image. | Host image management does not preserve application or workspace data by itself. |
 
-The architecture does not try to make the harness smarter. It lets the harness
-remain a normal coding agent while making its execution and model access
-operable.
+## Model access paths
 
-## Follow the validated path
-
-This is the **OpenCode → Praxis → vLLM** path. It uses no cloud-provider
-credential. Complete hardware, image, and OS prerequisites are in the
-[vLLM guide](../../../bootc/VLLM.md); start with the OpenCode bootc variant.
-
-### 1. Put the model on the host
-
-After deploying the published OpenCode image, select CPU or single-L4 GPU mode:
-
-```console
-sudo sss-bootc vllm cpu
-sudo sss-bootc vllm status
-```
-
-Wait until the model has loaded, then confirm that vLLM answers directly:
-
-```console
-curl --fail http://127.0.0.1:8000/health
-curl --fail http://127.0.0.1:8000/v1/models
-```
-
-This direct request is a diagnostic. It proves the model is running, not that
-the architecture is in effect. vLLM is deliberately loopback-only and is not the
-endpoint given to the harness.
-
-### 2. Put Praxis in the request path
-
-```console
-sudo sss-bootc inference vllm
-sudo sss-bootc inference status
-sudo sss-bootc inference check
-```
-
-`inference check` calls vLLM and then calls it through Praxis. A nonempty
-completion through both paths verifies the administrator-selected upstream.
-The [Praxis configuration](../../../configs/vllm/praxis.yaml) binds to
-`127.0.0.1`, strips caller authorization headers, applies two requests per
-second, and enforces a shared one-million-token rolling day with a 4,096-token
-reservation per request.
-
-Those limits are shared allowances, not per-user or USD budgets. See
-[quota semantics](../common/token-quotas.md) before relying on them for cost
-control.
-
-### 3. Give the harness only the gateway
-
-```console
-sudo sss-bootc harness create --profile dev --name qwen-dev
-sudo sss-bootc harness connect --name qwen-dev
-```
-
-OpenCode is configured to use the Praxis URL and a placeholder local API key.
-The [OpenCode provider configuration](../../../configs/vllm/harness/harness-provider.json.in)
-does not contain a provider secret. The
-[sandbox network policy](../../../configs/vllm/harness/profiles/dev/policy.yaml)
-allows the OpenCode and Node binaries to use only `GET /vllm/v1/models` and
-`POST /vllm/v1/chat/completions` on the Praxis host alias.
-
-That combination is the value of the architecture: the agent can still call a
-model and use its tools, but it does not receive a cloud key, the vLLM port, or
-the general network by default.
-
-### 4. Run the evidence suite
-
-From the host, run the automated end-to-end test against the sandbox:
-
-```console
-sudo bootc/test-inference qwen-dev
-```
-
-The test is intentionally stronger than a prompt-only demo. It checks that:
-
-- the sandbox can list `Qwen/Qwen3-8B` through Praxis;
-- direct connections to vLLM port 8000 are denied;
-- direct connections to `api.openai.com` are denied;
-- OpenShell audit records contain those denials;
-- OpenCode returns a streamed completion;
-- the model invokes the bash tool;
-- a unique file is independently read back from `/sandbox`;
-- no OpenCode JSON event is an error.
-
-The final line should be:
-
-```text
-OpenCode → Praxis → vLLM and explicit bypass denial checks passed
-```
-
-The file check matters. An agent can describe a command that never ran; reading
-the file from outside the model response is independent evidence that tool
-execution happened.
-
-### 5. Prove there is no silent cloud fallback
-
-Optionally stop vLLM and call the gateway:
-
-```console
-sudo sss-bootc vllm disabled
-curl --max-time 30 -i http://127.0.0.1:8080/v1/models
-```
-
-Praxis should fail with an upstream error, commonly HTTP 502 in the tested
-deployment. That failure is the desired result: an unavailable local model does
-not silently send the request to a paid cloud provider. Re-enable vLLM with
-`sudo sss-bootc vllm cpu` or `sudo sss-bootc vllm gpu`.
-
-The [runtime validation record](../../../bootc/VLLM-VALIDATION.md) contains the
-exact images, hardware, output, and remaining limits from the AWS CPU and GPU
-runs.
-
-## Clean up
-
-Deleting a sandbox destroys its work. Export anything you need first:
-
-```console
-sudo sss-bootc openshell sandbox delete qwen-dev
-sudo sss-bootc vllm disabled
-```
-
-## Why each layer earns its place
-
-| Layer | What it does | What it does not do |
+| Model choice | Request path | What it means |
 | --- | --- | --- |
-| Harness | Provides prompts, model selection, tool calling, and the developer experience. | Does not enforce host filesystem, network, or credential policy. |
-| OpenShell | Runs the harness and tools under a declared filesystem and network policy and records allowed and denied operations. | Is not a multi-tenant authorization boundary in the current single-operator deployment. |
-| Praxis | Makes the gateway the model path, strips client credentials, applies shared request and token limits, and chooses the approved upstream. | Does not yet provide per-user quotas, USD budgets, or a qualified usage dashboard. |
-| vLLM | Serves the pinned local Qwen3-8B model on host loopback. | Is unauthenticated and therefore must not be published or exposed directly to harnesses. |
-| bootc | Provides a reviewable, versioned RHEL host with pinned workload images. | Does not restore workspace data or application state after a deployment change. |
+| Local inference | Sandboxed harness → Praxis → private vLLM host | The model runs in the managed environment rather than through a hosted frontier-model API. The documented Qwen deployment uses a separate inference server; a co-located bootc path remains available for compatibility. |
+| External frontier model | Sandboxed harness → Praxis → provider API, or a configured OpenShell provider profile → provider API | Requests are served by an external provider. Praxis can centralize provider credentials and apply its configured shared limits; a direct provider profile is another documented option. Provider terms and data handling apply to the selected service. |
 
-## Upstream scope
+The model path is separate from the execution boundary. OpenShell governs the
+harness and its tools; the chosen model route determines where prompts and
+responses are processed. When Praxis is used, sandbox policy can limit the
+harness to the gateway while Praxis selects the approved upstream.
 
-This repository uses a narrower, pinned subset of OpenShell, Praxis
-experimental, and vLLM. It does not qualify upstream observability, per-user
-identity mapping, model failover, or cloud-provider routing. The older Praxis
-Ruby framework is unrelated to the gateway used here.
+## Why the components are separated
 
-## Know when not to use it
+| Concern | Role in this design |
+| --- | --- |
+| Workspace and tool access | OpenShell policies describe the sandbox's writable paths, read-only paths, approved binaries, and network destinations. |
+| Model routing | Praxis can give the harness one gateway endpoint while selecting a local or external upstream. |
+| Provider credentials | A gateway or configured OpenShell provider profile can keep provider credentials out of ordinary harness configuration. |
+| Shared use | Praxis profiles can enforce shared request or token allowances; the exact semantics depend on the selected profile. |
+| Host consistency | A bootc deployment can package the reviewed host environment and pinned workload configuration as a repeatable OS image. |
 
-This architecture is a good fit when one administrator wants a reproducible
-RHEL server for OpenCode tasks with an approved local model and explicit tool
-boundaries. It is not yet the right answer if you require all of the following:
+## Scope
 
-- per-user authentication and personal quotas;
-- USD spend caps or billing chargeback;
-- production multi-tenant isolation;
-- OpenClaw through the local Qwen path;
-- sustained-load or coding-quality guarantees.
+This repository documents selected configurations of OpenShell, Praxis,
+vLLM, and the harnesses. A component's presence does not imply that every
+upstream feature, provider combination, workload, or hardware configuration
+has been qualified. See the compatibility and validation records for the
+combinations that have been exercised.
 
-Read the [integration matrix](../openshell-praxis/users.md) and
-[trust model](../../../openshell/docs/threat-model.md) before extending the
-validated path.
+## Deployment and validation guides
 
-## Next step
-
-- [Deploy the local Qwen3-8B example](../../../bootc/VLLM.md)
-- Before extending the path, read the
-  [integration matrix](../openshell-praxis/users.md) and
-  [quota semantics](../common/token-quotas.md).
-- [Reproduce the acceptance evidence](../../testing/README.md).
+- [Bootc deployment](../openshell-single-server/bootc.md) and [manual Podman deployment](../openshell-single-server/manual.md)
+- [Local vLLM deployment](../../../bootc/VLLM.md) and [RHEL vLLM administration](../common/vllm.md)
+- [OpenShell + Praxis](../openshell-praxis/README.md)
+- [OpenShell Overview](../../../openshell/docs/README.md)
+- [Compatibility matrix](../../testing/compatibility.md) and [testing guide](../../testing/README.md)

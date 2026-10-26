@@ -18,16 +18,16 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 MAAS_COMMIT = '6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d'
-METERING_COMMIT = '557ceb1cbe1316d93e0f682baa8301455956fe18'
+METERING_COMMIT = 'a33b90ad1aea66479dbff99444ca819498589982'
 MAAS_REPO = 'https://github.com/Ladas/models-as-a-service.git'
 MAAS_BRANCH = 'feat/standalone-runtime-minimal'
 METERING_REPO = 'https://github.com/redhat-et/pricetag-metering.git'
 PRAXIS_IMAGE = 'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
 PRAXIS_REVISION = '5667c4acecd0981ae5114cbbf2ee3dcccec9c248'
 MAAS_IMAGE = 'localhost/pricetag-maas:standalone'
-METERING_IMAGE = 'localhost/pricetag-metering:upstream-557ceb1'
-PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:802bcc05e1ddedb818b21d0ae86886d66c2b5ba64d92306571612ae96fe9e0cc'
-PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:784bc884f4d4c4a25d2eaf6ce88202ee30dae324040ebe0928bfc09e87bd45a5'
+METERING_IMAGE = 'localhost/pricetag-metering:upstream-a33b90a'
+PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:5ca86edad1182787dc391b3486e46f0b83fc621e294b365a74a7b173fbf3631c'
+PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:62a8610521f3d7f5530a0d6dab7bf17cb47658232c2b0a27b16820cfac9d02b5'
 CACHE = Path('/var/cache/pricetag-installer')
 DEPLOY = Path('/etc/praxis-pricetag')
 ADMIN = Path('/root/pricetag-admin')
@@ -361,19 +361,27 @@ def acquire_images(args, arch):
 
 
 def install(args):
+    sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
+    from prepare import POSTGRES
+    apis = {'openai': 'OpenAI-compatible', 'anthropic': 'Anthropic Messages',
+            'both': 'OpenAI-compatible + Anthropic Messages'}
+    providers = {'openai': 'OpenAI', 'external': 'External (' + apis.get(args.external_api, 'both APIs') + ')',
+                 'pricetag': 'External (legacy PriceTag profile)'}
     print('\nRemote gateway with PriceTag\n' + '=' * 54)
     print(f'  Gateway    https://{args.hostname}:8443')
-    print(f'  Mode       {args.mode}')
+    print('  Providers  ' + ('Mock providers (benchmark)' if args.mode == 'mock' else
+                            ', '.join(providers[name] for name in args.provider)))
     print(f'  Images     {args.image_mode}')
+    print('  Praxis     ' + PRAXIS_IMAGE)
+    print('  PostgreSQL ' + POSTGRES)
     if args.image_mode == 'published':
         print('  MaaS       ' + args.maas_image)
         print('  PriceTag   ' + args.metering_image)
     else:
+        print('  MaaS       ' + MAAS_IMAGE)
+        print('  PriceTag   ' + METERING_IMAGE)
         print('  MaaS ref   ' + (args.maas_branch or args.maas_revision))
         print('  PriceTag ref ' + (args.metering_branch or args.metering_revision))
-    print('  Providers  ' + (', '.join(args.provider) or 'synthetic fixture only'))
-    if args.external_api:
-        print('  APIs       ' + args.external_api)
     print(f'  Users      admin, alice, bob (Alice/Bob: ${args.monthly_usd}/month each)')
     print('\n  1. Validate provider setup   4. Import images')
     print('  2. Prepare RHEL             5. Configure gateway')
@@ -381,7 +389,6 @@ def install(args):
     if args.plan:
         if args.image_mode == 'published':
             print('Expected MaaS commit: ' + args.maas_revision + '\nExpected PriceTag commit: ' + args.metering_revision)
-        print('Praxis image: ' + PRAXIS_IMAGE)
         return
     preflight(args.mode)
     helper = provider_module()
@@ -433,7 +440,7 @@ def install(args):
     print('Dashboard: https://' + args.hostname + ':8443/login')
     print('CA: /etc/praxis-pricetag/ca.pem')
     print('Keys: /root/pricetag-admin/{admin,alice,bob}.key')
-    print('\nNext: open the dashboard, then connect OpenCode (quickstart steps 3–4).')
+    print('\nNext: open the dashboard, then connect OpenCode (quickstart steps 3–5).')
     print('Guide: docs/quickstarts/remote-gateway-pricetag/README.md')
     if args.mode == 'mock':
         print('Benchmark: sudo python3 scripts/pricetag/benchmark')

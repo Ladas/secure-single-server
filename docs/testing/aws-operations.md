@@ -41,7 +41,7 @@ planning cannot prove mutation permissions or reserve capacity. No
 
 ## Direct CLI and custom VM configurations
 
-The [session helper](../../scripts/aws/session.sh) manages hidden credential
+The [session helper](https://github.com/redhat-et/secure-single-server/blob/main/scripts/aws/session.sh) manages hidden credential
 entry and common workstation settings. The [VM helper](../../scripts/aws/rhel-vm)
 plans/applies/verifies exactly one VM. It also works directly with your normal
 AWS CLI credential chain; do not mix exported keys and an AWS profile.

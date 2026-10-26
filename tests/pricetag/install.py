@@ -28,6 +28,25 @@ benchmark = module('benchmark')
 
 
 class InstallTest(unittest.TestCase):
+    def test_summary_shows_all_images_and_provider_choices(self):
+        sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
+        from prepare import POSTGRES
+        for mode in ('real', 'mock'):
+            with self.subTest(mode=mode):
+                flags = ['--mode', mode, '--hostname', 'gateway.example', '--plan']
+                if mode == 'real':
+                    flags += ['--provider', 'openai', '--provider', 'external', '--external-api', 'both']
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    installer.install(installer.parse_args(flags))
+                text = output.getvalue()
+                for image in (POSTGRES, installer.PRAXIS_IMAGE, installer.PUBLISHED_MAAS_IMAGE,
+                              installer.PUBLISHED_METERING_IMAGE):
+                    self.assertEqual(text.count(image), 1)
+                self.assertNotIn('  Mode ', text)
+                self.assertIn('Mock providers (benchmark)' if mode == 'mock' else
+                              'OpenAI, External (OpenAI-compatible + Anthropic Messages)', text)
+
     def image_args(self, *extra):
         return installer.parse_args(['--mode', 'mock', '--hostname', 'gateway.example', '--plan', *extra])
 

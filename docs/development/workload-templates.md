@@ -70,7 +70,7 @@ Adding a new client still requires qualifying its client configuration and tools
 
 The top-level JSON object has `version: 1` and a `templates` array. Entries are
 unique by `(harness, profile, backend)`. Image variables refer to the central
-[`images.env`](../../openshell/configs/images.env) digest pins. Set either `policy`
+[`images.env`](https://github.com/redhat-et/secure-single-server/blob/main/openshell/configs/images.env) digest pins. Set either `policy`
 for a standalone sandbox or `config_dir` for an integrated policy/provider recipe.
 Paths are relative to the installed repository root, including when a reviewed
 catalog is supplied through `OPENSHELL_TEMPLATE_DIR`; they are not relative to

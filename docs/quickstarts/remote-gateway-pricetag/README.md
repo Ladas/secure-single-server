@@ -79,15 +79,18 @@ ssh "${SSH_OPTS[@]}" "$RHEL_HOST" \
 ```
 
 Open that URL, trust the deployment certificate and paste the admin key.
-For the personal dashboard, use `alice.key` instead, in a separate browser
-profile. Treat printed keys as passwords; do not share the terminal output.
+Ordinary users can log in, but their personal dashboards are pending upstream
+and currently show “coming soon.” Use the administrator dashboard to inspect usage.
 [Create users, set budgets and rotate keys](users.md)
 
-## 4. Connect local OpenCode
+## 4. Prepare the local connection
 
-Copy the CA and Alice's key into a private local directory:
+Run this once in the **workstation shell used for installation**. It copies
+the CA and Alice's key, asks for a starting model, then prints the environment
+variables and command for launching OpenCode dynamically from any project shell:
 
 ```console
+cd "$REPO"
 CLIENT_DIR="$HOME/.config/praxis-pricetag/$GATEWAY_HOST"
 umask 077
 mkdir -p "$CLIENT_DIR"
@@ -98,37 +101,51 @@ chmod 600 "$CLIENT_DIR/ca.pem" "$CLIENT_DIR/alice.key"
 GATEWAY_URL="https://$GATEWAY_HOST:8443"
 curl --fail --cacert "$CLIENT_DIR/ca.pem" "$GATEWAY_URL/v1/models" | \
   python3 -c 'import json,sys; print("\n".join(m["id"] for m in json.load(sys.stdin)["data"]))'
+printf 'Initial model alias: '
+IFS= read -r MODEL
+printf '\nCopy into any workstation shell opened in your project directory:\n\n'
+printf 'export REPO=%q\nexport CLIENT_DIR=%q\nexport GATEWAY_URL=%q\nexport MODEL=%q\n' \
+  "$REPO" "$CLIENT_DIR" "$GATEWAY_URL" "$MODEL"
+printf '%s\n' \
+  'python3 "$REPO/scripts/pricetag/harness" opencode \' \
+  '  --url "$GATEWAY_URL" --key-file "$CLIENT_DIR/alice.key" \' \
+  '  --ca-file "$CLIENT_DIR/ca.pem" --model "$MODEL"'
 ```
 
-Pick an alias from that list and launch from your project:
+The printed block contains connection settings and file paths, not key contents.
 
-```console
-MODEL='COPY_AN_ALIAS_FROM_THE_LIST'
-cd /path/to/your/project
-python3 "$REPO/scripts/pricetag/harness" opencode \
-  --url "$GATEWAY_URL" --key-file "$CLIENT_DIR/alice.key" \
-  --ca-file "$CLIENT_DIR/ca.pem" --model "$MODEL"
-```
+## 5. Run OpenCode
 
-All enabled models are available in OpenCode's model picker for this session.
-Its persistent configuration is unchanged.
+Open a **shell in your project directory** and paste the block printed above.
+Reuse it in other project shells to run separate sessions. The helper refreshes
+the model list on each launch; all enabled models appear in the picker.
+Sessions share Alice's budget and leave saved OpenCode configuration unchanged.
+
+For later launches without exporting variables, save the configuration and
+launcher below once.
 
 <details>
-<summary>What the helper does — and native OpenCode configuration without it</summary>
+<summary>Save native configuration and a launcher — no exports needed on later runs</summary>
 
 The helper reads `/v1/models`, groups aliases by OpenAI or Anthropic API, and
 copies their context/output limits. It supplies the key and CA for this process
 and launches OpenCode using `OPENCODE_CONFIG_CONTENT`. It does not install
 OpenCode, issue keys or modify saved OpenCode settings.
 
-To use native configuration instead, run this on your workstation after the CA
-and key copy above. It needs `jq` and writes a separate configuration file with
-all advertised models; the key stays in `alice.key` and is referenced by path.
+Run this once in the **workstation shell used for setup**, where the variables
+from step 4 remain set. It needs `jq` and saves all advertised models plus a
+launcher. **Choose the user key on the first line**: keep Alice's path or replace
+it with the absolute path to a custom user's local key file. Use an inference
+key, not the admin key; requests use the selected user's budget. The key stays
+in that private file—only its path is saved in OpenCode configuration.
 
 ```console
+KEY_FILE="$CLIENT_DIR/alice.key"  # Or an absolute path to your custom user's key file.
+umask 077
+chmod 600 "$KEY_FILE"
 curl --fail --cacert "$CLIENT_DIR/ca.pem" "$GATEWAY_URL/v1/models" \
   -o "$CLIENT_DIR/models.json"
-jq --arg base "$GATEWAY_URL/v1" --arg key "{file:$CLIENT_DIR/alice.key}" \
+jq --arg base "$GATEWAY_URL/v1" --arg key "{file:$KEY_FILE}" \
   --arg model "$MODEL" '
   {provider: (reduce .data[] as $m ({};
     reduce $m.praxis.apis[] as $api (. ;
@@ -144,14 +161,29 @@ jq --arg base "$GATEWAY_URL/v1" --arg key "{file:$CLIENT_DIR/alice.key}" \
   .model = ((first(["praxis-openai", "praxis-anthropic"][] as $id | select(.provider[$id].models[$model]) | $id)
     // error("Selected model is missing")) + "/" + $model)
 ' "$CLIENT_DIR/models.json" > "$CLIENT_DIR/opencode.json"
-NODE_EXTRA_CA_CERTS="$CLIENT_DIR/ca.pem" \
-  OPENCODE_CONFIG_CONTENT="$(cat "$CLIENT_DIR/opencode.json")" opencode
+python3 -c '
+import pathlib, shlex, sys
+directory = pathlib.Path(sys.argv[1]).resolve()
+launcher = directory / "opencode"
+command = ["env", "NODE_EXTRA_CA_CERTS=" + str(directory / "ca.pem"),
+           "OPENCODE_CONFIG=" + str(directory / "opencode.json"), "opencode"]
+launcher.write_text("#!/bin/sh\nunset OPENCODE_CONFIG_CONTENT\nexec " + shlex.join(command) + " \"$@\"\n")
+launcher.chmod(0o700)
+print("\nRun this from any project directory, without exporting variables:\n")
+print(shlex.quote(str(launcher)))
+' "$CLIENT_DIR"
 ```
 
-This file is only loaded for that invocation. Rerun the catalog/configuration
-commands when the server's models change. OpenCode still merges unrelated
-settings from your existing configuration. For a hand-maintained catalog, edit
-this file's `provider` entries and model limits rather than regenerating it.
+Copy the printed launcher path into any project shell to start OpenCode there.
+It loads the saved configuration and CA automatically; no repository path or
+shell exports are needed. Other OpenCode invocations are unaffected.
+
+Rerun this setup block when the server's models change or to select another key
+path. After key rotation, securely replace the contents of the selected local
+key file and restart OpenCode. Never commit key files to a project repository.
+OpenCode still merges unrelated settings from
+your existing configuration. For a hand-maintained catalog, edit
+`opencode.json` instead of regenerating it.
 See [OpenCode configuration](https://opencode.ai/docs/config/) and
 [custom providers](https://opencode.ai/docs/providers/#custom-provider).
 

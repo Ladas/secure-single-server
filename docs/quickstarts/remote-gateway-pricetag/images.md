@@ -15,7 +15,7 @@ source labels and CPU architecture before preparing the deployment.
 
 ## Published images
 
-The installer pins both images from the [qualified publication run](https://github.com/redhat-et/secure-single-server/actions/runs/40008921330).
+The installer pins both images from the [qualified publication run](https://github.com/redhat-et/secure-single-server/actions/runs/40324136393).
 No image arguments are needed for the default installation. The repositories are:
 
 ```text
@@ -45,9 +45,9 @@ options](providers.md). Never put provider keys in command-line arguments.
 ## Build from a branch or commit
 
 Source mode defaults to `feat/standalone-runtime-minimal` in the MaaS fork.
-PriceTag keeps commit `557ceb1cbe1316d93e0f682baa8301455956fe18` by default;
-we do not maintain a modified PriceTag branch. Its newer upstream versions
-have compatibility changes and are not selected automatically.
+PriceTag keeps commit `a33b90ad1aea66479dbff99444ca819498589982` by default;
+we do not maintain a modified PriceTag branch. Other revisions require
+compatibility testing and are not selected automatically.
 
 ```console
 cd ~/secure-single-server

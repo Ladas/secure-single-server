@@ -1,7 +1,13 @@
 .state/
 evidence/
+.docs-build/
+site/
+.venv-docs/
 *.local
 *.secret
 __pycache__/
 *.pyc
 .playwright-cli/
+.worktrees/
+.DS_Store
+docs/examples/*/visual-demo.sheet*.png

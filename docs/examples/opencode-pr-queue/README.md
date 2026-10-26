@@ -458,14 +458,14 @@ authenticated commands or automatic authorization to publish.
 | --- | --- |
 | This user-facing runbook | `docs/examples/opencode-pr-queue/README.md` |
 | Ready-to-run demo prompt | [demo-task.md](demo-task.md) |
-| Sandbox policy | [`configs/openshell-praxis/profiles/pr-queue/policy.yaml`](../../../configs/openshell-praxis/profiles/pr-queue/policy.yaml) |
+| Sandbox policy | [`configs/openshell-praxis/profiles/pr-queue/policy.yaml`](https://github.com/redhat-et/secure-single-server/blob/main/configs/openshell-praxis/profiles/pr-queue/policy.yaml) |
 | OpenCode model/provider template | [`configs/openshell-praxis/pr-queue/harness-provider.json.in`](../../../configs/openshell-praxis/pr-queue/harness-provider.json.in) |
-| Queue runner | [`openshell/harnesses/opencode/pr-queue/queue.sh`](../../../openshell/harnesses/opencode/pr-queue/queue.sh) |
-| Optional labeled-issue watcher | [`openshell/harnesses/opencode/pr-queue/watch.sh`](../../../openshell/harnesses/opencode/pr-queue/watch.sh) |
-| Artifact collector | [`openshell/harnesses/opencode/pr-queue/collect.sh`](../../../openshell/harnesses/opencode/pr-queue/collect.sh) |
-| Shared metadata validation | [`openshell/harnesses/opencode/pr-queue/lib.sh`](../../../openshell/harnesses/opencode/pr-queue/lib.sh) |
+| Queue runner | [`openshell/harnesses/opencode/pr-queue/queue.sh`](https://github.com/redhat-et/secure-single-server/blob/main/openshell/harnesses/opencode/pr-queue/queue.sh) |
+| Optional labeled-issue watcher | [`openshell/harnesses/opencode/pr-queue/watch.sh`](https://github.com/redhat-et/secure-single-server/blob/main/openshell/harnesses/opencode/pr-queue/watch.sh) |
+| Artifact collector | [`openshell/harnesses/opencode/pr-queue/collect.sh`](https://github.com/redhat-et/secure-single-server/blob/main/openshell/harnesses/opencode/pr-queue/collect.sh) |
+| Shared metadata validation | [`openshell/harnesses/opencode/pr-queue/lib.sh`](https://github.com/redhat-et/secure-single-server/blob/main/openshell/harnesses/opencode/pr-queue/lib.sh) |
 | Agent instructions and artifact contract | [`openshell/harnesses/opencode/pr-queue/instructions.md`](../../../openshell/harnesses/opencode/pr-queue/instructions.md) |
-| Contracts and tests | [`openshell/tests/pr-queue.py`](../../../openshell/tests/pr-queue.py) |
+| Contracts and tests | [`openshell/tests/pr-queue.py`](https://github.com/redhat-et/secure-single-server/blob/main/openshell/tests/pr-queue.py) |
 
 Executable runtime code stays under `openshell/` and deployment configuration
 stays under `configs/`. This page is the single entry point; the source map

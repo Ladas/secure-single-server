@@ -12,15 +12,14 @@ intended model path is a sandboxed harness → Praxis → upstream provider. The
 bootc base packages both services and the selected harness configuration into
 one updatable OS deployment.
 
-If you are evaluating the idea, start with the
-[architecture value walkthrough](../architecture-walkthrough/README.md). It
-explains the problem, follows the recorded Qwen path, and shows which
-checks actually prove the boundary.
+For an informational view of the components and model access paths, see the
+[Architecture overview](../architecture-walkthrough/README.md). Deployment
+and validation procedures are documented separately.
 
 Service health alone does not qualify that complete model path.
 
 See the [supported matrix and qualification limits](users.md), [add-on installer](install.md),
-[bootc deployment](../../../bootc/README.md), and [threat model](../../../openshell/docs/threat-model.md).
+[bootc deployment](../../../bootc/README.md), and [OpenShell Overview](../../../openshell/docs/README.md).
 [OpenClaw bounded tasks](openclaw.md) and OpenCode configuration remain
 experimental; qualification depends on the host, provider and tool task.
 

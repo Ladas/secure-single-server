@@ -192,12 +192,12 @@ to grant and discover the private endpoint.
 
 ## Image publication
 
-[Validation CI](../.github/workflows/validate.yml) runs static checks and
+[Validation CI](https://github.com/redhat-et/secure-single-server/blob/main/.github/workflows/validate.yml) runs static checks and
 synthetic OpenAI contracts on native amd64 and arm64 Linux runners. It does not
 use provider credentials, download model weights, exercise GPUs, or replace RHEL
 runtime qualification.
 
-[Bootc image CI](../.github/workflows/bootc-images.yml) is the publisher for
+[Bootc image CI](https://github.com/redhat-et/secure-single-server/blob/main/.github/workflows/bootc-images.yml) is the publisher for
 these images. Repository maintainers use it to review and publish releases;
 deployment guides intentionally use the mutable `v0.1` tag for simplicity and
 do not include image-build instructions.

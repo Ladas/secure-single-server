@@ -8,14 +8,14 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-REVISION = '557ceb1cbe1316d93e0f682baa8301455956fe18'
+REVISION = 'a33b90ad1aea66479dbff99444ca819498589982'
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', required=True, type=Path, help='local redhat-et/pricetag-metering Git checkout')
     parser.add_argument('--platform', choices=['linux/amd64', 'linux/arm64'], help='defaults to container-engine host architecture')
-    parser.add_argument('--tag', default='localhost/pricetag-metering:upstream-557ceb1')
+    parser.add_argument('--tag', default='localhost/pricetag-metering:upstream-a33b90a')
     parser.add_argument('--revision', default=REVISION, help='full source commit to test; defaults to the qualified revision')
     args = parser.parse_args()
     if not re.fullmatch(r'[0-9a-f]{40}', args.revision):
