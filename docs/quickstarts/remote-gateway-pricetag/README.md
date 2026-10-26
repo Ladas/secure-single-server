@@ -40,40 +40,42 @@ SSH_OPTS=(-o IdentitiesOnly=yes -o ForwardAgent=no -i "$SSH_KEY")
     'mkdir -p ~/secure-single-server && tar -xf - -C ~/secure-single-server'
 ) &&
 ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
-  "cd ~/secure-single-server && sudo scripts/pricetag/install --mode real --hostname '$GATEWAY_HOST'"
+  "cd ~/secure-single-server && sudo scripts/pricetag/install --hostname '$GATEWAY_HOST'"
 ```
 
-Choose **OpenAI directly**, an **external API provider**, or **both**. At least
-one is required. For the external provider, choose **OpenAI-compatible**,
-**Anthropic Messages**, or **both APIs**, then enter the endpoint(s) and key.
-Keys use hidden prompts. One external key must cover all selected external APIs.
+Choose providers, enter their keys at hidden prompts, then confirm with `install`.
 
-The installer validates credentials and selects supported model presets before
-building anything. Review the displayed setup and type `install` to continue;
-no more prompts are needed. A rejected key stops setup without saving provider
-configuration—correct it and rerun the command.
+- **Providers:** OpenAI, an external OpenAI-compatible/Messages service, or both.
+- **Users:** admin is required; Alice/Bob are optional. Choose **Admin only** to
+  [create your own user](users.md#create-a-user) afterward.
+- **Defaults:** real providers, published images, $5/month per ordinary user.
 
-Installation shows six stages and progress messages. Detailed command output
-goes to the private `/var/log/praxis-install-*.log` file printed at startup;
-use the displayed `sudo tail -f` command in another SSH session to follow it.
-On failure, the installer prints the failed stage and log command. Keep the
-log private; review it before sharing. **Use published images** is the default:
-MaaS and PriceTag are pulled by their qualified digests, without compiling Go.
-Choose **Build from source** to test a branch or commit; builds can take several minutes.
-[Image options and testing new versions](images.md)
+<details>
+<summary>Installer options and logs</summary>
 
-The administrator is always created. Choose **Admin + sample users** for Alice
-and Bob, or **Admin only** and [create your own user](users.md#create-a-user)
-after installation. Ordinary users inherit $5/month; add `--monthly-usd 10`
-for another default. Use `--no-sample-users` to skip sample users without a prompt.
-For a DNS certificate, set `GATEWAY_HOST` to that name before installation.
+| Option | Purpose |
+| --- | --- |
+| `--no-sample-users` | Create admin only. |
+| `--monthly-usd 10` | Set the default per-user monthly allowance. |
+| `--image-mode source` | Build application images; see [image options](images.md). |
+| `--mode mock` | Use synthetic providers for [benchmarks](../../testing/pricetag-perf.md). |
+
+External setup accepts one or both APIs; one key must cover the selected APIs.
+Credentials and reviewed model presets are checked before installation.
+For a DNS certificate, set `GATEWAY_HOST` to that name before running the installer.
 Existing deployments are refused.
 
-[Manual installation](manual.md) · [Provider options and unattended setup](providers.md)
+The installer prints progress and a private log path under `/var/log/`, plus a
+`sudo tail -f` command. On failure, inspect that log before retrying; do not share
+it without reviewing its contents.
+
+[Manual installation](manual.md) · [Unattended provider setup](providers.md)
+
+</details>
 
 ## 3. Open the dashboards
 
-Print the browser URL and the saved keys over SSH:
+In the installation shell, print the login URL and admin key:
 
 ```console
 printf 'https://%s:8443/login\n' "$GATEWAY_HOST"
@@ -81,16 +83,13 @@ ssh "${SSH_OPTS[@]}" "$RHEL_HOST" \
   'sudo cat /root/pricetag-admin/admin.key'
 ```
 
-Open that URL, trust the deployment certificate and paste the admin key.
-Ordinary users can log in, but their personal dashboards are pending upstream
-and currently show “coming soon.” Use the administrator dashboard to inspect usage.
-[Create users, set budgets and rotate keys](users.md)
+Open the URL, accept the deployment certificate and paste the admin key.
+Personal dashboards are pending upstream; use the admin dashboard for usage.
 
 ## 4. Prepare the local connection
 
-Run this once in the **workstation shell used for installation**. It copies
-the CA and your selected user's key, selects the first model, then prints the environment
-variables and command for launching OpenCode dynamically from any project shell:
+In the **workstation installation shell**, choose your user on the first line.
+This copies the CA/key and prints a launch command for any project shell:
 
 ```console
 INFERENCE_USER=alice  # Change to a user you created; do not use admin.
@@ -117,18 +116,18 @@ printf '%s\n' \
   '  --ca-file "$CLIENT_DIR/ca.pem" --model "$MODEL"'
 ```
 
-The first advertised model is selected automatically. All models remain available
-in the OpenCode picker. The printed block contains connection settings and file
-paths, not key contents.
+The first model is selected automatically; all models remain in the picker.
+The printed command contains file paths, never key contents.
 
 ## 5. Run OpenCode
 
-Open a **shell in your project directory** and paste the block printed above.
-Reuse it in other project shells to run separate sessions. The helper refreshes
-the model list on each launch; all enabled models appear in the picker.
-Sessions using the same user share that user's budget and leave saved OpenCode configuration unchanged.
+In a **project shell**, paste the printed block. Each launch refreshes the catalog;
+existing OpenCode settings are unchanged. Sessions for one user share their budget.
 
-To switch users, copy their key using step 4, then relaunch with its path:
+<details>
+<summary>Switch users</summary>
+
+Copy the other user's key with step 4, then launch with its path:
 
 ```console
 KEY_FILE="$CLIENT_DIR/carol.key"  # Or the absolute path to another private user key.
@@ -136,24 +135,14 @@ python3 "$REPO/scripts/pricetag/harness" opencode --url "$GATEWAY_URL" \
   --key-file "$KEY_FILE" --ca-file "$CLIENT_DIR/ca.pem" --model "$MODEL"
 ```
 
-For later launches without exporting variables, save the configuration and
-launcher below once.
+</details>
 
 <details>
 <summary>Save native configuration and a launcher — no exports needed on later runs</summary>
 
-The helper reads `/v1/models`, groups aliases by OpenAI or Anthropic API, and
-copies their context/output limits. Modern GPT models use the OpenAI Responses
-SDK; other models retain their configured API. It supplies the key and CA for this process
-and launches OpenCode using `OPENCODE_CONFIG_CONTENT`. It does not install
-OpenCode, issue keys or modify saved OpenCode settings.
-
-Run this once in the **workstation shell used for setup**, where the variables
-from step 4 remain set. It needs `jq` and saves all advertised models plus a
-launcher. **Choose the user key on the first line**: keep Alice's path or replace
-it with the absolute path to a custom user's local key file. Use an inference
-key, not the admin key; requests use the selected user's budget. The key stays
-in that private file—only its path is saved in OpenCode configuration.
+Run in the **workstation setup shell** after step 4. Requires `jq`.
+Choose a user key below. This saves all advertised models and a launcher;
+only the key's absolute path is written to the config.
 
 ```console
 KEY_FILE="$CLIENT_DIR/alice.key"  # Choose your user's local key file.
@@ -199,18 +188,119 @@ print(shlex.quote(str(launcher)))
 ' "$CLIENT_DIR"
 ```
 
-Copy the printed launcher path into any project shell to start OpenCode there.
-It loads the saved configuration and CA automatically; no repository path or
-shell exports are needed. Other OpenCode invocations are unaffected.
+Run the printed launcher path from any project directory:
 
-Rerun this setup block when the server's models change or to select another key
-path. After key rotation, securely replace the contents of the selected local
-key file and restart OpenCode. Never commit key files to a project repository.
-OpenCode still merges unrelated settings from
-your existing configuration. For a hand-maintained catalog, edit
-`opencode.json` instead of regenerating it.
-See [OpenCode configuration](https://opencode.ai/docs/config/) and
-[custom providers](https://opencode.ai/docs/providers/#custom-provider).
+```console
+/absolute/path/to/client-directory/opencode
+```
+
+It loads the saved config and CA without exports. Regenerate after model changes.
+To switch users, regenerate with another `KEY_FILE`; after rotation, replace the
+referenced key file and restart OpenCode. Keep keys outside project repositories.
+
+</details>
+
+<details>
+<summary>Resulting OpenCode config — two-model example</summary>
+
+Inspect your generated file with `jq . "$CLIENT_DIR/opencode.json"` in the setup
+shell. It uses your URL, key path and model limits; for example:
+
+```json
+{
+  "provider": {
+    "praxis-openai": {
+      "name": "praxis-openai",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://gateway.example:8443/v1",
+        "apiKey": "{file:/absolute/path/to/alice.key}"
+      },
+      "models": {
+        "openai/gpt-5.4-mini": {
+          "name": "openai/gpt-5.4-mini",
+          "limit": {"context": 400000, "output": 128000},
+          "provider": {"npm": "@ai-sdk/openai"},
+          "reasoning": true,
+          "options": {
+            "store": false,
+            "reasoningEffort": "medium",
+            "include": ["reasoning.encrypted_content"]
+          }
+        }
+      }
+    },
+    "praxis-anthropic": {
+      "name": "praxis-anthropic",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "baseURL": "https://gateway.example:8443/v1",
+        "apiKey": "{file:/absolute/path/to/alice.key}"
+      },
+      "models": {
+        "external/claude-sonnet-5": {
+          "name": "external/claude-sonnet-5",
+          "limit": {"context": 128000, "output": 8192}
+        }
+      }
+    }
+  },
+  "disabled_providers": [],
+  "enabled_providers": ["praxis-anthropic", "praxis-openai"],
+  "model": "praxis-openai/openai/gpt-5.4-mini"
+}
+```
+
+Both providers reference the same private user-key file. GPT uses the Responses
+SDK; Messages uses the Anthropic SDK. The launcher supplies the CA separately.
+
+</details>
+
+<details>
+<summary>Use the standard config directory and run just opencode</summary>
+
+First generate the config using the **Save native configuration** block above.
+Then run in the **workstation setup shell**. If a global JSON/JSONC config exists,
+merge the generated settings into it instead; this block refuses to overwrite it.
+
+```console
+(
+  set -e
+  CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+  mkdir -p "$CONFIG_DIR"
+  if [ -e "$CONFIG_DIR/opencode.json" ] || [ -e "$CONFIG_DIR/opencode.jsonc" ]; then
+    printf 'Existing OpenCode config: merge the generated settings instead.\n'
+    exit 1
+  fi
+  cp "$CLIENT_DIR/opencode.json" "$CONFIG_DIR/opencode.json"
+  chmod 600 "$CONFIG_DIR/opencode.json"
+)
+```
+
+For the default private certificate, configure its CA once (**zsh on macOS**):
+
+```console
+printf '\nexport NODE_EXTRA_CA_CERTS=%q\n' "$CLIENT_DIR/ca.pem" >> "$HOME/.zshrc"
+export NODE_EXTRA_CA_CERTS="$CLIENT_DIR/ca.pem"
+unset OPENCODE_CONFIG OPENCODE_CONFIG_CONTENT
+```
+
+For Bash, use `~/.bashrc`. Preserve any existing CA bundle you need. Skip this
+CA setting for a publicly trusted certificate; never disable TLS verification.
+
+Then, in this shell or a newly opened project shell:
+
+```console
+cd /path/to/your/project
+opencode
+```
+
+To switch users, change `options.apiKey` in both Praxis providers to the other
+user's `{file:/absolute/path/to/key}`, then restart. Refresh the global config
+when models change. Project settings can override global settings.
+
+[Config locations and precedence](https://opencode.ai/docs/config/#precedence-order) ·
+[Custom certificates](https://opencode.ai/docs/network/#custom-certificates)
 
 </details>
 

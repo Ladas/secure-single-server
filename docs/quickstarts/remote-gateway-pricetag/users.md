@@ -1,9 +1,8 @@
 # Users, budgets and keys
 
-The installer always creates `admin`. Alice and Bob are optional sample users.
-Ordinary users inherit the default monthly allowance ($5 unless changed);
-individual overrides are optional. MaaS keys expire after at most 90 days.
-Use ordinary-user keys for inference: the administrator is quota-exempt.
+Admin is always created; Alice/Bob are optional. Ordinary users inherit $5/month
+unless configured otherwise. Keys expire within 90 days. Use ordinary-user keys
+for inference: admin is quota-exempt.
 
 ## Open the management session
 
@@ -14,9 +13,8 @@ ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
   'cd ~/secure-single-server && exec bash'
 ```
 
-Run management commands below in that SSH session. In a new workstation shell,
-first restore the variables from [connection setup](README.md#1-set-the-connection).
-Type `exit` when finished to return to your workstation.
+Run operations below in **this SSH session**; `exit` returns to your workstation.
+New shell? Restore [connection variables](README.md#1-set-the-connection) first.
 
 ## Create a user
 
@@ -26,13 +24,9 @@ sudo python3 scripts/pricetag/user --subject carol --name Carol \
 sudo cat /root/pricetag-admin/carol.key
 ```
 
-The key is saved privately at the requested path. Omit `--monthly-usd` to use
-the deployment default. Omit `--key-lifetime` for 90 days. Browser login accepts
-the same key, but personal dashboards are pending upstream.
-
-Back on your workstation, follow [Prepare the local connection](README.md#4-prepare-the-local-connection)
-with `INFERENCE_USER=carol`. Then launch OpenCode with `--key-file "$CLIENT_DIR/carol.key"`.
-Each key belongs to one user; switching key files switches whose budget is charged.
+Omit `--monthly-usd` to inherit the default; omit `--key-lifetime` for 90 days.
+On your workstation, follow [client setup](README.md#4-prepare-the-local-connection)
+with `INFERENCE_USER=carol`. That key charges Carol's budget.
 
 ## Change a budget
 
@@ -121,7 +115,8 @@ reported old IDs after checking their status.
 
 </details>
 
-## Dashboard or CLI?
+<details>
+<summary>Dashboard versus CLI: supported operations</summary>
 
 | Task | Available interface |
 | --- | --- |
@@ -137,27 +132,20 @@ The default monthly allowance applies separately to each user. An individual
 allowance overrides that default. This deployment starts with an empty
 post-limit exception list, so no model bypasses the USD limit.
 
+</details>
+
 <details>
 <summary>Administration boundaries and upstream API gaps</summary>
 
-MaaS owns keys; metering owns partner identities, usage and budgets. The public
-gateway exposes authenticated dashboard routes, not MaaS management or metering
-partner credentials. Browser key-management tabs and Kubernetes routing controls
-remain unavailable. The Pricing Discounts tab is also not exposed; alias-price
-refresh and historical repricing require separate qualification. Use the SSH
-commands above for supported management.
-
-The pinned metering revision removed the legacy people, identities and quota
-admin APIs. Its partner-user API expects email-based identities and does not
-expose individual budget edits. The SSH `user` command uses a small, transactional
-PostgreSQL adapter for local subjects and budget overrides, recording changes in
-`org_audit`. This adapter is tied to the metering schema and must be tested on
-upgrades. It does not call the removed APIs or require Kubernetes.
-
-An initial `admin` partner record receives the `super_admin` role during startup.
-Ordinary users retain the `user` role. The built-in `admin` identity is quota-exempt because it has `super_admin`.
-Granting that role to another user also exempts their inference from quotas;
-distribute ordinary-user keys to clients.
+- MaaS owns keys; PriceTag owns identities, usage and budgets. Management stays
+  private behind SSH; browser key-management and Kubernetes routing tabs are unavailable.
+- Per-user budget changes use a transactional PostgreSQL adapter because upstream
+  has no matching admin API. Changes are audited in `org_audit`; requalify the
+  adapter when upgrading metering.
+- Personal dashboards, Pricing Discounts, alias-price refresh and historical
+  repricing are not supported by this guide.
+- The `super_admin` role bypasses quotas. Grant it only to administrators;
+  ordinary inference users keep the `user` role.
 
 </details>
 

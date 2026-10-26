@@ -79,6 +79,16 @@ class InstallTest(unittest.TestCase):
             self.assertNotIn('--subject alice', result.stdout)
             self.assertIn('--subject bob', result.stdout)
 
+    def test_real_is_default_and_mock_requires_explicit_selection(self):
+        with patch.object(installer.sys.stdin, 'isatty', return_value=False):
+            args = installer.parse_args(['--hostname', 'gateway.example',
+                                         '--provider', 'openai', '--plan'])
+            self.assertEqual(args.mode, 'real')
+            mock = installer.parse_args(['--hostname', 'gateway.example', '--mode', 'mock', '--plan'])
+            self.assertEqual(mock.mode, 'mock')
+            with self.assertRaises(SystemExit):
+                installer.parse_args(['--hostname', 'gateway.example', '--plan'])
+
     def image_args(self, *extra):
         return installer.parse_args(['--mode', 'mock', '--hostname', 'gateway.example', '--plan', *extra])
 
@@ -217,7 +227,7 @@ class InstallTest(unittest.TestCase):
     def test_interactive_selection_accepts_menu_numbers(self):
         with patch.object(installer.sys.stdin, 'isatty', return_value=True), \
                 patch('builtins.input', side_effect=['2', '2', '2', '1']):
-            args = installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example'])
+            args = installer.parse_args(['--hostname', 'gateway.example'])
         self.assertEqual(args.provider, ['external'])
         self.assertEqual(args.external_api, 'anthropic')
         self.assertFalse(args.sample_users)

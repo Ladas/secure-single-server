@@ -1,26 +1,21 @@
 # Providers and models
 
-A provider is an upstream inference service. Its credential stays on RHEL;
-clients use their own MaaS user keys to reach the gateway.
-
-The setup helper has two fixed profiles:
+Provider credentials stay on RHEL; clients authenticate with their own user keys.
+The helper has two fixed profiles:
 
 | Profile | Supported upstream API | Gateway model aliases |
 | --- | --- | --- |
 | `openai` | OpenAI directly | `openai/MODEL_ID` |
 | `external` | OpenAI-compatible Chat/Responses, Anthropic Messages, or both | `external/MODEL_ID` |
 
-An external provider may be a hosted model service or another gateway. Choose
-only the APIs it implements. GPT models configured for Responses need a working
-`/v1/responses` endpoint; Chat compatibility alone is insufficient. Both APIs may
-share a hostname or use separate endpoints, but this profile uses **one key**.
-HTTPS and the OpenAI `/v1` suffix are added automatically. Enter an API origin,
-not a request path such as `/v1/messages`.
+An external provider is a hosted service or another gateway. Select its supported
+API(s); both may share a host, but must accept the same key. Enter an API origin:
+HTTPS and `/v1` normalization are automatic. GPT Responses models require
+`/v1/responses`, not just Chat compatibility.
 
-Arbitrary profile names, multiple external credentials and adding another
-provider to an already running deployment are not supported by this helper.
-Choose the required profiles during installation. Existing `pricetag/` deployments
-retain the legacy `pricetag` profile; new installs use `external/`.
+**Limits:** no arbitrary profile names, multiple external keys, or adding another
+provider after installation. Choose needed profiles at install time. Legacy
+`pricetag/` deployments continue using the `pricetag` command.
 
 ## Open the management session
 
@@ -31,9 +26,8 @@ ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
   'cd ~/secure-single-server && exec bash'
 ```
 
-Run the following commands in that SSH session. If using a new workstation shell,
-restore `RHEL_HOST`, `SSH_KEY` and `SSH_OPTS` from [connection setup](README.md#1-set-the-connection).
-Type `exit` to return to your workstation when finished.
+Run operations below in **this SSH session**; `exit` returns to your workstation.
+New shell? Restore [connection variables](README.md#1-set-the-connection) first.
 
 ## List configured providers and enabled models
 
@@ -41,14 +35,12 @@ Type `exit` to return to your workstation when finished.
 sudo python3 scripts/pricetag/providers list
 ```
 
-Shows each prepared provider, its model aliases, APIs and context/output limits.
-It does not read or print provider keys. Only these configured models are
-advertised to clients; the upstream may offer additional models.
+Lists prepared profiles, enabled aliases, APIs and limits; never keys.
 
-## List models advertised by an upstream
+<details>
+<summary>List models advertised by an upstream</summary>
 
-Run the command for the provider to inspect. Enter its endpoint(s), if external,
-and its key at the hidden prompt. Discovery does not save the key or change setup.
+Choose a provider. Enter its endpoint(s) and hidden key; nothing is saved.
 
 ```console
 sudo python3 scripts/pricetag/providers openai --list-models
@@ -60,6 +52,8 @@ sudo python3 scripts/pricetag/providers external --api both --list-models
 
 Replace `both` with `openai` or `anthropic` for a single API. Catalogs can depend
 on the credential and may omit usable models; listing is not an inference test.
+
+</details>
 
 ## Replace a key or endpoint
 
@@ -73,9 +67,8 @@ sudo python3 scripts/pricetag/providers openai --replace
 sudo python3 scripts/pricetag/providers external --api both --replace
 ```
 
-Enter the replacement endpoint(s) and credential. This preserves existing model
-selection, users, budgets and usage. It restarts Praxis and checks readiness;
-a failed activation attempts rollback. Do not rerun `prepare.py`.
+Enter the new endpoint/key. Models, users, budgets and usage are preserved.
+Praxis restarts; failed readiness triggers attempted rollback. Do not rerun `prepare.py`.
 
 <details>
 <summary>Specify separate external endpoints</summary>
@@ -91,11 +84,9 @@ Check the printed credential destinations before entering the key.
 
 ## Enable more models
 
-The helper enables the intersection of the upstream catalog and the reviewed
-presets in [provider-models.json](../../../configs/pricetag/provider-models.json).
-It does not automatically expose every model returned by `/models`.
-
-To refresh an existing external provider's selection:
+Enabled models must be advertised **and** present in the
+[reviewed presets](../../../configs/pricetag/provider-models.json). Refresh an
+existing external provider:
 
 ```console
 sudo python3 scripts/pricetag/providers external --api both --replace --refresh-models
@@ -128,22 +119,15 @@ The diagnostic requests at most 16 output tokens and changes no configuration.
 
 </details>
 
-Models outside the presets need reviewed IDs, supported APIs, context/output
-limits and a matching metering price source before deployment. Do not guess
-limits or prices. Direct OpenAI model refresh is not implemented by this helper;
-`openai --replace` only replaces credentials while retaining existing models.
-These cases require a reviewed configuration change, not a dashboard toggle.
+New presets require reviewed API/limit metadata and a metering price source.
+Direct OpenAI model refresh is unsupported; `openai --replace` retains models.
 
 ## Refresh local OpenCode
 
-Exit SSH and return to the workstation. For the dynamic helper, close OpenCode
-and rerun [Run OpenCode](README.md#5-run-opencode); each launch fetches the current
-catalog. If the previous default was removed, set `MODEL` to an enabled alias or
-rerun step 4 to select the first model.
-
-For saved native configuration, rerun the expandable configuration block in
-that section. Keep `KEY_FILE` pointed at the intended user's key. Provider
-credential changes do not require new user keys.
+On your **workstation**, restart the [dynamic helper](README.md#5-run-opencode)
+to refresh models. For saved config, regenerate it. If the default model was
+removed, select another alias or repeat step 4. Keep the intended `KEY_FILE`;
+upstream credential changes do not require new user keys.
 
 <details>
 <summary>Discovery errors and authentication headers</summary>
@@ -181,7 +165,7 @@ mode `0400` or `0600`, inside a root-owned `0700` directory. Pass paths, never
 values. The helper imports keys into Podman through stdin.
 
 ```console
-sudo scripts/pricetag/install --mode real --hostname GATEWAY_IP_OR_DNS \
+sudo scripts/pricetag/install --hostname GATEWAY_IP_OR_DNS \
   --provider openai --provider external --external-api both \
   --openai-key-file /root/provider-keys/openai.key \
   --external-key-file /root/provider-keys/external.key \

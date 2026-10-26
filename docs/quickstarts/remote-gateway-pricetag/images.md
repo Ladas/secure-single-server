@@ -1,36 +1,30 @@
 # Application images
 
-The installer supports two image modes. Both use the same provider setup,
-Quadlets and readiness checks. Praxis and PostgreSQL keep their existing pinned
-published images.
+Published images are the default. Source builds are for testing new versions.
+Praxis and PostgreSQL remain pinned published images in either mode.
 
 | Mode | MaaS and PriceTag |
 | --- | --- |
 | `--image-mode published` (default) | Pull the qualified MaaS and PriceTag images by digest. No application source checkout or Go build. |
 | `--image-mode source` | Build from a branch or commit on RHEL to test a new version. |
 
-The interactive installer recommends published images. Noninteractive commands
-also default to published images. It verifies application
-source labels and CPU architecture before preparing the deployment.
+The installer checks image source labels and CPU architecture.
 
 ## Open the installation session
 
-These are alternatives to the default installer command on a **fresh** host.
-From the workstation shell used to copy the checkout:
+For a **fresh host**, run from the workstation installation shell:
 
 ```console
 ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
   'cd ~/secure-single-server && exec bash'
 ```
 
-Run the examples below in that SSH session. In a new workstation shell, restore
-[connection settings](README.md#1-set-the-connection) first. Existing deployments
-are refused; these options do not upgrade a running gateway.
+Run examples below in **this SSH session**. New shell? Restore
+[connection settings](README.md#1-set-the-connection) first.
 
 ## Published images
 
-The installer pins both images from the [qualified publication run](https://github.com/redhat-et/secure-single-server/actions/runs/40324136393).
-No image arguments are needed for the default installation. The repositories are:
+Default repositories ([qualified publication](https://github.com/redhat-et/secure-single-server/actions/runs/40324136393)):
 
 ```text
 quay.io/redhat-et/secure-single-server-maas-standalone
@@ -41,14 +35,15 @@ The published images target `linux/amd64`. They are pinned in
 `scripts/pricetag/install.py`; no moving `latest` tag is used. Override them only
 to test another publication.
 
-To override the default images on a fresh RHEL host, after copying the checkout:
+<details>
+<summary>Override published MaaS and PriceTag images</summary>
 
 ```console
 cd ~/secure-single-server
 read -r -p 'Gateway IP or DNS: ' GATEWAY_HOST
 read -r -p 'MaaS repository@sha256:digest: ' MAAS_IMAGE
 read -r -p 'PriceTag repository@sha256:digest: ' METERING_IMAGE
-sudo scripts/pricetag/install --mode real --hostname "$GATEWAY_HOST" \
+sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" \
   --image-mode published --maas-image "$MAAS_IMAGE" --metering-image "$METERING_IMAGE"
 ```
 
@@ -56,7 +51,10 @@ Provider selection and hidden credential prompts follow. For unattended
 configuration, combine these options with the [private credential-file
 options](providers.md). Never put provider keys in command-line arguments.
 
-## Build from a branch or commit
+</details>
+
+<details>
+<summary>Build from the default source revisions</summary>
 
 Source mode defaults to `feat/standalone-runtime-minimal` in the MaaS fork.
 PriceTag keeps commit `a33b90ad1aea66479dbff99444ca819498589982` by default;
@@ -66,17 +64,16 @@ compatibility testing and are not selected automatically.
 ```console
 cd ~/secure-single-server
 read -r -p 'Gateway IP or DNS: ' GATEWAY_HOST
-sudo scripts/pricetag/install --mode real --hostname "$GATEWAY_HOST" --image-mode source
+sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" --image-mode source
 ```
 
-To test other branches, add `--maas-branch BRANCH` and/or
-`--metering-branch BRANCH`. Branches are fetched from the repositories below,
-resolved to full commit SHAs, and printed before building. The fetched commit
-is used even if the source cache contains an older local branch.
+</details>
 
-For reproducible source selection, use full 40-character Git commit SHAs
-reachable from the configured source
-repositories: [MaaS fork](https://github.com/Ladas/models-as-a-service) and
+<details>
+<summary>Build another branch or commit</summary>
+
+For branches, add `--maas-branch BRANCH` and/or `--metering-branch BRANCH`
+to source mode. For pinned commits, use the block below. Sources: [MaaS fork](https://github.com/Ladas/models-as-a-service) and
 [PriceTag metering](https://github.com/redhat-et/pricetag-metering).
 
 ```console
@@ -84,21 +81,21 @@ cd ~/secure-single-server
 read -r -p 'Gateway IP or DNS: ' GATEWAY_HOST
 read -r -p 'MaaS source commit: ' MAAS_REVISION
 read -r -p 'PriceTag source commit: ' METERING_REVISION
-sudo scripts/pricetag/install --mode real --hostname "$GATEWAY_HOST" \
+sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" \
   --image-mode source --maas-revision "$MAAS_REVISION" --metering-revision "$METERING_REVISION"
 ```
 
-A branch and a revision cannot be specified together for the same component.
-Omit both MaaS selectors to use the fork branch; omit both PriceTag selectors
-to keep its qualified commit. The MaaS checkout
-must provide the standalone runtime; arbitrary upstream versions may not work.
-New PriceTag revisions may change schemas, authentication or dashboard routes;
-a successful build does not establish gateway compatibility.
+Use a branch **or** a full SHA per component, never both. Branches resolve to a
+printed commit before building. MaaS must include the standalone runtime;
+PriceTag schema/API changes need compatibility testing.
 
-The same revision options specify expected source labels when pulling newly
-published images. A mismatch stops installation. Labels document provenance;
-they are not cryptographic signatures. Use digests from a trusted publisher.
+</details>
 
-These are **fresh installation** options. Existing deployments are refused;
-this command does not perform upgrades or database migrations for an existing
-gateway.
+<details>
+<summary>Image verification and upgrade limits</summary>
+
+Revision options also set expected source labels for published images. A mismatch
+stops installation. Labels are provenance metadata, not signatures; use trusted
+digests. These commands install fresh hosts, not upgrades or database migrations.
+
+</details>

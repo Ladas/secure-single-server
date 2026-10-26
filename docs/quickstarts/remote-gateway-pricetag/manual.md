@@ -21,13 +21,7 @@ cd ~/secure-single-server
 sudo scripts/common/install --prepare
 ```
 
-Build the MaaS API from the reviewed standalone-runtime commit and build
-unmodified PriceTag metering from the revision pinned by this repository. The
-MaaS checkout must include `maas-api/Dockerfile` and `maas-api/`.
-The minimal runtime branch includes the prerequisite
-[standalone API-key PR #1548](https://github.com/opendatahub-io/models-as-a-service/pull/1548)
-plus the runtime adaptation for operation without Kubernetes.
-The commands pin the [reviewed runtime commit](https://github.com/Ladas/models-as-a-service/commit/6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d); they do not build from a moving branch tip:
+Build the pinned MaaS standalone runtime and unmodified PriceTag revision:
 
 ```console
 git clone --branch feat/standalone-runtime-minimal \
@@ -39,11 +33,8 @@ git clone https://github.com/redhat-et/pricetag-metering.git ~/pricetag-metering
 sudo scripts/pricetag/build-metering --source ~/pricetag-metering
 ```
 
-Pull the published combined Praxis image. This multi-architecture digest
-contains the reviewed `redhat-et/praxis-ai` integration and experimental
-filters from source revision `5667c4acecd0981ae5114cbbf2ee3dcccec9c248`.
-This manual path builds MaaS and metering locally. The installer also supports
-[pulling published application images by digest](images.md).
+Pull Praxis; its source label must be `5667c4acecd0981ae5114cbbf2ee3dcccec9c248`.
+For prebuilt MaaS/PriceTag images, use the [installer's published mode](images.md).
 
 ```console
 PRAXIS_IMAGE=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8
@@ -126,16 +117,18 @@ sudo scripts/pricetag/start
 This creates the administrator only. [Create an inference user](users.md#create-a-user)
 next, or omit `--no-sample-users` during preparation to create Alice and Bob.
 
-`prepare.py` refuses to overwrite
-existing deployment directories. `start` installs and starts user Quadlets;
-PostgreSQL, MaaS, metering, the optional mock, and Praxis start on boot. It
-selects unused static addresses for MaaS, Praxis and PriceTag on
-`pricetag-private`. MaaS trusts host loopback and only those three `/32`
-service addresses; unrelated containers on the network are excluded.
+Preparation refuses existing directories. Startup installs persistent systemd
+Quadlets for PostgreSQL, MaaS, PriceTag and Praxis. Do not rerun preparation over
+an existing deployment; upgrades require separate qualification.
 
-This is a fresh-install procedure. Do not rerun preparation over an existing
-installation or adopt an old database using these steps. Upgrades and recovery
-need a separately qualified procedure.
+<details>
+<summary>Private network and trusted services</summary>
+
+MaaS trusts host loopback and the three `/32` service addresses assigned to MaaS,
+Praxis and PriceTag on `pricetag-private`. Unrelated containers are excluded.
+Host administrators and these service peers remain privileged.
+
+</details>
 
 ## 4. Verify services
 

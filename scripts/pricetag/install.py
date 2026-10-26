@@ -173,7 +173,8 @@ def choice(label, options, default):
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--mode', choices=('real', 'mock'))
+    p.add_argument('--mode', choices=('real', 'mock'), default='real',
+                   help='real providers (default); use mock for synthetic benchmarks')
     p.add_argument('--hostname', help='public IPv4 or DNS name; no scheme, path or port')
     p.add_argument('--provider', action='append', choices=('openai', 'external', 'pricetag'), default=[],
                    help='real mode requires one or more providers; pricetag is the legacy external profile')
@@ -203,12 +204,10 @@ def parse_args(argv=None):
     metering_source.add_argument('--metering-branch', help='source mode: branch in the PriceTag source repository')
     args = p.parse_args(argv)
     interactive = sys.stdin.isatty() and not args.plan
-    if not args.mode and interactive:
-        args.mode = choice('Deployment:', {'real': 'Real upstream providers', 'mock': 'Synthetic benchmark only'}, 'real')
     if not args.hostname and interactive:
         args.hostname = input('Gateway public IPv4 or DNS name: ').strip()
-    if args.mode not in ('real', 'mock') or not args.hostname or not valid_hostname(args.hostname):
-        p.error('provide --mode real|mock and --hostname with a valid IPv4 or DNS name')
+    if not args.hostname or not valid_hostname(args.hostname):
+        p.error('provide --hostname with a valid IPv4 or DNS name')
     if not 1 <= args.monthly_usd <= 10000:
         p.error('--monthly-usd must be 1–10000')
     if args.mode == 'real' and not args.provider:
