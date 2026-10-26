@@ -37,21 +37,34 @@ sudo python3 scripts/pricetag/providers list
 
 Lists prepared profiles, enabled aliases, APIs and limits; never keys.
 
-<details>
-<summary>List models advertised by an upstream</summary>
+## List available external models
 
-Choose a provider. Enter its endpoint(s) and hidden key; nothing is saved.
-
-```console
-sudo python3 scripts/pricetag/providers openai --list-models
-```
+Run on **RHEL**. Enter the endpoint(s) and credential at the hidden prompt:
 
 ```console
 sudo python3 scripts/pricetag/providers external --api both --list-models
 ```
 
-Replace `both` with `openai` or `anthropic` for a single API. Catalogs can depend
-on the credential and may omit usable models; listing is not an inference test.
+Shows upstream IDs, context/output limits, their source and the config-file path.
+Nothing is saved. Use `--api openai` or `--api anthropic` for a single API.
+For pasteable JSON, follow [Extend the model configuration](#extend-the-model-configuration).
+
+<details>
+<summary>Search, pagination and direct OpenAI discovery</summary>
+
+```console
+sudo python3 scripts/pricetag/providers external --api both --list-models --search claude
+sudo python3 scripts/pricetag/providers openai --list-models --search gpt --page 1 --page-size 20
+```
+
+Search matches model IDs case-insensitively. Interactive pages show 20 models:
+Enter continues; `q` stops. `--page N` selects one page; `--all` prints all matches.
+
+Search/display pagination are local; upstream cursor pages are fetched first.
+OpenAI's standard catalog has no name-search parameter or token limits.
+Anthropic can return limits; compatible gateways may omit them.
+[OpenAI API](https://developers.openai.com/api/reference/resources/models/methods/list) ·
+[Anthropic API](https://platform.claude.com/docs/en/api/models/list)
 
 </details>
 
@@ -82,20 +95,81 @@ Check the printed credential destinations before entering the key.
 
 </details>
 
-## Enable more models
+## Extend the model configuration
 
-Enabled models must be advertised **and** present in the
-[reviewed presets](../../../configs/pricetag/provider-models.json). Refresh an
-existing external provider:
+Run these steps in the **RHEL management session**.
+
+**1. Print pasteable JSON for the external provider.**
+
+```console
+sudo python3 scripts/pricetag/providers external --api both --list-models --all --format config
+```
+
+Add `--search claude` (or another substring) to narrow the output. Copy only the
+JSON rows you want. Models with unknown limits are omitted; obtain verified
+limits before adding them manually. Local preset limits are not confirmation
+of the hosted service's limits.
+
+**2. Merge those rows into the preset JSON.**
+
+```console
+cd ~/secure-single-server
+cp -p configs/pricetag/provider-models.json configs/pricetag/provider-models.json.bak
+vi configs/pricetag/provider-models.json
+python3 -m json.tool configs/pricetag/provider-models.json >/dev/null
+```
+
+Paste each row into its matching `openai` or `anthropic` array, separating rows
+with commas. Keep existing rows you still need; do not replace the whole file
+with a filtered/page fragment. Avoid duplicate IDs within an API array.
+
+Row format: `["UPSTREAM_MODEL_ID", context_tokens, max_output_tokens]`.
+Do not add gateway prefixes such as `external/`; the helper adds them.
+
+<details>
+<summary>Example JSON — keep only the models you want</summary>
+
+```json
+{
+  "openai": [
+    ["gpt-5.4-mini", 400000, 128000],
+    ["gpt-6-luna", 1050000, 128000]
+  ],
+  "anthropic": [
+    ["claude-sonnet-5-5", 1000000, 128000]
+  ]
+}
+```
+
+The sections select **APIs**, not provider profiles. `openai` presets are shared
+by direct OpenAI and the external OpenAI-compatible API; `anthropic` presets
+apply to external Messages. Editing this file alone does not change a running
+gateway. Separate per-provider preset files are not supported.
+
+</details>
+
+**3. Apply the external selection and check enabled models.**
 
 ```console
 sudo python3 scripts/pricetag/providers external --api both --replace --refresh-models
 sudo python3 scripts/pricetag/providers list
 ```
 
-This replaces that provider's selection with the currently advertised presets;
-models no longer advertised are removed unless explicitly pinned. Other
-providers and historical spending remain unchanged.
+Enter the intended endpoint(s) and key again. This enables advertised presets
+plus explicit pins, removes unselected external models, and restarts Praxis.
+Other providers, users and historical spending remain unchanged.
+
+**4. Refresh OpenCode on your workstation.** Restart the dynamic helper, or
+regenerate saved configuration. See [Refresh local OpenCode](#refresh-local-opencode).
+
+**Before adding a new model:** verify its API and limits, and ensure PriceTag
+has a reviewed price under the exact upstream ID. Activation refuses a new alias
+without that source price; do not use a zero-price placeholder. JSON validation
+above checks syntax only. Do not edit generated `/etc/praxis-pricetag` files.
+
+**Direct OpenAI:** edit presets before initial installation. Live model refresh
+is not implemented for this profile; `openai --replace` retains its existing
+models. Editing the preset JSON does not bypass that limitation.
 
 <details>
 <summary>Include a reviewed model omitted from discovery</summary>
@@ -119,8 +193,27 @@ The diagnostic requests at most 16 output tokens and changes no configuration.
 
 </details>
 
-New presets require reviewed API/limit metadata and a metering price source.
-Direct OpenAI model refresh is unsupported; `openai --replace` retains models.
+<details>
+<summary>Current presets and limit sources</summary>
+
+The preset selection includes GPT-5.4 mini, GPT-6 Luna, GPT-6.1 Sol, GPT-6 Astra,
+Claude Sonnet/Opus/Haiku 5.5, GLM 5.3 and DeepSeek V4.1 Flash 1017. GLM and
+DeepSeek are listed under both APIs; availability still depends on discovery.
+Old Claude presets and the unavailable Qwen preset are removed on external
+model refresh. Direct OpenAI's existing selection is unchanged by that command.
+
+| Updated presets | Context / maximum output | Source |
+| --- | --- | --- |
+| GPT-6 Astra | 1,050,000 / 128,000 | [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-astra) |
+| Claude Sonnet/Opus/Haiku 5.5 | 1,000,000 / 128,000 | [Sonnet](https://platform.claude.com/docs/en/models/sonnet-5-5/overview), [Opus](https://platform.claude.com/docs/en/models/opus-5-5/overview), [Haiku](https://platform.claude.com/docs/en/models/haiku-5-5/overview) |
+| DeepSeek V4.1 Flash 1017 | 1,000,000 / 384,000 | [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing/) |
+
+These are manufacturer-based preset ceilings, not verified limits of an external
+hosted deployment. Lower them if the provider documents smaller limits. Existing
+GLM settings remain 262,144 / 65,536. Pricing must exist independently in PriceTag;
+a model catalog does not supply a verified price.
+
+</details>
 
 ## Refresh local OpenCode
 

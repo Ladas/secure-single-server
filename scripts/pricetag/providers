@@ -143,6 +143,59 @@ def discover_models(url, api, key):
     raise ValueError('Model catalog exceeds the pagination limit')
 
 
+def model_limits(row, api):
+    """Use only known metadata fields; never infer limits from an ID."""
+    preset = next((r[1:] for r in PRESETS.get(api, []) if r[0] == row['id']), None)
+    meta = row.get('praxis')
+    pair = (meta.get('context'), meta.get('output')) if isinstance(meta, dict) else (None, None)
+    if api == 'anthropic' and pair == (None, None):
+        pair = (row.get('max_input_tokens'), row.get('max_tokens'))
+    valid = all(type(v) is int for v in pair) and 0 < pair[1] < pair[0] <= 2000000
+    if valid:
+        if preset:
+            return [min(pair[0], preset[0]), min(pair[1], preset[1])], 'provider capped by preset'
+        return list(pair), 'provider'
+    return (list(preset), 'local preset') if preset else (None, 'unknown; supply verified limits')
+
+
+def print_model_catalog(catalogs, search='', page=None, page_size=20, all_models=False, output_format='table'):
+    rows = [(api, row, *model_limits(row, api)) for api, catalog in catalogs.items()
+            for row in sorted(catalog, key=lambda r: r['id']) if search.casefold() in row['id'].casefold()]
+    print('Model config: ' + str(ROOT / 'configs/pricetag/provider-models.json'))
+    print('Limits: context/output tokens. Local presets are not confirmation of hosted limits.')
+    print('Discovery does not verify inference or metering prices; no configuration changed.')
+    total = max(1, (len(rows) + page_size - 1) // page_size)
+    number = page or 1
+    if number > total:
+        raise ValueError(f'Page {number} exceeds {total} pages ({len(rows)} matching models)')
+    while True:
+        selected = rows if all_models else rows[(number - 1) * page_size:number * page_size]
+        print(f'Matches: {len(rows)}; ' + ('all results' if all_models else f'page {number}/{total}'))
+        if output_format == 'config':
+            result = {api: [] for api in catalogs}
+            for api, row, limits, source in selected:
+                if limits:
+                    result[api].append([row['id'], *limits])
+                else:
+                    print('Omitted (unknown limits): ' + api + ':' + row['id'])
+            print('JSON fragment: merge selected rows into the matching API arrays; do not replace the full file.')
+            print(json.dumps(result, indent=2))
+        else:
+            for api, row, limits, source in selected:
+                values = '/'.join(map(str, limits)) if limits else '?/?'
+                print(f'{api}: {row["id"]}  {values}  [{source}]')
+        if all_models or page is not None or number == total or not sys.stdin.isatty() or not sys.stdout.isatty():
+            break
+        try:
+            if input('Enter: next page; q: quit: ').strip().lower() == 'q':
+                break
+        except EOFError:
+            break
+        number += 1
+    if not all_models and number < total:
+        print('Use --page NUMBER, --all, or --search TEXT to see other matches.')
+
+
 def messages_auth(config, scheme, name="pricetag"):
     """Set the upstream credential's header, independently of model selection."""
     found = []
@@ -287,12 +340,9 @@ def provider_settings(name, api, url, key, urls=None, allocate_secret=True):
                 else:
                     print('Not advertised; skipped:', model)
                     continue
-            metadata = available.get(model, {}).get('praxis', {})
-            if isinstance(metadata, dict):
-                advertised_context, advertised_output = metadata.get('context'), metadata.get('output')
-                if (type(advertised_context) is int and type(advertised_output) is int
-                        and 0 < advertised_output < advertised_context <= 2000000):
-                    context, output = min(context, advertised_context), min(output, advertised_output)
+            limits, _ = model_limits(available.get(model, {'id': model}), dialect)
+            if limits:
+                context, output = limits
             alias = name + '/' + model
             entry = selected.setdefault(alias, {'id': alias, 'provider': name, 'model': model,
                                                'apis': [], 'context': context, 'output': output})
@@ -638,7 +688,7 @@ def collect_credential(name, urls, key_file=None):
 
 
 def add_provider(name, urls=None, replace=False, check_auth=False, check_inference=None,
-                 refresh=False, key_file=None, apis=None, list_models=False):
+                 refresh=False, key_file=None, apis=None, list_models=False, listing_options=None):
     if not key_file and not sys.stdin.isatty():
         raise ValueError('Run interactively over SSH; never pipe provider keys')
     STATE.mkdir(mode=0o700, exist_ok=True)
@@ -650,10 +700,8 @@ def add_provider(name, urls=None, replace=False, check_auth=False, check_inferen
     url = next(iter(urls.values()))
     key = collect_credential(name, urls, key_file)
     if list_models:
-        for dialect, address in urls.items():
-            print(dialect + ':')
-            for row in discover_models(address, dialect, key):
-                print('  ' + json.dumps(row['id'].replace(key, '[redacted]'), ensure_ascii=True))
+        catalogs = {dialect: discover_models(address, dialect, key) for dialect, address in urls.items()}
+        print_model_catalog(catalogs, **(listing_options or {}))
         return
     if check_auth:
         diagnose_catalog_auth(urls, key)
@@ -761,6 +809,12 @@ def main():
                         help='External/legacy PriceTag only: use unverified presets if initial model discovery returns 404/405/501; authentication/TLS failures still stop')
     parser.add_argument('--list-models', action='store_true',
                         help='discover upstream model IDs using a prompted credential; no configuration change')
+    parser.add_argument('--search', default='', help='case-insensitive model-ID substring; with --list-models')
+    parser.add_argument('--page', type=int, help='show one page of discovered models (1-based)')
+    parser.add_argument('--page-size', type=int, default=20, help='models per display page (default 20)')
+    parser.add_argument('--all', dest='all_models', action='store_true', help='print every matching model without paging')
+    parser.add_argument('--format', choices=['table', 'config'], default='table',
+                        help='config: pasteable JSON for known limits; unknown models are omitted')
     parser.add_argument('--check-auth', action='store_true',
                         help='External/legacy PriceTag only: probe both catalog headers; save no key and change no provider config')
     parser.add_argument('--check-inference', metavar='API:MODEL',
@@ -772,6 +826,14 @@ def main():
     parser.add_argument('--pin-model', action='append', default=[], metavar='API:MODEL',
                         help='External/legacy PriceTag only: include a reviewed preset even if omitted from a successful catalog')
     args = parser.parse_args()
+    if not 1 <= args.page_size <= 1000 or (args.page is not None and args.page < 1):
+        parser.error('page must be positive and page-size must be 1–1000')
+    if args.page is not None and args.all_models:
+        parser.error('choose --page or --all')
+    if (args.search or args.page is not None or args.all_models or args.format != 'table' or args.page_size != 20) and not args.list_models:
+        parser.error('search, pagination and format options require --list-models')
+    if args.command == 'list' and args.list_models:
+        parser.error('choose openai/external/pricetag for upstream discovery')
     if args.command == 'list':
         list_providers()
         return
@@ -827,6 +889,8 @@ def main():
                 urls[api] = value
         add_provider(args.command, urls=urls, replace=args.replace, check_auth=args.check_auth,
                      check_inference=probe, refresh=args.refresh_models, key_file=args.key_file, list_models=args.list_models,
+                     listing_options={'search': args.search, 'page': args.page, 'page_size': args.page_size,
+                                      'all_models': args.all_models, 'output_format': args.format},
                      apis=['openai', 'anthropic'] if args.api in (None, 'both') else [args.api])
 
 
