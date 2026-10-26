@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 60
     env:
       MAAS_REVISION: 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-      METERING_REVISION: 557ceb1cbe1316d93e0f682baa8301455956fe18
+      METERING_REVISION: a33b90ad1aea66479dbff99444ca819498589982
       MAAS_IMAGE: quay.io/redhat-et/secure-single-server-maas-standalone
       METERING_IMAGE: quay.io/redhat-et/secure-single-server-pricetag-metering
     steps:
@@ -69,7 +69,7 @@ jobs:
           sudo scripts/pricetag/build-maas --source "${RUNNER_TEMP}/maas-source" \
             --expected-commit "$MAAS_REVISION" --platform linux/amd64 --tag localhost/maas:ci
           sudo python3 scripts/pricetag/build-metering --source "${RUNNER_TEMP}/metering-source" \
-            --platform linux/amd64 --tag localhost/metering:ci
+            --platform linux/amd64 --revision "$METERING_REVISION" --tag localhost/metering:ci
           test "$(sudo podman image inspect localhost/maas:ci --format '{{index .Labels "org.opencontainers.image.revision"}}')" = "$MAAS_REVISION"
           test "$(sudo podman image inspect localhost/metering:ci --format '{{index .Labels "org.opencontainers.image.revision"}}')" = "$METERING_REVISION"
           for image in localhost/maas:ci localhost/metering:ci; do
