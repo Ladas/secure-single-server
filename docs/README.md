@@ -37,6 +37,7 @@ and performance guides are linked from that overview.
 
 | If you need to… | Use |
 | --- | --- |
+| Get a short overview to present or share | [Overview slide deck](slides/secure-single-server-overview.html) |
 | Review component roles and model paths | [Architecture overview](quickstarts/architecture-walkthrough/README.md) |
 | Install OpenShell and harness containers separately | [Manual single-server deployment](quickstarts/openshell-single-server/manual.md) |
 | Choose a deployment method | [Deployment methods](deployment-methods.md) |

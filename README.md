@@ -19,6 +19,9 @@ the [Streamlit before-and-after demo](docs/examples/streamlit-security/README.md
 It runs the same app in an ordinary container and an OpenShell sandbox to show
 credential substitution and filesystem confinement.
 
+A short [overview slide deck](docs/slides/secure-single-server-overview.html)
+summarizes the stack and its security story.
+
 > [!IMPORTANT]
 > This is an experimental demonstration, not a production-ready platform. Use
 > a disposable host for first evaluation and review the linked qualification

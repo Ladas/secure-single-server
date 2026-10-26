@@ -43,8 +43,15 @@ class StageTests(unittest.TestCase):
             "docs/examples/document-exfiltration/visual-demo.html",
             staged_paths,
         )
+        self.assertIn(
+            "docs/slides/secure-single-server-overview.html", staged_paths
+        )
         self.assertTrue(
-            all(path.endswith("/visual-demo.html") for path in staged_paths),
+            all(
+                path.endswith("/visual-demo.html")
+                or path.startswith("docs/slides/")
+                for path in staged_paths
+            ),
             staged_paths,
         )
 
