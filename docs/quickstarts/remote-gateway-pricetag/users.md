@@ -1,22 +1,38 @@
 # Users, budgets and keys
 
-Run over SSH from `~/secure-single-server`. The installer creates `admin`,
-`alice` and `bob`; Alice and Bob inherit the default monthly allowance ($5
-unless changed during installation). Keys are opaque MaaS
-API keys, with a maximum lifetime of 90 days.
+The installer always creates `admin`. Alice and Bob are optional sample users.
+Ordinary users inherit the default monthly allowance ($5 unless changed);
+individual overrides are optional. MaaS keys expire after at most 90 days.
+Use ordinary-user keys for inference: the administrator is quota-exempt.
+
+## Open the management session
+
+From the **workstation shell used for installation**:
+
+```console
+ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
+  'cd ~/secure-single-server && exec bash'
+```
+
+Run management commands below in that SSH session. In a new workstation shell,
+first restore the variables from [connection setup](README.md#1-set-the-connection).
+Type `exit` when finished to return to your workstation.
 
 ## Create a user
 
 ```console
-cd ~/secure-single-server
 sudo python3 scripts/pricetag/user --subject carol --name Carol \
   --monthly-usd 5 --key-lifetime 30d --output /root/pricetag-admin/carol.key
 sudo cat /root/pricetag-admin/carol.key
 ```
 
-Use this key for inference. Browser login also accepts it, but upstream
-personal dashboards are not available yet.
-[Local client setup](README.md#4-prepare-the-local-connection)
+The key is saved privately at the requested path. Omit `--monthly-usd` to use
+the deployment default. Omit `--key-lifetime` for 90 days. Browser login accepts
+the same key, but personal dashboards are pending upstream.
+
+Back on your workstation, follow [Prepare the local connection](README.md#4-prepare-the-local-connection)
+with `INFERENCE_USER=carol`. Then launch OpenCode with `--key-file "$CLIENT_DIR/carol.key"`.
+Each key belongs to one user; switching key files switches whose budget is charged.
 
 ## Change a budget
 
@@ -27,21 +43,56 @@ sudo python3 scripts/pricetag/user --subject carol --monthly-usd 10 --no-key
 Existing keys and usage are preserved. Allow up to 15 seconds for cached
 admission decisions to expire.
 
-## List, rotate or revoke keys
+## List users and keys
+
+The administrator dashboard's **Users** page lists local identities. To list
+one user's keys and expiry/status metadata (not the key values):
 
 ```console
 sudo python3 scripts/pricetag/maas-key list --subject carol
+```
+
+To read a saved key for login or secure copying:
+
+```console
+sudo cat /root/pricetag-admin/carol.key
+```
+
+## Rotate or revoke a key
+
+```console
 sudo python3 scripts/pricetag/user --subject carol --rotate \
   --key-lifetime 30d --output /root/pricetag-admin/carol-next.key
 ```
 
-Update the harness with the new key. Rotation saves the replacement before
+Copy the new file to your workstation, then use its path as `KEY_FILE` and
+restart OpenCode. Rotation saves the replacement before
 revoking previous keys named `inference`; use a new output filename each time.
 To revoke a specific key, copy its ID from `list`:
 
 ```console
 sudo python3 scripts/pricetag/maas-key revoke --subject carol --key-id OLD_KEY_ID
 ```
+
+<details>
+<summary>Copy a rotated key and switch OpenCode</summary>
+
+Run in the **workstation installation shell**, after exiting SSH:
+
+```console
+umask 077
+KEY_FILE="$CLIENT_DIR/carol-next.key"
+ssh "${SSH_OPTS[@]}" "$RHEL_HOST" 'sudo cat /root/pricetag-admin/carol-next.key' > "$KEY_FILE"
+chmod 600 "$KEY_FILE"
+printf 'User key saved at: %s\n' "$KEY_FILE"
+```
+
+In your project shell, set `KEY_FILE` to that printed path and rerun the
+[OpenCode command](README.md#5-run-opencode). For a saved native configuration,
+regenerate it with this key path. Alternatively, securely replace the contents
+of the key file it already references and restart OpenCode.
+
+</details>
 
 <details>
 <summary>Rotate with an overlap while clients switch</summary>

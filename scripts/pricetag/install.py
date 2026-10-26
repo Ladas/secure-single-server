@@ -96,10 +96,10 @@ def service_prefix():
             f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus']
 
 
-def import_image(image, prefix):
+def import_image(image, prefix, component="Image"):
     # Stream between stores and check both processes; a failed save must not be
     # hidden by a successful load. Never use the administrator's cwd as praxis-svc.
-    print('  Importing image into service account...', flush=True)
+    print(f'  Importing {component} into praxis-svc...\n    {image}', flush=True)
     source_id = run(['podman', 'image', 'inspect', image, '--format', '{{.Id}}'], True)
     if not re.fullmatch(r'(?:sha256:)?[0-9a-f]{64}', source_id):
         raise RuntimeError('source image ID is invalid')
@@ -120,6 +120,7 @@ def import_image(image, prefix):
         image_id = 'sha256:' + image_id
     if not re.fullmatch(r'sha256:[0-9a-f]{64}', image_id):
         raise RuntimeError('image import did not return an immutable image ID')
+    print(f'  OK: {component} imported', flush=True)
     return image_id
 
 
@@ -186,7 +187,9 @@ def parse_args(argv=None):
     p.add_argument('--pricetag-key-file', type=Path, help=argparse.SUPPRESS)
     p.add_argument('--pricetag-messages-url', help=argparse.SUPPRESS)
     p.add_argument('--pricetag-openai-url', help=argparse.SUPPRESS)
-    p.add_argument('--monthly-usd', type=int, default=5, help='Alice/Bob monthly USD allowance; default 5')
+    p.add_argument('--monthly-usd', type=int, default=5, help='default per-user monthly USD allowance; default 5')
+    p.add_argument('--sample-users', action=argparse.BooleanOptionalAction, default=None,
+                   help='create Alice and Bob in addition to the required administrator')
     p.add_argument('--yes', action='store_true', help='skip final confirmation, not missing setup prompts')
     p.add_argument('--plan', action='store_true', help='print stages without credentials, discovery or host changes')
     p.add_argument('--image-mode', choices=('source', 'published'), help='build source or pull digest-pinned images')
@@ -255,6 +258,12 @@ def parse_args(argv=None):
                 'messages' if args.external_api == 'anthropic' else 'openai']
             if any(not getattr(args, 'external_' + api + '_url') for api in required):
                 p.error('supply an endpoint for each selected external API')
+    if args.sample_users is None:
+        args.sample_users = True
+        if interactive and not args.yes:
+            args.sample_users = choice('Initial users:', {
+                'yes': 'Admin + sample users Alice and Bob',
+                'no': 'Admin only; add users later'}, 'yes') == 'yes'
     if not args.image_mode:
         if args.maas_image or args.metering_image:
             args.image_mode = 'published'
@@ -345,8 +354,10 @@ def acquire_images(args, arch):
         images = (MAAS_IMAGE, METERING_IMAGE)
     else:
         images = (args.maas_image, args.metering_image)
-        for image in images:
-            run(['podman', 'pull', image], label='Pulling application image')
+        for component, image in zip(('MaaS', 'PriceTag metering'), images):
+            print(f'  {component} image: {image}', flush=True)
+            run(['podman', 'pull', image], label='Pulling ' + component)
+    print('  Praxis image: ' + PRAXIS_IMAGE, flush=True)
     run(['podman', 'pull', PRAXIS_IMAGE], label='Pulling Praxis')
     for image, expected in zip((PRAXIS_IMAGE, *images),
                                (PRAXIS_REVISION, args.maas_revision, args.metering_revision)):
@@ -382,7 +393,8 @@ def install(args):
         print('  PriceTag   ' + METERING_IMAGE)
         print('  MaaS ref   ' + (args.maas_branch or args.maas_revision))
         print('  PriceTag ref ' + (args.metering_branch or args.metering_revision))
-    print(f'  Users      admin, alice, bob (Alice/Bob: ${args.monthly_usd}/month each)')
+    print('  Users      ' + ('admin, alice, bob' if args.sample_users else 'admin only'))
+    print(f'  Budget     ${args.monthly_usd}/month per ordinary user')
     print('\n  1. Validate provider setup   4. Import images')
     print('  2. Prepare RHEL             5. Configure gateway')
     print('  3. Build/pull images        6. Start and verify services')
@@ -416,7 +428,8 @@ def install(args):
         raise ValueError('existing PriceTag Quadlets; review the host instead of reinstalling')
     application_images = acquire_images(args, arch)
     stage(4, 'Import images into the service account')
-    ids = [import_image(image, prefix) for image in (PRAXIS_IMAGE, *application_images)]
+    ids = [import_image(image, prefix, component) for component, image in
+           zip(('Praxis', 'MaaS', 'PriceTag metering'), (PRAXIS_IMAGE, *application_images))]
     stage(5, 'Configure providers, TLS and budgets')
     for name, settings, key in prepared:
         helper.save_provider(name, settings, key)
@@ -424,6 +437,8 @@ def install(args):
     command = [sys.executable, ROOT / 'scripts/pricetag/prepare.py', '--hostname', args.hostname,
                '--praxis-image', ids[0], '--maas-image', ids[1], '--metering-image', ids[2],
                '--monthly-usd', str(args.monthly_usd)]
+    if not args.sample_users:
+        command += ['--no-sample-users']
     if args.mode == 'mock':
         command += ['--mock-provider', '--price-sources', ROOT / 'configs/pricetag/perf-price-sources.json']
     else:
@@ -439,7 +454,9 @@ def install(args):
     print('\nInstallation complete\n' + '=' * 54)
     print('Dashboard: https://' + args.hostname + ':8443/login')
     print('CA: /etc/praxis-pricetag/ca.pem')
-    print('Keys: /root/pricetag-admin/{admin,alice,bob}.key')
+    print('Keys: /root/pricetag-admin/' + ('{admin,alice,bob}.key' if args.sample_users else 'admin.key'))
+    if not args.sample_users:
+        print('Create an inference user next: docs/quickstarts/remote-gateway-pricetag/users.md')
     print('\nNext: open the dashboard, then connect OpenCode (quickstart steps 3–5).')
     print('Guide: docs/quickstarts/remote-gateway-pricetag/README.md')
     if args.mode == 'mock':

@@ -13,6 +13,20 @@ The interactive installer recommends published images. Noninteractive commands
 also default to published images. It verifies application
 source labels and CPU architecture before preparing the deployment.
 
+## Open the installation session
+
+These are alternatives to the default installer command on a **fresh** host.
+From the workstation shell used to copy the checkout:
+
+```console
+ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
+  'cd ~/secure-single-server && exec bash'
+```
+
+Run the examples below in that SSH session. In a new workstation shell, restore
+[connection settings](README.md#1-set-the-connection) first. Existing deployments
+are refused; these options do not upgrade a running gateway.
+
 ## Published images
 
 The installer pins both images from the [qualified publication run](https://github.com/redhat-et/secure-single-server/actions/runs/40324136393).

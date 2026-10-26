@@ -106,6 +106,8 @@ def main():
                         help='expose only local vLLM; do not mount cloud provider secrets')
     mode.add_argument('--mock-provider', action='store_true',
                       help='isolated synthetic provider for a fresh performance-test VM')
+    parser.add_argument('--sample-users', action=argparse.BooleanOptionalAction, default=True,
+                        help='create sample users on start; admin is always created')
     parser.add_argument('--monthly-usd', type=int, default=5)
     parser.add_argument('--price-sources', type=Path, required=True,
                         help='JSON mapping gateway aliases to reviewed PriceTag pricing model IDs')
@@ -189,6 +191,7 @@ def main():
     (args.directory / 'm2m-secret').write_text(m2m_secret + '\n')
     (args.directory / 'maas-db-url').write_text(
         f'postgres://maas:{maas_password}@pricetag-db:5432/maas?sslmode=disable\n')
+    (args.directory / 'sample-users').write_text('yes\n' if args.sample_users else 'no\n')
     (args.directory / 'admin-directory').write_text(str(args.admin_directory) + '\n')
     (args.directory / 'bootstrap.sql').write_text(bootstrap(models, sources, args.monthly_usd))
     (args.directory / 'models.json').write_text(json.dumps(models, indent=2) + '\n')

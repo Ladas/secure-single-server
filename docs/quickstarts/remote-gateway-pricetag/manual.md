@@ -2,10 +2,12 @@
 
 Use these steps **instead of** the installer, on a fresh RHEL host after
 [copying the checkout](README.md#2-copy-and-install). Run all blocks in the same
-SSH session. Stop at any failed command.
+SSH session. From the workstation installation shell, connect first.
+Stop at any failed command.
 
 ```console
-cd ~/secure-single-server
+ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
+  'cd ~/secure-single-server && exec bash'
 ```
 
 ## 1. Prepare RHEL and images
@@ -117,9 +119,12 @@ sudo python3 scripts/pricetag/prepare.py \
   --models /root/pricetag-provider-inputs/models.json \
   --provider-unit /root/pricetag-provider-inputs/provider-secrets.container \
   --price-sources /root/pricetag-provider-inputs/prices.json \
-  --monthly-usd 5
+  --monthly-usd 5 --no-sample-users
 sudo scripts/pricetag/start
 ```
+
+This creates the administrator only. [Create an inference user](users.md#create-a-user)
+next, or omit `--no-sample-users` during preparation to create Alice and Bob.
 
 `prepare.py` refuses to overwrite
 existing deployment directories. `start` installs and starts user Quadlets;

@@ -638,17 +638,23 @@ def collect_credential(name, urls, key_file=None):
 
 
 def add_provider(name, urls=None, replace=False, check_auth=False, check_inference=None,
-                 refresh=False, key_file=None, apis=None):
+                 refresh=False, key_file=None, apis=None, list_models=False):
     if not key_file and not sys.stdin.isatty():
         raise ValueError('Run interactively over SSH; never pipe provider keys')
     STATE.mkdir(mode=0o700, exist_ok=True)
     destination = STATE / ('provider-' + name + '.json')
-    if destination.exists() and not replace and not (check_auth or check_inference):
+    if destination.exists() and not replace and not (check_auth or check_inference or list_models):
         raise ValueError(name + ' is already configured; use --replace to update its key')
     urls = provider_urls(name, urls, apis)
     api = 'openai' if name == 'openai' else 'both'
     url = next(iter(urls.values()))
     key = collect_credential(name, urls, key_file)
+    if list_models:
+        for dialect, address in urls.items():
+            print(dialect + ':')
+            for row in discover_models(address, dialect, key):
+                print('  ' + json.dumps(row['id'].replace(key, '[redacted]'), ensure_ascii=True))
+        return
     if check_auth:
         diagnose_catalog_auth(urls, key)
         return
@@ -723,10 +729,24 @@ def export():
     print(f'Exported {len(models)} models and secret references to {STATE}; no services started')
 
 
+def list_providers():
+    """Print active aliases and limits, never provider credentials."""
+    path = DEPLOY / 'models.json'
+    if not path.is_file():
+        raise ValueError('No prepared gateway; complete installation first')
+    rows = json.loads(path.read_text())
+    for name in sorted({row['provider'] for row in rows}):
+        print(name)
+        for row in rows:
+            if row['provider'] == name:
+                print(f"  {row['id']}  APIs={','.join(row['apis'])}  "
+                      f"context={row['context']}  output={row['output']}")
+
+
 def main():
     global DEBUG, ALLOW_UNVERIFIED_MODELS, CATALOG_AUTH, PINNED_MODELS, STATE, MESSAGES_AUTH
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['openai', 'external', 'pricetag', 'export'])
+    parser.add_argument('command', choices=['openai', 'external', 'pricetag', 'export', 'list'])
     parser.add_argument('--openai-url', help='external OpenAI-compatible endpoint; HTTPS added if omitted')
     parser.add_argument('--anthropic-url', help='external Anthropic Messages endpoint')
     parser.add_argument('--api', choices=['openai', 'anthropic', 'both'], help='external provider: supported API(s); default both')
@@ -739,6 +759,8 @@ def main():
     parser.add_argument('--debug', action='store_true', help='print request URLs, auth header names, HTTP status and model counts; no keys or response bodies')
     parser.add_argument('--allow-unverified-models', action='store_true',
                         help='External/legacy PriceTag only: use unverified presets if initial model discovery returns 404/405/501; authentication/TLS failures still stop')
+    parser.add_argument('--list-models', action='store_true',
+                        help='discover upstream model IDs using a prompted credential; no configuration change')
     parser.add_argument('--check-auth', action='store_true',
                         help='External/legacy PriceTag only: probe both catalog headers; save no key and change no provider config')
     parser.add_argument('--check-inference', metavar='API:MODEL',
@@ -750,6 +772,11 @@ def main():
     parser.add_argument('--pin-model', action='append', default=[], metavar='API:MODEL',
                         help='External/legacy PriceTag only: include a reviewed preset even if omitted from a successful catalog')
     args = parser.parse_args()
+    if args.command == 'list':
+        list_providers()
+        return
+    if args.list_models and (args.command == 'export' or args.check_auth or args.check_inference or args.replace or args.refresh_models):
+        parser.error('--list-models is a read-only provider discovery operation')
     if args.api and args.command != 'external':
         parser.error('--api is only supported for external')
     if args.key_file and args.command == 'export':
@@ -781,7 +808,7 @@ def main():
     if ALLOW_UNVERIFIED_MODELS and args.command not in ('pricetag', 'external'):
         parser.error('--allow-unverified-models is only supported for external or pricetag')
     DEBUG = args.debug
-    check_host(allow_active=(args.command in ('openai', 'pricetag', 'external') and args.replace) or args.check_auth or bool(probe))
+    check_host(allow_active=(args.command in ('openai', 'pricetag', 'external') and args.replace) or args.check_auth or bool(probe) or args.list_models)
     os.umask(0o077)
     STATE.mkdir(mode=0o700, exist_ok=True)
     lock_fd = os.open(STATE / '.setup.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -799,7 +826,7 @@ def main():
             if value:
                 urls[api] = value
         add_provider(args.command, urls=urls, replace=args.replace, check_auth=args.check_auth,
-                     check_inference=probe, refresh=args.refresh_models, key_file=args.key_file,
+                     check_inference=probe, refresh=args.refresh_models, key_file=args.key_file, list_models=args.list_models,
                      apis=['openai', 'anthropic'] if args.api in (None, 'both') else [args.api])
 
 

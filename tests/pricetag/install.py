@@ -47,6 +47,38 @@ class InstallTest(unittest.TestCase):
                 self.assertIn('Mock providers (benchmark)' if mode == 'mock' else
                               'OpenAI, External (OpenAI-compatible + Anthropic Messages)', text)
 
+    def test_sample_users_can_be_omitted_without_omitting_admin(self):
+        args = self.image_args('--no-sample-users')
+        self.assertFalse(args.sample_users)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            installer.install(args)
+        self.assertIn('admin only', output.getvalue())
+        self.assertNotIn('admin, alice, bob', output.getvalue())
+
+    def test_start_respects_sample_user_choice_on_repeated_starts(self):
+        # Execute the actual startup provisioning block with a recording Python
+        # command; no systemd, database or host configuration is touched.
+        version = subprocess.check_output(['bash', '-c', 'printf %s "${BASH_VERSINFO[0]}"'], text=True)
+        if int(version) < 4:
+            self.skipTest('startup requires Bash 4+, as provided by RHEL')
+        source = (ROOT / 'scripts/pricetag/start').read_text()
+        block = source[source.index('if [[ ! -f "${DEPLOY_DIR}/sample-users"'):source.index("note 'Praxis")]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / 'check.sh'
+            script.write_text('set -euo pipefail\nDEPLOY_DIR="$1"\nadmin_dir="$1"\nSCRIPT_DIR="$1"\n'
+                              'python3() { printf "%s\\n" "$*"; }\n' + block)
+            for selection, expected in [('no', False), ('yes', True)]:
+                (root / 'sample-users').write_text(selection + '\n')
+                result = subprocess.run(['bash', str(script), directory], capture_output=True, text=True, check=True)
+                self.assertEqual('--subject alice' in result.stdout, expected)
+                self.assertEqual('--subject bob' in result.stdout, expected)
+            (root / 'alice.key').touch()
+            result = subprocess.run(['bash', str(script), directory], capture_output=True, text=True, check=True)
+            self.assertNotIn('--subject alice', result.stdout)
+            self.assertIn('--subject bob', result.stdout)
+
     def image_args(self, *extra):
         return installer.parse_args(['--mode', 'mock', '--hostname', 'gateway.example', '--plan', *extra])
 
@@ -106,9 +138,11 @@ class InstallTest(unittest.TestCase):
                 return {installer.PRAXIS_IMAGE: installer.PRAXIS_REVISION,
                         args.maas_image: args.maas_revision,
                         args.metering_image: args.metering_revision}[command[3]]
-        with patch.object(installer, 'run', side_effect=execute), \
+        with patch.object(installer, 'run', side_effect=execute) as runner, \
                 patch.object(installer, 'checkout', side_effect=AssertionError('source checkout')):
             self.assertEqual(installer.acquire_images(args, 'amd64'), (args.maas_image, args.metering_image))
+            pulls = [c.kwargs['label'] for c in runner.call_args_list if c.args[0][:2] == ['podman', 'pull']]
+            self.assertEqual(pulls, ['Pulling MaaS', 'Pulling PriceTag metering', 'Pulling Praxis'])
         with patch.object(installer, 'run', return_value='wrong-source'):
             with self.assertRaisesRegex(ValueError, 'source revision'):
                 installer.acquire_images(args, 'amd64')
@@ -182,10 +216,11 @@ class InstallTest(unittest.TestCase):
 
     def test_interactive_selection_accepts_menu_numbers(self):
         with patch.object(installer.sys.stdin, 'isatty', return_value=True), \
-                patch('builtins.input', side_effect=['2', '2', '1']):
+                patch('builtins.input', side_effect=['2', '2', '2', '1']):
             args = installer.parse_args(['--mode', 'real', '--hostname', 'gateway.example'])
         self.assertEqual(args.provider, ['external'])
         self.assertEqual(args.external_api, 'anthropic')
+        self.assertFalse(args.sample_users)
 
     def test_external_selection_requires_one_provider_and_records_api(self):
         with patch.object(installer.sys.stdin, 'isatty', return_value=False):
@@ -245,10 +280,14 @@ class InstallTest(unittest.TestCase):
             import os
             for image_id in ('a' * 64, 'sha256:' + 'a' * 64):
                 with patch.dict(os.environ, {'PATH': directory + ':' + os.environ['PATH']}), \
-                        patch.object(installer, 'run', side_effect=[image_id, image_id]) as execute:
-                    self.assertEqual(installer.import_image('registry/image@sha256:manifest', ['true']),
+                        patch.object(installer, 'run', side_effect=[image_id, image_id]) as execute, \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(installer.import_image('registry/image@sha256:manifest', ['true'], 'MaaS'),
                                      'sha256:' + 'a' * 64)
                     self.assertIn(image_id, execute.call_args.args[0])
+                    self.assertIn('Importing MaaS into praxis-svc', output.getvalue())
+                    self.assertIn('registry/image@sha256:manifest', output.getvalue())
+                    self.assertIn('OK: MaaS imported', output.getvalue())
 
     def test_mock_rejects_provider_flags(self):
         with self.assertRaises(SystemExit):

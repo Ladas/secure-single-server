@@ -295,7 +295,10 @@ class HarnessTest(unittest.TestCase):
         messages_model = {'id': 'pricetag/claude-sonnet-5', 'praxis': {
             'provider': 'pricetag', 'upstream_model': 'claude-sonnet-5',
             'context': 128000, 'output': 8192, 'apis': ['anthropic']}}
-        rows = [self.model, openai_model, messages_model]
+        external_gpt = copy.deepcopy(openai_model)
+        external_gpt['id'] = 'pricetag/gpt-6-luna'
+        external_gpt['praxis']['provider'] = 'pricetag'
+        rows = [self.model, openai_model, messages_model, external_gpt]
         selected = self.preview('opencode', catalog_rows=rows)
         config = json.loads(selected['environment']['OPENCODE_CONFIG_CONTENT'])
         self.assertEqual(config['model'], 'praxis-openai/' + self.model['id'])
@@ -309,6 +312,13 @@ class HarnessTest(unittest.TestCase):
                          {'context': 1050000, 'output': 128000})
         self.assertEqual(anthropic['models'][messages_model['id']]['limit'],
                          {'context': 128000, 'output': 8192})
+        gpt = openai['models'][openai_model['id']]
+        self.assertEqual(gpt['provider']['npm'], '@ai-sdk/openai')
+        self.assertEqual(openai['models'][external_gpt['id']]['provider'], gpt['provider'])
+        self.assertNotIn('provider', anthropic['models'][messages_model['id']])
+        self.assertTrue(gpt['reasoning'])
+        self.assertFalse(gpt['options']['store'])
+        self.assertEqual(gpt['options']['include'], ['reasoning.encrypted_content'])
         self.assertIn(self.model['id'], openai['models'])
         self.assertIn(self.model['id'], anthropic['models'])
         selected = self.preview('codex')

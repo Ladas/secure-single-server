@@ -24,6 +24,36 @@ from gateway import render as gateway
 
 
 class SetupTest(unittest.TestCase):
+    def test_list_shows_active_models_without_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            deploy = Path(directory)
+            (deploy / 'models.json').write_text(json.dumps([{'id': 'external/test',
+                'provider': 'external', 'apis': ['openai'], 'context': 1000, 'output': 100}]))
+            output = io.StringIO()
+            with patch.object(setup, 'DEPLOY', deploy), contextlib.redirect_stdout(output):
+                setup.list_providers()
+            self.assertIn('external/test', output.getvalue())
+            self.assertIn('1000', output.getvalue())
+
+    def test_discovery_listing_does_not_save_or_replace_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            saved = state / 'provider-external.json'
+            saved.write_text('existing configuration')
+            output = io.StringIO()
+            with patch.object(setup, 'STATE', state), \
+                    patch.object(setup.sys.stdin, 'isatty', return_value=True), \
+                    patch.object(setup, 'collect_credential', return_value='SECRET_SENTINEL'), \
+                    patch.object(setup, 'discover_models', return_value=[{'id': 'model-a'}]), \
+                    patch.object(setup, 'save_provider', side_effect=AssertionError('must not save')), \
+                    patch.object(setup, 'service', side_effect=AssertionError('must not mutate host')), \
+                    contextlib.redirect_stdout(output):
+                setup.add_provider('external', urls={'openai': 'https://provider.example'},
+                                   apis=['openai'], list_models=True)
+            self.assertIn('model-a', output.getvalue())
+            self.assertNotIn('SECRET_SENTINEL', output.getvalue())
+            self.assertEqual(saved.read_text(), 'existing configuration')
+
     def test_external_export_messages_uses_generic_secret_and_routes(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
