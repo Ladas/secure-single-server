@@ -15,7 +15,13 @@ The helper supports these two fixed profiles. Choose them during installation;
 adding another provider to a running deployment or arbitrary profile names is
 not supported. Older `pricetag/` deployments use the legacy `pricetag` command.
 
-## Open the management session
+## Refresh models on an existing deployment
+
+The numbered steps below update an installed external provider. For a fresh
+installation, use the [installer](README.md#3-install) or
+[manual provider setup](manual.md#2-configure-providers) instead.
+
+### Open the management session
 
 From the **workstation installation shell**:
 
@@ -122,106 +128,7 @@ models with recorded usage in the selected scope and period. Pricing can contain
 both an upstream ID and its gateway alias; these are separate rate records,
 not duplicate charges.
 
-<details>
-<summary>Inspect rates over SSH or add a missing source price</summary>
-
-Define this function in the **RHEL management session**:
-
-```console
-PRICETAG_UID=$(id -u praxis-svc)
-ptsql() {
-  (cd /tmp && sudo -u praxis-svc env \
-    XDG_RUNTIME_DIR="/run/user/$PRICETAG_UID" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$PRICETAG_UID/bus" \
-    podman exec -i pricetag-db psql -X -U metering -d metering -v ON_ERROR_STOP=1 "$@")
-}
-ptsql -c "SELECT model, input_cost_per_mtok, output_cost_per_mtok, cache_write_cost_per_mtok, cache_read_cost_per_mtok FROM model_pricing WHERE model IN ('gpt-6-luna', 'external/gpt-6-luna');"
-```
-
-For a **missing source price**, create a SQL file:
-
-```console
-vi /tmp/pricetag-new-price.sql
-```
-
-Paste this template, replacing the model ID and all four rate placeholders with
-verified **USD per million tokens** (not per-token prices):
-
-```sql
-INSERT INTO model_pricing
-  (model, provider, input_cost_per_mtok, output_cost_per_mtok,
-   cache_write_cost_per_mtok, cache_read_cost_per_mtok)
-VALUES
-  ('UPSTREAM_MODEL_ID', 'external', INPUT_RATE, OUTPUT_RATE,
-   CACHE_WRITE_RATE, CACHE_READ_RATE)
-RETURNING model, input_cost_per_mtok, output_cost_per_mtok,
-          cache_write_cost_per_mtok, cache_read_cost_per_mtok;
-```
-
-Review and apply before model refresh:
-
-```console
-cat /tmp/pricetag-new-price.sql
-ptsql < /tmp/pricetag-new-price.sql
-```
-
-This inserts a source row and refuses an existing ID. Do not substitute zero
-for an unknown rate. Startup/pricing refresh can reseed catalog source rates;
-new gateway aliases retain the snapshot copied at activation. Changing existing
-alias rates or repricing historical usage needs a separate reviewed procedure.
-
-</details>
-
-<details>
-<summary>Change a price before a model has recorded usage</summary>
-
-Use the `ptsql` function above. Edit a SQL file with the exact pricing ID and
-verified USD-per-million rates. Use an upstream ID **before** alias creation,
-or `external/MODEL_ID` for an already-created alias with no usage:
-
-```console
-vi /tmp/pricetag-change-price.sql
-```
-
-```sql
-BEGIN;
-LOCK TABLE usage_events IN SHARE MODE;
-DO $guard$
-BEGIN
-  IF EXISTS (SELECT 1 FROM usage_events WHERE model = 'PRICING_MODEL_ID') THEN
-    RAISE EXCEPTION 'Model has usage; changing its rate needs a repricing review';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM model_pricing WHERE model = 'PRICING_MODEL_ID') THEN
-    RAISE EXCEPTION 'Price row missing; insert it first';
-  END IF;
-END;
-$guard$;
-UPDATE model_pricing
-SET input_cost_per_mtok = INPUT_RATE,
-    output_cost_per_mtok = OUTPUT_RATE,
-    cache_write_cost_per_mtok = CACHE_WRITE_RATE,
-    cache_read_cost_per_mtok = CACHE_READ_RATE
-WHERE model = 'PRICING_MODEL_ID'
-RETURNING model, input_cost_per_mtok, output_cost_per_mtok,
-          cache_write_cost_per_mtok, cache_read_cost_per_mtok;
-COMMIT;
-```
-
-Replace both occurrences of the ID in the checks and the ID in the update,
-plus all four rate placeholders. Then:
-
-```console
-cat /tmp/pricetag-change-price.sql
-ptsql < /tmp/pricetag-change-price.sql
-```
-
-The transaction briefly blocks event inserts while checking for usage. It
-refuses to reprice a used model. Editing a source row does **not** update existing
-alias rows; inspect the exact alias charged by clients. Allow cached budget
-checks about 15 seconds to expire. List-price columns shown as savings remain
-separate from these actual charging rates.
-
-</details>
+[Inspect or change rates](pricing.md) before refreshing models.
 
 ## 4. Apply the external models to Praxis
 
@@ -281,7 +188,7 @@ before installation. `openai --replace` retains the current model selection.
 ## 5. Refresh local OpenCode
 
 Return to your **workstation** with `exit`. Restart the
-[dynamic helper](README.md#5-run-opencode) to fetch the new catalog, or regenerate
+[dynamic helper](README.md#6-run-opencode) to fetch the new catalog, or regenerate
 saved configuration. If the default model was removed, choose another alias.
 Keep the intended user-key path; upstream changes do not require new user keys.
 
@@ -316,16 +223,7 @@ it does not verify credentials or model access.
 </details>
 
 <details>
-<summary>Manual initial setup and unattended credentials</summary>
-
-On a fresh host prepared using [manual installation](manual.md), run one or both
-commands, then export and continue with service startup:
-
-```console
-sudo python3 scripts/pricetag/providers openai
-sudo python3 scripts/pricetag/providers external --api both
-sudo python3 scripts/pricetag/providers export
-```
+<summary>Unattended credentials</summary>
 
 For automation, provision one-line credentials in root-owned regular files,
 mode `0400` or `0600`, inside a root-owned `0700` directory. Pass paths, never

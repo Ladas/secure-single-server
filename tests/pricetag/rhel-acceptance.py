@@ -97,6 +97,17 @@ def main():
     check('admin dashboard API available', request(admin, '/api/v1/dashboard/overview')[0] == 200)
     check('admin safety net available', request(admin, '/api/v1/admin/safety-net')[0] == 200)
 
+    check('admin model suggestions available', request(admin, '/api/v1/admin/models')[0] == 200)
+    check('ordinary user cannot read admin model suggestions',
+          request(browser, '/api/v1/admin/models')[0] == 403)
+    try:
+        noauth.open(url + '/api/v1/admin/models', timeout=30)
+        anonymous_denied = False
+    except urllib.error.HTTPError as error:
+        anonymous_denied = (error.code in (401, 403) or
+                            (error.code == 302 and error.headers.get('Location') == '/login'))
+    check('anonymous cannot read admin model suggestions', anonymous_denied)
+
     def sql(query):
         uid = pwd.getpwnam('praxis-svc').pw_uid
         result = subprocess.run(['sudo', '-u', 'praxis-svc', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}',

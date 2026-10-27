@@ -6,7 +6,7 @@ The [image workflow](../../.github/workflows/pricetag-images.yml) builds two
 | Image repository | Source |
 | --- | --- |
 | `quay.io/redhat-et/secure-single-server-maas-standalone` | [MaaS standalone revision](https://github.com/Ladas/models-as-a-service/commit/6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d) |
-| `quay.io/redhat-et/secure-single-server-pricetag-metering` | [Unmodified PriceTag revision](https://github.com/redhat-et/pricetag-metering/commit/557ceb1cbe1316d93e0f682baa8301455956fe18) |
+| `quay.io/redhat-et/secure-single-server-pricetag-metering` | [Unmodified PriceTag revision](https://github.com/redhat-et/pricetag-metering/commit/a33b90ad1aea66479dbff99444ca819498589982) |
 
 MaaS uses its source Dockerfile; PriceTag uses the repository's packaging-only
 Containerfile. Application commits are fixed in the workflow and checked against
@@ -56,7 +56,7 @@ To run the component smoke test against locally built images:
 ```console
 sudo python3 tests/pricetag/component-images.py \
   --maas-image localhost/pricetag-maas:standalone \
-  --metering-image localhost/pricetag-metering:upstream-557ceb1
+  --metering-image localhost/pricetag-metering:upstream-a33b90a
 ```
 
 ARM64 publication, image signatures and SBOM/provenance publication are not

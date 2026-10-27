@@ -1,7 +1,7 @@
 # Manual installation
 
 Use these steps **instead of** the installer, on a fresh RHEL host after
-[copying the checkout](README.md#2-copy-and-install). Run all blocks in the same
+[copying the checkout](README.md#2-copy-the-checkout). Run all blocks in the same
 SSH session. From the workstation installation shell, connect first.
 Stop at any failed command.
 
@@ -79,10 +79,21 @@ Run on the real-provider host. The helper asks for credentials using hidden
 prompts, performs HTTPS model discovery, and stores provider secrets separately
 from the MaaS user keys. Choose one or both provider types:
 
+**Direct OpenAI** (optional if using only an external provider):
+
 ```console
-cd ~/secure-single-server
 sudo python3 scripts/pricetag/providers openai
+```
+
+**External provider** (optional if using only direct OpenAI):
+
+```console
 sudo python3 scripts/pricetag/providers external --api both
+```
+
+After configuring your chosen provider(s):
+
+```console
 sudo python3 scripts/pricetag/providers export
 ```
 
@@ -117,6 +128,9 @@ sudo scripts/pricetag/start
 This creates the administrator only. [Create an inference user](users.md#create-a-user)
 next, or omit `--no-sample-users` during preparation to create Alice and Bob.
 
+If startup reports a missing price, follow [price recovery](pricing.md#recover-a-first-install-with-missing-prices),
+then rerun `sudo scripts/pricetag/start`. Do not repeat preparation.
+
 Preparation refuses existing directories. Startup installs persistent systemd
 Quadlets for PostgreSQL, MaaS, PriceTag and Praxis. Do not rerun preparation over
 an existing deployment; upgrades require separate qualification.
@@ -139,4 +153,4 @@ loginctl show-user praxis-svc -p Linger
 sudo curl --fail --cacert /etc/praxis-pricetag/ca.pem https://localhost:8443/login >/dev/null
 ```
 
-Return to [dashboard and client setup](README.md#3-open-the-dashboards).
+Return to [dashboard and client setup](README.md#4-open-the-dashboards).

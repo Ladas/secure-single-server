@@ -7,7 +7,7 @@ or real-provider latency. Never configure real provider keys on this host.
 ## Set up the benchmark host
 
 Follow the [RHEL requirements and AWS setup](../quickstarts/remote-gateway-pricetag/README.md#1-set-the-connection)
-and [copy the reviewed checkout](../quickstarts/remote-gateway-pricetag/README.md#2-copy-and-install).
+and [copy the reviewed checkout](../quickstarts/remote-gateway-pricetag/README.md#2-copy-the-checkout).
 Choose a separate VM name such as `pricetag-perf` in the AWS commands. Then run
 over SSH, substituting that VM's public IP or DNS name:
 
@@ -153,6 +153,18 @@ samples and before/after disk use for longer soaks. Include host CPU, memory,
 disk, service restarts, PostgreSQL/WAL size and report contents. A single
 snapshot does not establish peak usage or sustained capacity. Local laptop runs
 are not substitutes for RHEL measurements.
+
+## Missing-price recovery check
+
+On the mock-only host:
+
+```console
+sudo python3 tests/pricetag/rhel-price-recovery.py
+```
+
+This tests rejection of an unpriced model and successful alias creation after
+adding source rates. It uses session-local PostgreSQL tables; deployment prices,
+users and usage stay unchanged. See [first-install recovery](../quickstarts/remote-gateway-pricetag/pricing.md#recover-a-first-install-with-missing-prices).
 
 ## USD quota probe
 

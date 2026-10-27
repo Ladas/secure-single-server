@@ -25,7 +25,7 @@ sudo cat /root/pricetag-admin/carol.key
 ```
 
 Omit `--monthly-usd` to inherit the default; omit `--key-lifetime` for 90 days.
-On your workstation, follow [client setup](README.md#4-prepare-the-local-connection)
+On your workstation, follow [client setup](README.md#5-prepare-the-local-connection)
 with `INFERENCE_USER=carol`. That key charges Carol's budget.
 
 ## Change a budget
@@ -82,7 +82,7 @@ printf 'User key saved at: %s\n' "$KEY_FILE"
 ```
 
 In your project shell, set `KEY_FILE` to that printed path and rerun the
-[OpenCode command](README.md#5-run-opencode). For a saved native configuration,
+[OpenCode command](README.md#6-run-opencode). For a saved native configuration,
 regenerate it with this key path. Alternatively, securely replace the contents
 of the key file it already references and restart OpenCode.
 

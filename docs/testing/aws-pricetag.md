@@ -62,7 +62,7 @@ printf 'export RHEL_HOST=%q\nexport SSH_KEY=%q\nexport GATEWAY_HOST=%q\nexport R
 printf 'cd "$REPO"\n'
 ```
 
-Continue at [copy and install](../quickstarts/remote-gateway-pricetag/README.md#2-copy-and-install).
+Continue at [copy the checkout](../quickstarts/remote-gateway-pricetag/README.md#2-copy-the-checkout).
 The destination terminal does not need AWS administrator credentials for SSH,
 installation or OpenCode. If the SSH key is encrypted, unlock it there with
 `ssh-add "$SSH_KEY"` when needed.

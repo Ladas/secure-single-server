@@ -28,6 +28,24 @@ benchmark = module('benchmark')
 
 
 class InstallTest(unittest.TestCase):
+    def test_bootstrap_failure_stops_before_marker_and_explains_recovery(self):
+        source = (ROOT / 'scripts/pricetag/start').read_text()
+        start = source.index('  if ! as_service podman exec -i pricetag-db psql')
+        end = source.index('\nfi', start)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'bootstrap.sql').write_text('SELECT 1;')
+            script = root / 'check.sh'
+            script.write_text('set -eu\nDEPLOY_DIR="$1"\n'
+                              'as_service() { return 1; }\n'
+                              'note() { echo "$*"; }\n'
+                              'die() { echo "$*"; exit 1; }\n' + source[start:end])
+            result = subprocess.run(['bash', str(script), directory], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('sudo scripts/pricetag/start', result.stdout)
+            self.assertIn('pricing.md#recover-a-first-install', result.stdout)
+            self.assertFalse((root / 'bootstrap.done').exists())
+
     def test_summary_shows_all_images_and_provider_choices(self):
         sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
         from prepare import POSTGRES
