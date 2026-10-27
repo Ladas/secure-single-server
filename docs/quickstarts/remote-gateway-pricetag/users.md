@@ -1,0 +1,162 @@
+# Users, budgets and keys
+
+Admin is always created; Alice/Bob are optional. Ordinary users inherit $5/month
+unless configured otherwise. Keys expire within 90 days. Use ordinary-user keys
+for inference: admin is quota-exempt.
+
+## Open the management session
+
+From the **workstation shell used for installation**:
+
+```console
+ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
+  'cd ~/secure-single-server && exec bash'
+```
+
+Run operations below in **this SSH session**; `exit` returns to your workstation.
+New shell? Restore [connection variables](README.md#1-set-the-connection) first.
+
+## Create a user
+
+```console
+sudo python3 scripts/pricetag/user --subject carol --name Carol \
+  --monthly-usd 5 --key-lifetime 30d --output /root/pricetag-admin/carol.key
+sudo cat /root/pricetag-admin/carol.key
+```
+
+Omit `--monthly-usd` to inherit the default; omit `--key-lifetime` for 90 days.
+On your workstation, follow [client setup](README.md#5-prepare-the-local-connection)
+with `INFERENCE_USER=carol`. That key charges Carol's budget.
+
+## Change a budget
+
+```console
+sudo python3 scripts/pricetag/user --subject carol --monthly-usd 10 --no-key
+```
+
+Existing keys and usage are preserved. Allow up to 15 seconds for cached
+admission decisions to expire.
+
+## List users and keys
+
+The administrator dashboard's **Users** page lists local identities. To list
+one user's keys and expiry/status metadata (not the key values):
+
+```console
+sudo python3 scripts/pricetag/maas-key list --subject carol
+```
+
+To read a saved key for login or secure copying:
+
+```console
+sudo cat /root/pricetag-admin/carol.key
+```
+
+## Rotate or revoke a key
+
+```console
+sudo python3 scripts/pricetag/user --subject carol --rotate \
+  --key-lifetime 30d --output /root/pricetag-admin/carol-next.key
+```
+
+Copy the new file to your workstation, then use its path as `KEY_FILE` and
+restart OpenCode. Rotation saves the replacement before
+revoking previous keys named `inference`; use a new output filename each time.
+To revoke a specific key, copy its ID from `list`:
+
+```console
+sudo python3 scripts/pricetag/maas-key revoke --subject carol --key-id OLD_KEY_ID
+```
+
+<details>
+<summary>Copy a rotated key and switch OpenCode</summary>
+
+Run in the **workstation installation shell**, after exiting SSH:
+
+```console
+umask 077
+KEY_FILE="$CLIENT_DIR/carol-next.key"
+ssh "${SSH_OPTS[@]}" "$RHEL_HOST" 'sudo cat /root/pricetag-admin/carol-next.key' > "$KEY_FILE"
+chmod 600 "$KEY_FILE"
+printf 'User key saved at: %s\n' "$KEY_FILE"
+```
+
+In your project shell, set `KEY_FILE` to that printed path and rerun the
+[OpenCode command](README.md#6-run-opencode). For a saved native configuration,
+regenerate it with this key path. Alternatively, securely replace the contents
+of the key file it already references and restart OpenCode.
+
+</details>
+
+<details>
+<summary>Rotate with an overlap while clients switch</summary>
+
+```console
+sudo python3 scripts/pricetag/maas-key create --subject carol \
+  --name laptop-next --expires-in 30d --output /root/pricetag-admin/carol-laptop.key
+```
+
+Switch the client, verify inference, then revoke the old key by ID.
+
+</details>
+
+<details>
+<summary>Find saved keys or recover access</summary>
+
+```console
+sudo find /root/pricetag-admin -maxdepth 1 -type f -name '*.key' -print
+```
+
+Saved files may contain revoked keys; `maas-key list` is authoritative. Use
+`--admin` for key operations on the configured administrator identity.
+An SSH administrator can issue a replacement after all a user's keys expire.
+If rotation reports a revocation failure, retain the new file and revoke the
+reported old IDs after checking their status.
+
+</details>
+
+<details>
+<summary>Dashboard versus CLI: supported operations</summary>
+
+| Task | Available interface |
+| --- | --- |
+| View aggregate and user spending | Administrator dashboard |
+| View local users and change administrator roles or manager relationships | Administrator **Users** |
+| Set the default monthly allowance and post-limit model exceptions | Administrator **Safety Net** (`/api/v1/admin/safety-net`) |
+| Create users or change an individual allowance | SSH: `scripts/pricetag/user` |
+| Issue, list, rotate or revoke keys | SSH: `scripts/pricetag/maas-key` using the private MaaS API |
+| Configure providers, credentials and advertised models | SSH: `scripts/pricetag/providers` |
+| View your own spending as an ordinary user | Pending upstream; login currently shows “coming soon” |
+
+The default monthly allowance applies separately to each user. An individual
+allowance overrides that default. This deployment starts with an empty
+post-limit exception list, so no model bypasses the USD limit.
+
+</details>
+
+<details>
+<summary>Administration boundaries and upstream API gaps</summary>
+
+- MaaS owns keys; PriceTag owns identities, usage and budgets. Management stays
+  private behind SSH; browser key-management and Kubernetes routing tabs are unavailable.
+- Per-user budget changes use a transactional PostgreSQL adapter because upstream
+  has no matching admin API. Changes are audited in `org_audit`; requalify the
+  adapter when upgrading metering.
+- Personal dashboards, Pricing Discounts, alias-price refresh and historical
+  repricing are not supported by this guide.
+- The `super_admin` role bypasses quotas. Grant it only to administrators;
+  ordinary inference users keep the `user` role.
+
+</details>
+
+## Limits
+
+- Monthly admission decisions are cached for about 15 seconds; concurrent or
+  delayed requests can overshoot a USD allowance.
+- Key revocation stops new key validation, but does **not** end an existing
+  dashboard session. It is not complete account offboarding.
+- MaaS administration stays on host loopback over SSH. Host administrators and
+  configured service peers are privileged.
+- Raw-event retention, upgrades and backup/recovery are not qualified by this
+  fresh-install guide. Use the [mock benchmark](../../testing/pricetag-perf.md)
+  to measure resource and storage growth.

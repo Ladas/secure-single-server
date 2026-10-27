@@ -60,8 +60,7 @@ def users(args):
         subject = f'{args.prefix}-{index:02d}'
         command = [str(ROOT / 'scripts/pricetag/user'), '--subject', subject,
                    '--monthly-usd', '100', '--output', str(args.tokens / (subject + '.key')),
-                   '--admin-key', str(args.admin_key), '--gateway', args.gateway,
-                   '--ca', str(args.ca), '--maas-url', args.maas_url]
+                   '--maas-url', args.maas_url]
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
     print(f'Created {args.count} distinct users with $100 test allowances; credentials: {args.tokens}')
 
@@ -164,9 +163,6 @@ def main():
     p.add_argument('--tokens', type=Path, required=True)
     p.add_argument('--prefix', required=True)
     p.add_argument('--count', type=int, choices=range(1, 21), default=20)
-    p.add_argument('--admin-key', type=Path, default=Path('/root/pricetag-admin/admin.key'))
-    p.add_argument('--gateway', default='https://localhost:8443')
-    p.add_argument('--ca', type=Path, default=Path('/etc/praxis-pricetag/ca.pem'))
     p.add_argument('--maas-url', default='http://127.0.0.1:18086')
     p = commands.add_parser('run')
     p.add_argument('--url', required=True); p.add_argument('--ca', type=Path, required=True)
