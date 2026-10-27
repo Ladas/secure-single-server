@@ -109,7 +109,6 @@ if [[ ! -f "${DEPLOY_DIR}/bootstrap.done" ]]; then
   fi
   if ! as_service podman exec -i pricetag-db psql -X -U metering -d metering -v ON_ERROR_STOP=1 < "${DEPLOY_DIR}/bootstrap.sql"; then
     note 'Price/bootstrap initialization failed; its transaction was rolled back. Gateway startup stopped.'
-    note 'For Missing reviewed price, add verified source rates using docs/quickstarts/remote-gateway-pricetag/pricing.md#recover-a-first-install-with-missing-prices'
     die 'Keep the prepared files and keys. After fixing the cause, rerun sudo scripts/pricetag/start; do not rerun install or prepare.py.'
   fi
   install -m 0600 /dev/null "${DEPLOY_DIR}/bootstrap.done"

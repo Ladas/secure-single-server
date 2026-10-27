@@ -56,7 +56,7 @@ def bootstrap(models, sources, budget):
         alias, source = literal(model['id']), literal(sources.get(model['id'], model['model']))
         statements += [
             f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM model_pricing WHERE model={source}) "
-            f"THEN RAISE EXCEPTION 'Missing reviewed price for model %', {alias}; END IF; END $$;",
+            f"THEN RAISE WARNING 'No source price for model %; PriceTag fallback rates apply', {alias}; END IF; END $$;",
             f'INSERT INTO model_pricing(model,provider,{fields}) '
             f'SELECT {alias},{literal(model["provider"])},{fields} FROM model_pricing WHERE model={source} '
             'ON CONFLICT(model) DO NOTHING;']

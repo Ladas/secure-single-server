@@ -59,6 +59,19 @@ class PreparationTest(unittest.TestCase):
         router = next(f for f in edge['filters'] if f['filter'] == 'router')
         self.assertIn({'path': '/api/v1/admin/models', 'cluster': 'dashboard'}, router['routes'])
 
+    def test_pricing_management_routes_use_dashboard_authentication(self):
+        original, models = prepare.mock_inputs()
+        result = prepare.render(original, models)
+        edge = next(c for c in result['filter_chains'] if c['name'] == 'edge')
+        router = next(f for f in edge['filters'] if f['filter'] == 'router')
+        guard = next(f for f in edge['filters'] if f.get('body') == 'Route not available')
+        for path in ('/api/v1/admin/pricing-discounts', '/api/v1/admin/pricing/refresh',
+                     '/api/v1/admin/pricing/reprice'):
+            self.assertIn({'path': path, 'cluster': 'dashboard'}, router['routes'])
+            self.assertIn({'unless': {'path': path}}, guard['conditions'])
+        self.assertIn({'path_prefix': '/api/v1/admin/pricing/reprice/', 'cluster': 'dashboard'}, router['routes'])
+        self.assertNotIn({'path_prefix': '/api/v1/admin/', 'cluster': 'dashboard'}, router['routes'])
+
     def test_postgres_bootstrap_is_idempotent_and_quotes_generated_passwords(self):
         sql = prepare.postgres_bootstrap("metering'pw", 'maas-pw')
         self.assertEqual(sql.count('\\gexec'), 4)

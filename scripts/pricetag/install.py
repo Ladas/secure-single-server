@@ -487,8 +487,7 @@ if __name__ == '__main__':
         if LOG_PATH:
             print(f'Details: sudo tail -n 80 {LOG_PATH}', file=sys.stderr)
         print('No files or volumes were automatically deleted. Fix the failed stage and use the manual steps; '
-              'if configuration was already prepared, inspect it before running sudo scripts/pricetag/start. '
-              'Missing reviewed price: docs/quickstarts/remote-gateway-pricetag/pricing.md#recover-a-first-install-with-missing-prices', file=sys.stderr)
+              'if configuration was already prepared, inspect it before running sudo scripts/pricetag/start.', file=sys.stderr)
         sys.exit(1)
     finally:
         if LOG is not None:

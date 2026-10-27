@@ -128,8 +128,8 @@ sudo scripts/pricetag/start
 This creates the administrator only. [Create an inference user](users.md#create-a-user)
 next, or omit `--no-sample-users` during preparation to create Alice and Bob.
 
-If startup reports a missing price, follow [price recovery](pricing.md#recover-a-first-install-with-missing-prices),
-then rerun `sudo scripts/pricetag/start`. Do not repeat preparation.
+Missing prices do not block startup; PriceTag uses [fallback estimates](pricing.md#missing-prices).
+Inspect the rates before real-provider inference.
 
 Preparation refuses existing directories. Startup installs persistent systemd
 Quadlets for PostgreSQL, MaaS, PriceTag and Praxis. Do not rerun preparation over

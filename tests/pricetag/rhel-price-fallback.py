@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test bootstrap price recovery with session-local tables on the mock RHEL host."""
+"""Test bootstrap fallback pricing with session-local tables on the mock RHEL host."""
 import importlib.machinery
 import importlib.util
 from pathlib import Path
@@ -30,9 +30,13 @@ CREATE TEMP TABLE usage_events (LIKE public.usage_events INCLUDING ALL);
 '''
     models = [{'id': 'test/missing-price', 'model': 'missing-price', 'provider': 'external'}]
     sql = prepare.bootstrap(models, {}, 5)
-    failed = subprocess.run(command, input=setup + sql, text=True, capture_output=True, cwd='/tmp')
-    assert failed.returncode != 0 and 'Missing reviewed price' in failed.stderr, failed.stderr
-    print('PASS: missing price blocks bootstrap')
+    fallback_query = "SELECT count(*) FROM model_pricing WHERE model='test/missing-price';"
+    missing = subprocess.run(command, input=setup + sql + fallback_query,
+                             text=True, capture_output=True, cwd='/tmp')
+    assert missing.returncode == 0, missing.stderr
+    assert 'PriceTag fallback rates apply' in missing.stderr, missing.stderr
+    assert missing.stdout.strip().splitlines()[-1] == '0', missing.stdout
+    print('PASS: missing price permits bootstrap, warns, and does not invent a rate')
     seed = '''INSERT INTO model_pricing(model,provider,input_cost_per_mtok,output_cost_per_mtok,
 cache_write_cost_per_mtok,cache_read_cost_per_mtok) VALUES ('missing-price','external',1,2,0,0);
 '''
@@ -41,7 +45,7 @@ cache_write_cost_per_mtok,cache_read_cost_per_mtok) VALUES ('missing-price','ext
                                text=True, capture_output=True, cwd='/tmp')
     assert recovered.returncode == 0, recovered.stderr
     assert recovered.stdout.strip().splitlines()[-1] == 't', recovered.stdout
-    print('PASS: reviewed source rates allow retry and populate alias rates')
+    print('PASS: available source rates populate alias rates')
 
 
 if __name__ == '__main__':

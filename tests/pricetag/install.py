@@ -43,7 +43,6 @@ class InstallTest(unittest.TestCase):
             result = subprocess.run(['bash', str(script), directory], text=True, capture_output=True)
             self.assertEqual(result.returncode, 1)
             self.assertIn('sudo scripts/pricetag/start', result.stdout)
-            self.assertIn('pricing.md#recover-a-first-install', result.stdout)
             self.assertFalse((root / 'bootstrap.done').exists())
 
     def test_summary_shows_all_images_and_provider_choices(self):

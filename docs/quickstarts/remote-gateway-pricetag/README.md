@@ -73,9 +73,8 @@ Choose providers, enter their keys at hidden prompts, then confirm with `install
 
 External setup accepts one or both APIs; one key must cover the selected APIs.
 Credentials and model presets are checked before installation. Prices are loaded
-at service startup; a missing price stops activation. Follow the
-[missing-price recovery steps](pricing.md#recover-a-first-install-with-missing-prices)
-to resume without reinstalling.
+at service startup. Missing prices use [PriceTag fallback rates](pricing.md#missing-prices)
+and do not block installation. Review rates before using real providers.
 For a DNS certificate, set `GATEWAY_HOST` to that name before running the installer.
 Existing deployments are refused.
 

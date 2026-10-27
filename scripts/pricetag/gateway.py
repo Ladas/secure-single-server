@@ -16,9 +16,10 @@ DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me'
              '/api/v1/dashboard/models', '/api/v1/dashboard/tools',
              '/api/v1/dashboard/timeline', '/api/v1/dashboard/recent',
              '/api/v1/admin/safety-net', '/api/v1/admin/models', '/api/v1/admin/partner-users',
-             '/api/v1/admin/model-policies', '/api/v1/org/scope',
+             '/api/v1/admin/model-policies', '/api/v1/admin/pricing-discounts',
+             '/api/v1/admin/pricing/refresh', '/api/v1/admin/pricing/reprice', '/api/v1/org/scope',
              '/api/v1/org/usage', '/api/v1/org/person', '/api/v1/org/charts']
-DASHBOARD_PREFIXES = ['/api/v1/admin/partner-users/']
+DASHBOARD_PREFIXES = ['/api/v1/admin/partner-users/', '/api/v1/admin/pricing/reprice/']
 
 
 def render(original, models, origins=None):

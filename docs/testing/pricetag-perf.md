@@ -154,17 +154,32 @@ disk, service restarts, PostgreSQL/WAL size and report contents. A single
 snapshot does not establish peak usage or sustained capacity. Local laptop runs
 are not substitutes for RHEL measurements.
 
-## Missing-price recovery check
+## Pricing administration check
+
+```console
+sudo python3 tests/pricetag/rhel-pricing.py --output /root/pricetag-admin/pricing-check
+```
+
+Use a new output directory. This mock-only test checks admin/ordinary/anonymous
+access, attempts to save the unchanged discount policy, refreshes source prices, and creates
+a historical-repricing preview. The known upstream discount-save constraint
+error is recorded as `known_bug`, not a successful save. Other failures stop the
+test. It does not apply historical corrections. Catalog
+refresh requires outbound access and may update source prices; gateway alias
+snapshots remain unchanged.
+
+## Missing-price fallback check
 
 On the mock-only host:
 
 ```console
-sudo python3 tests/pricetag/rhel-price-recovery.py
+sudo python3 tests/pricetag/rhel-price-fallback.py
 ```
 
-This tests rejection of an unpriced model and successful alias creation after
-adding source rates. It uses session-local PostgreSQL tables; deployment prices,
-users and usage stay unchanged. See [first-install recovery](../quickstarts/remote-gateway-pricetag/pricing.md#recover-a-first-install-with-missing-prices).
+This checks that an unpriced model does not block bootstrap, emits a warning,
+and gets an alias price when source rates exist. It uses session-local PostgreSQL
+tables; deployment prices, users and usage stay unchanged.
+See [fallback rates](../quickstarts/remote-gateway-pricetag/pricing.md#missing-prices).
 
 ## USD quota probe
 

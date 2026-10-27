@@ -128,7 +128,9 @@ models with recorded usage in the selected scope and period. Pricing can contain
 both an upstream ID and its gateway alias; these are separate rate records,
 not duplicate charges.
 
-[Inspect or change rates](pricing.md) before refreshing models.
+Use the [pricing UI and APIs](pricing.md) to inspect rates and manage source-catalog
+discounts. Adding an arbitrary missing price still requires the documented SSH
+fallback; existing alias prices are not changed by catalog refresh.
 
 ## 4. Apply the external models to Praxis
 
