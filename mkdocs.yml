@@ -1,6 +1,6 @@
 site_name: Secure single-server AI harness
 site_description: >-
-  Run OpenCode and OpenClaw on one dedicated RHEL 9 host with OpenShell,
+  Run OpenCode and OpenClaw on one dedicated RHEL 9.8+ host with OpenShell,
   Praxis, and bootc.
 site_url: https://redhat-et.github.io/secure-single-server/
 repo_url: https://github.com/redhat-et/secure-single-server

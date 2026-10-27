@@ -10,7 +10,7 @@ repository; the guides below are separated by the question they answer.
    [Architecture overview](quickstarts/architecture-walkthrough/README.md) to
    understand the component roles, model access paths, and system boundaries.
 2. **Deploy a sandboxed harness.** Use
-   [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.4/docs) through the
+   [OpenShell](https://github.com/NVIDIA/OpenShell/tree/v0.1.5/docs) through the
    [manual container guide](quickstarts/openshell-single-server/manual.md) or
    [bootc deployment guide](quickstarts/openshell-single-server/bootc.md) to deploy [OpenCode](https://github.com/anomalyco/opencode) or
    [OpenClaw](https://github.com/openclaw/openclaw) on one trusted RHEL host.
@@ -92,8 +92,8 @@ For maintainers: [build and publish standalone MaaS and PriceTag images](develop
 
 - [OpenCode](https://github.com/anomalyco/opencode)
 - [OpenClaw](https://github.com/openclaw/openclaw)
-- [OpenShell documentation](https://github.com/NVIDIA/OpenShell/tree/v0.1.4/docs)
-  and [sandbox overview](https://github.com/NVIDIA/OpenShell/blob/v0.1.4/docs/how-it-works/sandboxes/overview.mdx)
+- [OpenShell documentation](https://github.com/NVIDIA/OpenShell/tree/v0.1.5/docs)
+  and [sandbox overview](https://github.com/NVIDIA/OpenShell/blob/v0.1.5/docs/how-it-works/sandboxes/overview.mdx)
 - [Praxis framework](https://github.com/praxis/praxis)
 - [Praxis experimental gateway](https://github.com/praxis-proxy/experimental)
 - [llm-d-sc semantic classifier](https://github.com/llm-d-incubation/llm-d-semantic-classifier)
