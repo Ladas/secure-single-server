@@ -18,7 +18,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 MAAS_COMMIT = '6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d'
-METERING_COMMIT = '49e75dc57c9081b5d2bb7e3cfbb4e1099d0b1a36'
+METERING_COMMIT = '666770c4e31e035c1de236490bbff9dfffe7e047'
 MAAS_REPO = 'https://github.com/Ladas/models-as-a-service.git'
 MAAS_BRANCH = 'feat/standalone-runtime-minimal'
 METERING_REPO = 'https://github.com/Ladas/pricetag-metering.git'
@@ -26,7 +26,7 @@ METERING_BRANCH = 'feat/standalone-demo-reuse-upstream-ui'
 PRAXIS_IMAGE = 'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
 PRAXIS_REVISION = '5667c4acecd0981ae5114cbbf2ee3dcccec9c248'
 MAAS_IMAGE = 'localhost/pricetag-maas:standalone'
-METERING_IMAGE = 'localhost/pricetag-metering:demo-49e75dc'
+METERING_IMAGE = 'localhost/pricetag-metering:demo-666770c'
 PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:5ca86edad1182787dc391b3486e46f0b83fc621e294b365a74a7b173fbf3631c'
 PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:62a8610521f3d7f5530a0d6dab7bf17cb47658232c2b0a27b16820cfac9d02b5'
 CACHE = Path('/var/cache/pricetag-installer')

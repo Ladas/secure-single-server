@@ -77,7 +77,7 @@ Choose providers, enter their keys at hidden prompts, then confirm with `install
 
 External setup accepts one or both APIs; one key must cover the selected APIs.
 Credentials and model presets are checked before installation. Prices are loaded
-at service startup. Missing prices use [PriceTag fallback rates](pricing.md#missing-prices)
+at service startup. Missing prices use [PriceTag fallback rates](pricing.md#missing-price-fallback)
 and do not block installation. Review rates before using real providers.
 For a DNS certificate, set `GATEWAY_HOST` to that name before running the installer.
 Existing deployments are refused.
@@ -92,19 +92,21 @@ it without reviewing its contents.
 
 ## 4. Open the dashboards
 
-In the installation shell, print the login URL and admin key:
+In the installation shell on macOS, print the login URL and copy the admin key to the clipboard without displaying it:
 
 ```console
 printf 'https://%s:8443/login\n' "$GATEWAY_HOST"
 ssh "${SSH_OPTS[@]}" "$RHEL_HOST" \
-  'sudo cat /root/pricetag-admin/admin.key'
+  'sudo cat /root/pricetag-admin/admin.key' | pbcopy
 ```
 
 Open the URL, accept the deployment certificate and paste the admin key.
+Clear the clipboard after login with `pbcopy < /dev/null`. Clipboard managers may retain copied keys.
 Open **Administration** at `/admin`: **Users** handles onboarding and managers;
 **Safety Net** handles budgets. **My keys** at `/management` handles personal keys.
 Follow the [UI demo walkthrough](demo.md) for the
-admin, personal and team views, spending controls and pricing.
+onboarding, personal/team views, read-only impersonation, budgets, pricing and
+key replacement/offboarding.
 
 ## 5. Prepare the local connection
 

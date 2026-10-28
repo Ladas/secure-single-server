@@ -80,6 +80,18 @@ path in the [OpenCode setup](clients.md):
 chmod 600 /path/to/pricetag.key
 ```
 
+## Inspect a user's view
+
+As superadmin, select the user in **Administration → Users → Issue onboarding key**
+and choose **View selected user’s usage** or **View selected user’s team**.
+Confirm **Continue**; no key needs to be issued or copied. The **Viewing as** banner
+identifies the target. Use **Back to admin view** and confirm to restore your view.
+
+Impersonation is read-only and follows the target's current identity/team scope.
+It does not allow administrative changes or key issuance. To demonstrate the
+user's actual login and key management, sign in with their key in a separate
+browser profile. See the [demo walkthrough](demo.md#3-inspect-a-users-view-through-impersonation).
+
 ## Rotate or revoke a key
 
 ```console
@@ -155,7 +167,8 @@ reported old IDs after checking their status.
 | Issue onboarding keys | Administration → Users → Issue onboarding key |
 | Create/list/revoke your own keys | My keys (`/management`); SSH `scripts/pricetag/maas-key` remains available |
 | Configure providers, credentials and advertised models | SSH [provider helper](providers.md) |
-| View personal/team spending | My usage / Team usage; team scope follows manager relationships |
+| View personal/team spending | Usage is personal for users/managers; My team follows manager relationships |
+| Inspect a user’s scoped view without their key | Superadmin View / Team links; read-only impersonation with confirmed return |
 
 The default monthly allowance applies separately to each user. An individual
 allowance overrides that default. This deployment starts with an empty
