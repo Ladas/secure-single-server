@@ -8,8 +8,7 @@ import stat
 
 from metering_admin import request
 
-RESOURCES = ('users', 'budgets', 'prices', 'policy', 'keys',
-             'gateway/config', 'gateway/status', 'gateway/discover')
+RESOURCES = ('users', 'budgets', 'prices', 'policy', 'keys')
 
 
 def main():
@@ -50,8 +49,6 @@ def main():
         # mutation failed server-side. Never automatically repeat a key issuance.
         raise ValueError('management request/output failed; inspect server state before retrying; response file retained') from None
     print('Response saved privately: ' + str(args.output))
-    if args.resource == 'gateway/config' and args.method == 'PUT':
-        print('Activation is asynchronous; query gateway/status and verify its operation ID before assuming success.')
 
 
 if __name__ == '__main__':

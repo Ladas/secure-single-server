@@ -24,17 +24,6 @@ from gateway import render as gateway
 
 
 class SetupTest(unittest.TestCase):
-    def test_legacy_mutation_rejects_adapter_managed_configuration(self):
-        with tempfile.TemporaryDirectory() as directory:
-            deploy = Path(directory)
-            (deploy / 'gateway-management.json').write_text('{}')
-            with patch.object(setup, 'DEPLOY', deploy), \
-                    patch.object(setup, 'collect_credential', side_effect=AssertionError('must not prompt')):
-                with self.assertRaisesRegex(ValueError, 'Account management'):
-                    setup.add_provider('external', replace=True)
-                with self.assertRaisesRegex(ValueError, 'Account management'):
-                    setup.export()
-
     def test_list_shows_active_models_without_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
             deploy = Path(directory)

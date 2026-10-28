@@ -633,16 +633,8 @@ def collect_credential(name, urls, key_file=None):
     return key
 
 
-def require_legacy_configuration():
-    if (DEPLOY / 'gateway-management.json').exists():
-        raise ValueError('Gateway configuration is managed through Account management; '
-                         'use its provider/model UI or management API instead of legacy provider files')
-
-
 def add_provider(name, urls=None, replace=False, check_auth=False, check_inference=None,
                  refresh=False, key_file=None, apis=None, list_models=False, listing_options=None):
-    if not (check_auth or check_inference or list_models):
-        require_legacy_configuration()
     if not key_file and not sys.stdin.isatty():
         raise ValueError('Run interactively over SSH; never pipe provider keys')
     STATE.mkdir(mode=0o700, exist_ok=True)
@@ -699,7 +691,6 @@ def save_provider(name, settings, key, replace=False, refresh=False):
 
 
 def export():
-    require_legacy_configuration()
     import yaml
     from provider_config import render
     from unified_config import validate

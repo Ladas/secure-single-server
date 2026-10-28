@@ -11,26 +11,14 @@ An external provider is a hosted service or another gateway. Both APIs can share
 an endpoint or use separate endpoints, but must accept the same key. GPT models
 using Responses need `/v1/responses`, not just Chat compatibility.
 
-The legacy installer helper supports these two fixed profiles. Choose them during
-installation; this helper cannot add arbitrary profile names. The management
-candidate supports additional providers through its UI/API, restricted to
-host-approved origins. Older `pricetag/` deployments use the legacy `pricetag` command.
+The installer supports these two fixed profiles. Choose them during installation;
+the helper cannot add arbitrary profile names. Older `pricetag/` deployments use
+the legacy `pricetag` command.
 
 ## Reduced demo image
 
-The reduced PriceTag demo image has no provider/model editor or adapter API. Keep
-provider setup in the host CLI workflow below. Do not install the optional adapter
-with that image: it would disable legacy helper writes without providing the
-replacement PriceTag API. User, budget, key and price UI controls are separate.
-
-## Full management UI deployments
-
-If the gateway-management adapter is installed, use **Account management →
-Providers and models** to discover models, replace credentials, edit aliases/limits
-and apply changes. Its management API uses the same revision checks and activation
-path; see [Management CLI and API](management-api.md). The legacy provider helper refuses configuration writes in this mode, so
-saved installer inputs cannot overwrite later UI changes. Read-only discovery
-below remains available.
+Provider and model routing is configured through the host CLI below. User,
+budget, key and pricing management is available in the browser.
 
 ## Refresh models on a CLI-managed deployment
 

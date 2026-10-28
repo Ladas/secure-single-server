@@ -46,7 +46,7 @@ def main():
     navigation = {'/', '/login', '/welcome', '/logout', '/me'}
     protected = [p for p in gateway.DASHBOARD if p not in navigation]
     protected += ['/api/v1/management/' + p for p in
-                  ('users', 'budgets', 'prices', 'policy', 'keys', 'gateway/config', 'gateway/status')]
+                  ('users', 'budgets', 'prices', 'policy', 'keys')]
     protected += ['/me/keys/test-id', '/api/v1/admin/partner-users/test-id',
                   '/api/v1/admin/pricing/reprice/test-id']
     for headers in ({}, spoof):

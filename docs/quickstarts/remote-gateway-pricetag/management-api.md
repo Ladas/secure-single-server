@@ -5,10 +5,6 @@ For automation, `scripts/pricetag/manage` calls the private loopback API with th
 host's protected service credential. It does not print credentials or response
 bodies, and it refuses to overwrite response files.
 
-Provider/model `gateway/*` APIs described below require the optional **full**
-management image and adapter. The reduced demo supports users, budgets, prices,
-policy and keys; manage providers through the host CLI instead.
-
 ## Remote HTTPS client
 
 From a checkout on your workstation, use the same key and CA as browser/harness
@@ -53,8 +49,6 @@ Run from the installed repository **on RHEL**:
 sudo install -d -m 0700 /root/gateway-management
 sudo python3 scripts/pricetag/manage GET users \
   --output /root/gateway-management/users.json
-sudo python3 scripts/pricetag/manage GET gateway/config \
-  --output /root/gateway-management/gateway.json
 ```
 
 Choose a new output filename for each call. Inspect files privately with
@@ -83,39 +77,13 @@ sudo python3 scripts/pricetag/manage PUT budgets \
   --output /root/gateway-management/budget-result.json
 ```
 
-The same resource names are available for `users`, `prices`, `policy`, `keys`,
-`gateway/config`, `gateway/status` and `gateway/discover`. They use the candidate
+The same resource names are available for `users`, `prices`, `policy` and `keys`. They use the candidate
 PriceTag management API schemas. The server validates allowed methods and fields;
 this client does not bypass authorization or manipulate database tables.
 
-<details>
-<summary>Edit provider/model configuration through the same API as the UI</summary>
 
-Transform the saved configuration into an update request:
-
-```sh
-sudo python3 -c 'import json, os; os.umask(0o077); p="/root/gateway-management/"; current=json.load(open(p+"gateway.json")); json.dump({"revision":current["revision"],"configuration":current["configuration"],"credentials":{}},open(p+"gateway-input.json","x"),indent=2)'
-sudoedit /root/gateway-management/gateway-input.json
-sudo python3 scripts/pricetag/manage PUT gateway/config \
-  --input /root/gateway-management/gateway-input.json \
-  --output /root/gateway-management/activation.json
-sudo python3 scripts/pricetag/manage GET gateway/status \
-  --output /root/gateway-management/activation-status.json
-```
-
-Edit providers/models inside `configuration`. Supply a new provider credential in
-`credentials` under its provider name using the private editor; never put it in
-command arguments. Existing credentials need not be resubmitted. Origins must
-already be approved by the host administrator.
-
-Activation is asynchronous. Compare the operation IDs in the two response files;
-`state: complete` is success, `running` needs another status query with a new output
-filename, and `failed` needs inspection. A restart can lose PriceTag's operation
-status; reload configuration and verify health instead of blindly retrying.
-
-</details>
 
 **On errors:** inspect server state before repeating a mutation. A transport or
-output error does not prove that key issuance or activation failed server-side.
+output error does not prove that key issuance failed server-side.
 The client retains its private response file for inspection and does not retry.
-Remove request files containing provider credentials when no longer needed.
+Remove private request files when no longer needed.

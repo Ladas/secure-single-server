@@ -50,7 +50,8 @@ class InstallTest(unittest.TestCase):
         from prepare import POSTGRES
         for mode in ('real', 'mock'):
             with self.subTest(mode=mode):
-                flags = ['--mode', mode, '--hostname', 'gateway.example', '--plan']
+                flags = ['--mode', mode, '--hostname', 'gateway.example', '--plan',
+                         '--image-mode', 'published', '--metering-image', installer.PUBLISHED_METERING_IMAGE]
                 if mode == 'real':
                     flags += ['--provider', 'openai', '--provider', 'external', '--external-api', 'both']
                 output = io.StringIO()
@@ -109,16 +110,16 @@ class InstallTest(unittest.TestCase):
     def image_args(self, *extra):
         return installer.parse_args(['--mode', 'mock', '--hostname', 'gateway.example', '--plan', *extra])
 
-    def test_default_images_are_published_and_source_defaults_are_explicit(self):
+    def test_demo_source_defaults_exclude_optional_followup(self):
         args = self.image_args()
-        self.assertEqual(args.image_mode, 'published')
-        self.assertEqual(args.maas_image, installer.PUBLISHED_MAAS_IMAGE)
-        self.assertEqual(args.metering_image, installer.PUBLISHED_METERING_IMAGE)
+        self.assertEqual(args.image_mode, 'source')
+        self.assertEqual(args.metering_branch, 'feat/standalone-management-demo')
+        self.assertEqual(installer.METERING_REPO, 'https://github.com/Ladas/pricetag-metering.git')
         source = self.image_args('--image-mode', 'source')
         self.assertEqual(source.maas_branch, installer.MAAS_BRANCH)
-        self.assertIsNone(source.metering_branch)
+        self.assertEqual(source.metering_branch, installer.METERING_BRANCH)
         self.assertEqual(source.metering_revision, installer.METERING_COMMIT)
-        for flags in (['--maas-branch', 'feature'],
+        for flags in (['--image-mode', 'published'],
                       ['--image-mode', 'source', '--maas-branch', '../bad'],
                       ['--image-mode', 'source', '--maas-branch', 'feature', '--maas-revision', 'a' * 40]):
             with self.assertRaises(SystemExit):
@@ -243,7 +244,7 @@ class InstallTest(unittest.TestCase):
 
     def test_interactive_selection_accepts_menu_numbers(self):
         with patch.object(installer.sys.stdin, 'isatty', return_value=True), \
-                patch('builtins.input', side_effect=['2', '2', '2', '1']):
+                patch('builtins.input', side_effect=['2', '2', '2', '2']):
             args = installer.parse_args(['--hostname', 'gateway.example'])
         self.assertEqual(args.provider, ['external'])
         self.assertEqual(args.external_api, 'anthropic')
@@ -369,7 +370,7 @@ class InstallTest(unittest.TestCase):
 
     def test_mock_guard_accepts_managed_mock_aliases_only(self):
         sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
-        import gateway_management
+        import demo_config
         import gateway
         document = {'providers': [{'name': 'mock', 'urls': {
             'openai': 'http://pricetag-provider:18080/v1',
@@ -380,7 +381,7 @@ class InstallTest(unittest.TestCase):
             path = Path(directory)
             (path / 'quadlets').mkdir(); (path / 'gateway').mkdir()
             (path / 'models.json').write_text(json.dumps(document['models']))
-            rendered = gateway.render(gateway_management.native_inputs(document), document['models'])
+            rendered = gateway.render(demo_config.native_inputs(document), document['models'])
             (path / 'gateway/gateway.json').write_text(json.dumps(rendered))
             unit = path / 'quadlets/pricetag-gateway.container'
             unit.write_text('Network=pricetag-mock.network\nSecret=praxis-mock-api-key-v2,type=env,target=CUSTOM_MOCK_API_KEY\n')

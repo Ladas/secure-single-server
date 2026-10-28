@@ -7,12 +7,9 @@ OpenCode with a user key and a monthly USD budget.
 SSH/8443 from your IP; Git, Python 3 and OpenCode on your workstation.
 The tested VM has 8 vCPUs, 32 GiB RAM and 150 GiB disk. No GPU is needed.
 
-> **Management candidate:** this branch requires the matching, unpublished
-> PriceTag management changes. The published image defaults do not contain those
-> APIs. For the qualified mock UI demo, follow the
-> [candidate installation](../../testing/pricetag-management-demo.md).
-> The general installation below must use a compatible image before this branch
-> is released; it is not currently a verified path with the published defaults.
+> **Management demo:** the installer currently builds the reviewed MaaS and
+> PriceTag demo branches. Published management images are pending; see
+> [image options](images.md). The optional provider editor is not included.
 
 ## 1. Set the connection
 
@@ -66,14 +63,14 @@ Choose providers, enter their keys at hidden prompts, then confirm with `install
 - **Providers:** OpenAI, an external OpenAI-compatible/Messages service, or both.
 - **Users:** admin is required; Alice/Bob are optional. Choose **Admin only** to
   [create your own user](users.md#create-a-user) afterward.
-- **Defaults:** real providers, published images, $5/month per ordinary user.
+- **Defaults:** real providers, demo source builds, $5/month per ordinary user.
 
 <details>
 <summary>Installer options and logs</summary>
 
 | Option | Purpose |
 | --- | --- |
-| `--no-sample-users` | Create admin only. |
+| `--no-sample-users` | Create admin only; onboard users in Account management. |
 | `--monthly-usd 10` | Set the default per-user monthly allowance. |
 | `--image-mode source` | Build application images; see [image options](images.md). |
 | `--mode mock` | Use synthetic providers for [benchmarks](../../testing/pricetag-perf.md). |
@@ -104,12 +101,16 @@ ssh "${SSH_OPTS[@]}" "$RHEL_HOST" \
 ```
 
 Open the URL, accept the deployment certificate and paste the admin key.
-Personal dashboards are pending upstream; use the admin dashboard for usage.
+Open **Account management** at `/management` to create users, assign managers,
+set budgets and issue keys. Follow the [UI demo walkthrough](demo.md) for the
+admin, personal and team views, spending controls and pricing.
 
 ## 5. Prepare the local connection
 
 In the **workstation installation shell**, choose your user on the first line.
-This copies the CA/key and prints a launch command for any project shell:
+For installer/CLI-created users, this copies the CA/key and prints a launch command
+for any project shell. Browser-issued keys are shown once: save yours privately to
+`$CLIENT_DIR/$INFERENCE_USER.key` instead of the key-copy SSH command below.
 
 ```console
 INFERENCE_USER=alice  # Change to a user you created; do not use admin.

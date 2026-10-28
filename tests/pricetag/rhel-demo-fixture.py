@@ -44,10 +44,13 @@ def main():
         parser.error('output already exists; use --resume to reuse its manifest and keys')
     os.umask(0o077)
     deploy = Path('/etc/praxis-pricetag')
-    policy = json.loads((deploy / 'gateway-management-policy.json').read_text())
-    allowed = {'http://pricetag-provider:18080', 'http://pricetag-provider:18081'}
-    if policy != {'approved_origins': list(policy['approved_origins']), 'mock': True} or set(policy['approved_origins']) != allowed:
-        raise ValueError('requires the exact mock-only management policy')
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader('demo_benchmark', str(Path(__file__).resolve().parents[2] / 'scripts/pricetag/benchmark'))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    benchmark = importlib.util.module_from_spec(spec)
+    loader.exec_module(benchmark)
+    benchmark.require_mock(deploy)
     context = ssl.create_default_context(cafile=str(deploy / 'ca.pem'))
     origin = next(line.split('=', 1)[1] for line in (deploy / 'metering.env').read_text().splitlines()
                   if line.startswith('MANAGEMENT_PUBLIC_ORIGIN='))
@@ -75,14 +78,9 @@ def main():
     except urllib.error.HTTPError as error:
         if error.code != 302 or not any(c.name == 'metering_session' for c in jar):
             raise ValueError('administrator login failed') from None
-    configuration = call('GET', '/api/v1/management/gateway/config')['configuration']
-    if not configuration['providers'] or any(p['name'] != 'mock' or
-            p['urls'] != {'openai': 'http://pricetag-provider:18080/v1', 'anthropic': 'http://pricetag-provider:18081'}
-            for p in configuration['providers']):
-        raise ValueError('refusing non-mock gateway configuration')
     expected = {'mock/fixture', 'mock/demo-cheap'}
-    if not expected <= {m['id'] for m in configuration['models']}:
-        raise ValueError('configure mock/fixture and mock/demo-cheap through the administrator UI first')
+    if not expected <= {m['id'] for m in json.loads((deploy / 'models.json').read_text())}:
+        raise ValueError('install the synthetic demo provider configuration first')
     if args.resume or args.cleanup:
         if args.output.is_symlink() or args.output.stat().st_mode & 0o077:
             raise ValueError('fixture directory must be private')

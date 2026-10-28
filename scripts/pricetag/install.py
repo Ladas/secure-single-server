@@ -18,14 +18,15 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 MAAS_COMMIT = '6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d'
-METERING_COMMIT = 'a33b90ad1aea66479dbff99444ca819498589982'
+METERING_COMMIT = '3f8923d56e05d421e9d3460b2d05e4878b11b805'
 MAAS_REPO = 'https://github.com/Ladas/models-as-a-service.git'
 MAAS_BRANCH = 'feat/standalone-runtime-minimal'
-METERING_REPO = 'https://github.com/redhat-et/pricetag-metering.git'
+METERING_REPO = 'https://github.com/Ladas/pricetag-metering.git'
+METERING_BRANCH = 'feat/standalone-management-demo'
 PRAXIS_IMAGE = 'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
 PRAXIS_REVISION = '5667c4acecd0981ae5114cbbf2ee3dcccec9c248'
 MAAS_IMAGE = 'localhost/pricetag-maas:standalone'
-METERING_IMAGE = 'localhost/pricetag-metering:upstream-a33b90a'
+METERING_IMAGE = 'localhost/pricetag-metering:demo-3f8923d'
 PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:5ca86edad1182787dc391b3486e46f0b83fc621e294b365a74a7b173fbf3631c'
 PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:62a8610521f3d7f5530a0d6dab7bf17cb47658232c2b0a27b16820cfac9d02b5'
 CACHE = Path('/var/cache/pricetag-installer')
@@ -268,16 +269,18 @@ def parse_args(argv=None):
             args.image_mode = 'published'
         elif interactive and not args.yes:
             args.image_mode = choice('Application images:', {
-                'published': 'Use published images (recommended; faster)',
-                'source': 'Build from source (test a branch or commit)'}, 'published')
+                'published': 'Use compatible published images (explicit digests required)',
+                'source': 'Build the management demo branches'}, 'source')
         else:
-            args.image_mode = 'published'
+            args.image_mode = 'source'
+    if args.image_mode == 'published' and not args.metering_image:
+        p.error('the management demo requires a compatible --metering-image digest; use --image-mode source until publication')
     for component in ('maas', 'metering'):
         revision = getattr(args, component + '_revision')
         branch = getattr(args, component + '_branch')
-        if args.image_mode == 'source' and component == 'maas' and not (revision or branch):
-            branch = MAAS_BRANCH
-            args.maas_branch = branch
+        if args.image_mode == 'source' and not (revision or branch):
+            branch = MAAS_BRANCH if component == 'maas' else METERING_BRANCH
+            setattr(args, component + '_branch', branch)
         if branch:
             if args.image_mode != 'source':
                 p.error('branch selection requires --image-mode source')

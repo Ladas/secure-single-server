@@ -131,7 +131,7 @@ reported old IDs after checking their status.
 | Create users or change an individual allowance | Account management → Users / Monthly user budgets; SSH `scripts/pricetag/user` uses the same PriceTag APIs |
 | Issue onboarding keys | Account management → Issue onboarding key |
 | Create/list/revoke your own keys | Account management → My keys; SSH `scripts/pricetag/maas-key` remains available |
-| Configure providers, credentials and advertised models | Account management → Providers and gateway models, when the private adapter is installed |
+| Configure providers, credentials and advertised models | SSH [provider helper](providers.md) |
 | View personal/team spending | My usage / Team usage; team scope follows manager relationships |
 
 The default monthly allowance applies separately to each user. An individual
@@ -143,7 +143,7 @@ post-limit exception list, so no model bypasses the USD limit.
 <details>
 <summary>Administration boundaries and upstream API gaps</summary>
 
-- The matching PriceTag management candidate and private gateway adapter are required.
+- The matching PriceTag demo image is required.
   Published upstream images do not yet provide this complete contract.
 - MaaS owns keys; PriceTag owns identities, usage and budgets. Public browser
   management is authenticated by PriceTag; MaaS lifecycle endpoints stay private.

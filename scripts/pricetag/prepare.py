@@ -37,7 +37,7 @@ def vllm_only(original, models):
 
 def mock_inputs(managed=False):
     if managed:
-        from gateway_management import mock_configuration, native_inputs
+        from demo_config import mock_configuration, native_inputs
         document = mock_configuration()
         return native_inputs(document), document['models']
     models = [{'id': 'fixture', 'provider': 'vllm', 'model': 'fixture',

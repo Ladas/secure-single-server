@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 
 from install import import_image, preflight, service_prefix, valid_hostname
-from gateway_management import mock_configuration
+from demo_config import mock_configuration
 
 ROOT = Path(__file__).resolve().parents[2]
 INPUTS = Path('/root/pricetag-demo-inputs')
@@ -27,7 +27,6 @@ def main():
     for component in ('praxis', 'maas', 'metering'):
         parser.add_argument('--' + component + '-image', required=True,
                             help='immutable sha256 image ID in root Podman storage')
-    parser.add_argument('--gateway-management', action='store_true', help='optional full-image extension; requires the gateway adapter API in PriceTag')
     parser.add_argument('--plan', action='store_true')
     args = parser.parse_args()
     if not valid_hostname(args.hostname):
@@ -36,7 +35,7 @@ def main():
     if any(not re.fullmatch(r'sha256:[0-9a-f]{64}', image) for image in images):
         parser.error('images must be immutable local sha256 IDs')
     print('Management demo: synthetic providers, admin/alice/bob, $5 monthly budgets')
-    print('Steps: prepare RHEL; import images; prepare/start services' + ('; install management adapter' if args.gateway_management else '; providers remain host-managed'))
+    print('Steps: prepare RHEL; import images; prepare/start services; providers remain host-managed')
     if args.plan:
         return
     preflight('mock')
@@ -74,12 +73,6 @@ def main():
          '--mock-provider', '--managed-mock', '--mock-secret', secret,
          '--price-sources', INPUTS / 'prices.json'])
     run([ROOT / 'scripts/pricetag/start'])
-    if args.gateway_management:
-        run([sys.executable, ROOT / 'scripts/pricetag/install-management',
-             '--configuration', INPUTS / 'configuration.json',
-             '--secret-references', INPUTS / 'secret-references.json', '--mock',
-             '--approved-origin', 'http://pricetag-provider:18080',
-             '--approved-origin', 'http://pricetag-provider:18081'])
     print('Demo services installed. Set illustrative prices and create the 20-user fixture next.')
     print('Administrator key: /root/pricetag-admin/admin.key')
 
