@@ -27,9 +27,11 @@ Pull the same digest-pinned images as the installer:
 PRAXIS_REF=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8
 MAAS_REF=quay.io/redhat-et/secure-single-server-maas-standalone@sha256:0bec6ef57fa5b10a7bef8f4df8d98f932c9d7fc96798f7bfc0cd77b504790fa8
 METERING_REF=quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:02494463ca905e8342c39f707310e4aa2c8a14670625da5c9fdd750e7622220a
-for image in "$PRAXIS_REF" "$MAAS_REF" "$METERING_REF"; do
-  sudo podman pull "$image" || exit 1
-done
+(
+  for image in "$PRAXIS_REF" "$MAAS_REF" "$METERING_REF"; do
+    sudo podman pull "$image" || exit 1
+  done
+)
 ```
 
 Import into the service account and capture immutable local IDs:
@@ -42,9 +44,16 @@ svc() {
     XDG_RUNTIME_DIR="/run/user/$PRICETAG_UID" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$PRICETAG_UID/bus" "$@")
 }
-for image in "$PRAXIS_REF" "$MAAS_REF" "$METERING_REF"; do
-  sudo podman save "$image" | svc podman load || exit 1
-done
+(
+  for image in "$PRAXIS_REF" "$MAAS_REF" "$METERING_REF"; do
+    sudo podman save "$image" | svc podman load || exit 1
+  done
+)
+```
+
+After a successful import, capture the IDs in the same SSH session:
+
+```console
 PRAXIS_ID=$(sudo podman image inspect "$PRAXIS_REF" --format '{{.Id}}')
 MAAS_ID=$(sudo podman image inspect "$MAAS_REF" --format '{{.Id}}')
 METERING_ID=$(sudo podman image inspect "$METERING_REF" --format '{{.Id}}')
