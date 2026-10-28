@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 60
     env:
       MAAS_REVISION: 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-      METERING_REVISION: a33b90ad1aea66479dbff99444ca819498589982
+      METERING_REVISION: 666770c4e31e035c1de236490bbff9dfffe7e047
       MAAS_IMAGE: quay.io/redhat-et/secure-single-server-maas-standalone
       METERING_IMAGE: quay.io/redhat-et/secure-single-server-pricetag-metering
     steps:
@@ -54,7 +54,7 @@ jobs:
               repository=https://github.com/Ladas/models-as-a-service.git
               revision="$MAAS_REVISION"
             else
-              repository=https://github.com/redhat-et/pricetag-metering.git
+              repository=https://github.com/Ladas/pricetag-metering.git
               revision="$METERING_REVISION"
             fi
             git init "$directory"
