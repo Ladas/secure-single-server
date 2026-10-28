@@ -41,7 +41,9 @@ def main():
     else:
         input_cases=[]
         for path in sorted(args.report.glob('r*-u*-l*/requests.json')):
-            input_cases.append({'name':path.parent.name,'phase':json.loads(path.read_text())['phases'][0],
+            report=json.loads(path.read_text())
+            input_cases.append({'name':path.parent.name,'phase':report['phases'][0],
+                'connection_policy':report.get('connection_policy','new TLS connection per request'),
                 'rows':[json.loads(line) for line in (path.parent/'observe.jsonl').read_text().splitlines()]})
     policies={item.get('connection_policy','new TLS connection per request') for item in input_cases}
     connection_label='; '.join(sorted(policies))

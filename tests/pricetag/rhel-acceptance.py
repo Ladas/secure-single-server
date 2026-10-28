@@ -42,7 +42,9 @@ def main():
     url = 'https://localhost:8443'
     origin = next(line.split('=', 1)[1] for line in Path('/etc/praxis-pricetag/metering.env').read_text().splitlines() if line.startswith('MANAGEMENT_PUBLIC_ORIGIN='))
     models = json.loads(Path('/etc/praxis-pricetag/models.json').read_text())
-    selected = next(m for m in models if m['id'] != m['model'] and set(m['apis']) == {'openai', 'anthropic'})
+    selected = next((m for m in models if m['id'] != m['model'] and set(m['apis']) == {'openai', 'anthropic'}), None)
+    if selected is None:
+        p.error('acceptance requires a dual-API model alias; install mock mode with --demo-fixture')
     tls = ssl.create_default_context(cafile='/etc/praxis-pricetag/ca.pem')
     noauth = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
                                          urllib.request.HTTPSHandler(context=tls))

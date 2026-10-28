@@ -13,7 +13,7 @@ over SSH, substituting that VM's public IP or DNS name:
 
 ```console
 cd ~/secure-single-server
-sudo scripts/pricetag/install --mode mock --hostname PERFORMANCE_VM_PUBLIC_IP_OR_DNS --yes
+sudo scripts/pricetag/install --mode mock --demo-fixture --hostname PERFORMANCE_VM_PUBLIC_IP_OR_DNS --yes
 ```
 
 This is a fresh installation, not an update command. It pulls the pinned
@@ -33,6 +33,8 @@ sudo scripts/pricetag/start
 
 Do not run manual preparation after a successful guided install. The fixture
 price source is synthetic test configuration; do not reuse it for real models.
+Manual preparation above supports the benchmark. The acceptance script below
+also checks model aliases and requires the guided install with `--demo-fixture`.
 
 ## One-command benchmark
 
@@ -179,7 +181,7 @@ sudo python3 tests/pricetag/rhel-price-fallback.py
 This checks that an unpriced model does not block bootstrap, emits a warning,
 and gets an alias price when source rates exist. It uses session-local PostgreSQL
 tables; deployment prices, users and usage stay unchanged.
-See [fallback rates](../quickstarts/remote-gateway-pricetag/pricing.md#missing-prices).
+See [fallback rates](../quickstarts/remote-gateway-pricetag/pricing.md#missing-price-fallback).
 
 ## USD quota probe
 

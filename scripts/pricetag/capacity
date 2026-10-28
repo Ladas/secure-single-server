@@ -25,6 +25,31 @@ def load(name):
     return module
 
 
+def suspend_synthetic(prefixes, request):
+    """Suspend only accounts created by this sweep, including partial cases."""
+    if not prefixes:
+        return True
+    try:
+        rows = request('GET', 'users')
+    except Exception as error:
+        print(f'Could not list synthetic accounts for cleanup: {error}', file=sys.stderr)
+        return False
+    clean = True
+    for row in rows:
+        subject = row.get('user_id') if isinstance(row, dict) else None
+        if not isinstance(subject, str):
+            print('Could not identify a user in cleanup response', file=sys.stderr)
+            clean = False
+            continue
+        if any(subject.startswith(prefix + '-') for prefix in prefixes):
+            try:
+                request('PUT', 'users', {'subject': subject, 'active': False})
+            except Exception as error:
+                print(f'Could not suspend synthetic account {subject}: {error}', file=sys.stderr)
+                clean = False
+    return clean
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rates', nargs='+', type=int, default=[30, 1000])
@@ -37,8 +62,10 @@ def main():
     cases = [tuple(map(int, c.split('x'))) for c in args.cases]
     if os.geteuid() or any(not 1 <= u <= 100 or not 1 <= n <= 32 or u*n > 512 for u,n in cases) or not 1 <= args.requests <= 1000 or any(not 1 <= r <= 2000 for r in args.rates):
         parser.error('requires root, 1–100 users, 1–32 streams/user, at most 512 streams, rates 1–2000, requests 1–1000')
-    bench, perf, observer = load('benchmark'), load('perf'), load('observe')
+    bench, observer = load('benchmark'), load('observe')
     bench.require_mock(DEPLOY)
+    sys.path.insert(0,str(ROOT/'scripts/pricetag'))
+    from metering_admin import request
     uid = pwd.getpwnam('praxis-svc').pw_uid
     prefix = ['sudo','-u','praxis-svc','env', f'XDG_RUNTIME_DIR=/run/user/{uid}',f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus']
     os.umask(0o077)
@@ -54,6 +81,7 @@ def main():
     summary = {'mock_only': True, 'generator_on_gateway_host': True, 'streaming': not args.json, 'cases': []}
     (output/'host.json').write_text(json.dumps({'cpu_count':os.cpu_count(),'uname':list(os.uname()),'generator_on_gateway_host':True},indent=2))
     command = [sys.executable, str(ROOT/'scripts/pricetag/perf')]
+    provisioned_prefixes = set()
     def restart():
         subprocess.run(prefix+['systemctl','--user','restart','pricetag-gateway.service'],check=True,cwd='/tmp')
         # Readiness over verified TLS; public catalog is the deployment contract.
@@ -77,7 +105,9 @@ def main():
             for users,lanes in cases:
                 case=output/f'r{rate}-u{users}-l{lanes}'
                 case.mkdir(mode=0o700)
-                subprocess.run(command+['users','--tokens',str(case/'keys'),'--prefix','perf-'+uuid.uuid4().hex[:12],'--count',str(users),'--monthly-usd','10000'],check=True,cwd='/tmp')
+                subject_prefix = 'perf-' + uuid.uuid4().hex[:12]
+                provisioned_prefixes.add(subject_prefix)
+                subprocess.run(command+['users','--tokens',str(case/'keys'),'--prefix',subject_prefix,'--count',str(users),'--monthly-usd','10000'],check=True,cwd='/tmp')
                 baseline=observer.sample(prefix)
                 restarts=bench.check_sample(baseline)
                 request_cmd=command+['run','--url','https://localhost:8443','--ca',str(DEPLOY/'ca.pem'),'--model',model,'--tokens',str(case/'keys'),'--output',str(case/'requests.json'),'--concurrency',str(users),'--lanes',str(lanes),'--requests',str(args.requests),'--think','0','--allow-rate-limited']
@@ -108,15 +138,25 @@ def main():
                 phase=json.loads((case/'requests.json').read_text())['phases'][0]
                 summary['cases'].append({'rate':rate,'burst':rate*4,'directory':case.name,**{k:v for k,v in phase.items() if k!='samples'}})
                 (output/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
-                # Keep accounting, suspend only this case's synthetic accounts.
-                sys.path.insert(0,str(ROOT/'scripts/pricetag'))
-                from metering_admin import request
-                for subject,_ in perf.identities(case/'keys'):
-                    request('PUT','users',{'subject':subject,'active':False})
+                if suspend_synthetic({subject_prefix}, request):
+                    provisioned_prefixes.discard(subject_prefix)
     finally:
-        config_path.write_bytes(original)
-        restart()
-        os.close(lock)
+        failure_in_progress = sys.exc_info()[0] is not None
+        try:
+            # Provisioning can fail after creating an account but before writing
+            # its key. The management API includes these partial cases.
+            cleanup_ok = suspend_synthetic(provisioned_prefixes, request)
+            try:
+                config_path.write_bytes(original)
+                restart()
+            except Exception as error:
+                if not failure_in_progress:
+                    raise
+                print(f'Could not restore original gateway configuration: {error}',file=sys.stderr)
+            if not cleanup_ok and not failure_in_progress:
+                raise RuntimeError('synthetic account cleanup failed; inspect the capacity result directory')
+        finally:
+            os.close(lock)
     print('PASS: capacity sweep and exact accounting; original limiter restored. '+str(output),flush=True)
 
 

@@ -43,7 +43,7 @@ def opencode_model(entry, api):
         model.update(provider={'npm': '@ai-sdk/openai'}, reasoning=True,
                      options={'store': False, 'reasoningEffort': 'medium',
                               'include': ['reasoning.encrypted_content']})
-    elif api == 'anthropic' and re.match(
+    elif api in ('anthropic', 'messages') and re.match(
             r'^claude-(?:(?:opus|sonnet)-(?:4-[678]|5)(?:-|$)|haiku-5(?:-|$))', upstream):
         # OpenCode's automatic binding control is rejected by some Messages
         # gateways. Keep adaptive thinking explicit: a partial thinking object

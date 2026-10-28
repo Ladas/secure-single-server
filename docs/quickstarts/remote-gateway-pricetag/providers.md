@@ -134,7 +134,7 @@ both an upstream ID and its gateway alias; these are separate rate records,
 not duplicate charges.
 
 Use the [pricing UI and APIs](pricing.md) to inspect rates and manage source-catalog
-discounts. Add missing rates through **Account management → Model pricing**. Price the
+discounts. Add missing rates through **Administration → Pricing Discounts → Model pricing**. Price the
 upstream ID recorded in usage; catalog refresh does not synchronize copied aliases.
 
 ## 4. Apply the external models to Praxis

@@ -123,7 +123,7 @@ sudo scripts/pricetag/start
 This creates the administrator only. [Create an inference user](users.md#create-a-user)
 next, or omit `--no-sample-users` during preparation to create Alice and Bob.
 
-Missing prices do not block startup; PriceTag uses [fallback estimates](pricing.md#missing-prices).
+Missing prices do not block startup; PriceTag uses [fallback estimates](pricing.md#missing-price-fallback).
 Inspect the rates before real-provider inference.
 
 Preparation refuses existing directories. Startup installs persistent systemd
