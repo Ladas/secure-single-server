@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 60
     env:
       MAAS_REVISION: 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-      METERING_REVISION: 3f8923d56e05d421e9d3460b2d05e4878b11b805
+      METERING_REVISION: 2d52613ad1125bd95e98f0dbc0c0b5d20f3a9289
       MAAS_IMAGE: quay.io/redhat-et/secure-single-server-maas-standalone
       METERING_IMAGE: quay.io/redhat-et/secure-single-server-pricetag-metering
     steps:
