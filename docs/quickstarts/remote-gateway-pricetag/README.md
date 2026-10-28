@@ -7,6 +7,10 @@ OpenCode with a user key and a monthly USD budget.
 SSH/8443 from your IP; Git, Python 3 and OpenCode on your workstation.
 The tested VM has 8 vCPUs, 32 GiB RAM and 150 GiB disk. No GPU is needed.
 
+> The installer uses digest-pinned published MaaS and PriceTag demo images.
+> [Source builds](images.md) remain available for testing another branch or commit.
+> The optional provider editor is not included.
+
 ## 1. Set the connection
 
 Run from your checked-out `secure-single-server` repository on your workstation:
@@ -66,14 +70,14 @@ Choose providers, enter their keys at hidden prompts, then confirm with `install
 
 | Option | Purpose |
 | --- | --- |
-| `--no-sample-users` | Create admin only. |
+| `--no-sample-users` | Create admin only; onboard users in Administration → Users. |
 | `--monthly-usd 10` | Set the default per-user monthly allowance. |
 | `--image-mode source` | Build application images; see [image options](images.md). |
 | `--mode mock` | Use synthetic providers for [benchmarks](../../testing/pricetag-perf.md). |
 
 External setup accepts one or both APIs; one key must cover the selected APIs.
 Credentials and model presets are checked before installation. Prices are loaded
-at service startup. Missing prices use [PriceTag fallback rates](pricing.md#missing-prices)
+at service startup. Missing prices use [PriceTag fallback rates](pricing.md#missing-price-fallback)
 and do not block installation. Review rates before using real providers.
 For a DNS certificate, set `GATEWAY_HOST` to that name before running the installer.
 Existing deployments are refused.
@@ -88,21 +92,28 @@ it without reviewing its contents.
 
 ## 4. Open the dashboards
 
-In the installation shell, print the login URL and admin key:
+In the installation shell on macOS, print the login URL and copy the admin key to the clipboard without displaying it:
 
 ```console
 printf 'https://%s:8443/login\n' "$GATEWAY_HOST"
 ssh "${SSH_OPTS[@]}" "$RHEL_HOST" \
-  'sudo cat /root/pricetag-admin/admin.key'
+  'sudo cat /root/pricetag-admin/admin.key' | pbcopy
 ```
 
 Open the URL, accept the deployment certificate and paste the admin key.
-Personal dashboards are pending upstream; use the admin dashboard for usage.
+Clear the clipboard after login with `pbcopy < /dev/null`. Clipboard managers may retain copied keys.
+Open **Administration** at `/admin`: **Users** handles onboarding and managers;
+**Safety Net** handles budgets. **My keys** at `/management` handles personal keys.
+Follow the [UI demo walkthrough](demo.md) for the
+onboarding, personal/team views, read-only impersonation, budgets, pricing and
+key replacement/offboarding.
 
 ## 5. Prepare the local connection
 
 In the **workstation installation shell**, choose your user on the first line.
-This copies the CA/key and prints a launch command for any project shell:
+For installer/CLI-created users, this copies the CA/key and prints a launch command
+for any project shell. Browser-issued keys are shown once: save yours privately to
+`$CLIENT_DIR/$INFERENCE_USER.key` instead of the key-copy SSH command below.
 
 ```console
 INFERENCE_USER=alice  # Change to a user you created; do not use admin.
@@ -141,8 +152,9 @@ OpenCode merges these with existing settings. Sessions for one user share their 
 Send: **“Reply with just: gateway works.”** In the admin dashboard, select Alice
 (or your chosen user) and confirm the request, model alias and recorded spend.
 Accounting may take a few seconds; free models record zero USD. The default
-allowance is per user; individual overrides are managed through the
-[user helper](users.md), not displayed as individual limits in this UI.
+allowance is per user. With the management candidate, view and change overrides
+in **Administration → Safety Net**; the [user helper](users.md) uses the same service API.
+The pinned published demo image includes these controls. Older images may not.
 For budget-denial testing, use the separate [mock quota probe](../../testing/pricetag-perf.md#usd-quota-probe).
 
 [Save a native config or switch to the standard OpenCode config directory](clients.md).
@@ -162,7 +174,23 @@ python3 "$REPO/scripts/pricetag/harness" opencode --url "$GATEWAY_URL" \
 
 ## Operations
 
+With the **management candidate**, use Administration for users, team
+relationships, budgets, onboarding keys and prices; use My keys for personal keys. Provider/model configuration stays in the host CLI
+for the reduced demo image. Personal
+and manager dashboards show scoped usage. For automation, use
+[`scripts/pricetag/api`](management-api.md#remote-https-client) from your workstation
+or [`scripts/pricetag/manage`](management-api.md#host-management-over-ssh) on RHEL.
+Both call service APIs; neither writes business tables. Use the
+[mock demo setup](../../testing/pricetag-management-demo.md) for synthetic
+quota-exhaustion and team-fixture tests.
+
+Installation and approval of new provider origins remain host operations.
+Quota exceptions permit explicit client model selection; they do not reroute
+a denied request automatically.
+
+
 [Providers](providers.md) · [Users, keys and budgets](users.md) ·
+[Management CLI and API](management-api.md) ·
 [Manual installation](manual.md) · [Mock benchmarks](../../testing/pricetag-perf.md)
 
 **Pilot limits:** keep this host restricted to trusted administrators. MaaS

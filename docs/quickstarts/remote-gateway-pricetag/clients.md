@@ -36,6 +36,9 @@ jq --arg base "$GATEWAY_URL/v1" --arg key "{file:$KEY_FILE}" \
             options: {store: false, reasoningEffort: "medium", include: ["reasoning.encrypted_content"]}}
         elif $api == "openai" and ($upstream | contains("qwen")) then
           .[$id].models[$m.id] += {reasoning: true, interleaved: {field: "reasoning"}}
+        elif $api == "anthropic" and
+          ($upstream | test("^claude-((opus|sonnet)-(4-[678]|5)(-|$)|haiku-5(-|$))")) then
+          .[$id].models[$m.id].options = {thinking: {type: "adaptive", blockBinding: false}}
         else . end
       else . end))), disabled_providers: []} |
   .enabled_providers = (.provider | keys) |
@@ -107,7 +110,8 @@ shell. It uses your URL, key path and model limits; for example:
       "models": {
         "external/claude-sonnet-5-5": {
           "name": "external/claude-sonnet-5-5",
-          "limit": {"context": 1000000, "output": 128000}
+          "limit": {"context": 1000000, "output": 128000},
+          "options": {"thinking": {"type": "adaptive", "blockBinding": false}}
         }
       }
     }
@@ -168,5 +172,28 @@ when models change. Project settings can override global settings.
 
 [Config locations and precedence](https://opencode.ai/docs/config/#precedence-order) ·
 [Custom certificates](https://opencode.ai/docs/network/#custom-certificates)
+
+</details>
+
+<details>
+<summary>External Claude rejects thinking.adaptive.block_binding</summary>
+
+OpenCode may inject a thinking extension that an Anthropic-compatible gateway
+rejects. The helper sets this compatibility option for recognized adaptive-thinking
+Claude models, using upstream model metadata rather than the public alias:
+
+```json
+"options": {
+  "thinking": { "type": "adaptive", "blockBinding": false }
+}
+```
+
+This retains adaptive thinking and omits the unsupported binding field. It does
+not change authentication, routing or model limits. Verified with OpenCode 1.19.5;
+[upstream opt-out](https://github.com/anomalyco/opencode/pull/46820).
+Restart the helper for a session config, or regenerate a saved native config
+before restarting OpenCode. This is a workstation change; no gateway rebuild is
+needed. OpenCode 2 requires separate qualification because its compatibility
+configuration differs ([tracked issue](https://github.com/anomalyco/opencode/issues/52325)).
 
 </details>

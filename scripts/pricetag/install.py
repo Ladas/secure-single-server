@@ -18,16 +18,17 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 MAAS_COMMIT = '6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d'
-METERING_COMMIT = 'a33b90ad1aea66479dbff99444ca819498589982'
+METERING_COMMIT = '666770c4e31e035c1de236490bbff9dfffe7e047'
 MAAS_REPO = 'https://github.com/Ladas/models-as-a-service.git'
 MAAS_BRANCH = 'feat/standalone-runtime-minimal'
-METERING_REPO = 'https://github.com/redhat-et/pricetag-metering.git'
+METERING_REPO = 'https://github.com/Ladas/pricetag-metering.git'
+METERING_BRANCH = 'feat/standalone-demo-reuse-upstream-ui'
 PRAXIS_IMAGE = 'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
 PRAXIS_REVISION = '5667c4acecd0981ae5114cbbf2ee3dcccec9c248'
 MAAS_IMAGE = 'localhost/pricetag-maas:standalone'
-METERING_IMAGE = 'localhost/pricetag-metering:upstream-a33b90a'
-PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:5ca86edad1182787dc391b3486e46f0b83fc621e294b365a74a7b173fbf3631c'
-PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:62a8610521f3d7f5530a0d6dab7bf17cb47658232c2b0a27b16820cfac9d02b5'
+METERING_IMAGE = 'localhost/pricetag-metering:demo-666770c'
+PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:0bec6ef57fa5b10a7bef8f4df8d98f932c9d7fc96798f7bfc0cd77b504790fa8'
+PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:02494463ca905e8342c39f707310e4aa2c8a14670625da5c9fdd750e7622220a'
 CACHE = Path('/var/cache/pricetag-installer')
 DEPLOY = Path('/etc/praxis-pricetag')
 ADMIN = Path('/root/pricetag-admin')
@@ -175,6 +176,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=('real', 'mock'), default='real',
                    help='real providers (default); use mock for synthetic benchmarks')
+    p.add_argument('--demo-fixture', action='store_true', help='mock mode only: two model aliases for the UI demo')
     p.add_argument('--hostname', help='public IPv4 or DNS name; no scheme, path or port')
     p.add_argument('--provider', action='append', choices=('openai', 'external', 'pricetag'), default=[],
                    help='real mode requires one or more providers; pricetag is the legacy external profile')
@@ -219,6 +221,8 @@ def parse_args(argv=None):
             args.provider = ['openai', 'external'] if selected == 'both' else [selected]
         else:
             p.error('real mode requires --provider openai and/or --provider external')
+    if args.demo_fixture and args.mode != 'mock':
+        p.error('--demo-fixture requires --mode mock')
     if args.mode == 'mock' and args.provider:
         p.error('mock mode cannot configure real providers')
     if 'external' in args.provider and not args.external_api:
@@ -268,16 +272,16 @@ def parse_args(argv=None):
             args.image_mode = 'published'
         elif interactive and not args.yes:
             args.image_mode = choice('Application images:', {
-                'published': 'Use published images (recommended; faster)',
-                'source': 'Build from source (test a branch or commit)'}, 'published')
+                'published': 'Use tested published images (recommended)',
+                'source': 'Build the management demo branches'}, 'published')
         else:
             args.image_mode = 'published'
     for component in ('maas', 'metering'):
         revision = getattr(args, component + '_revision')
         branch = getattr(args, component + '_branch')
-        if args.image_mode == 'source' and component == 'maas' and not (revision or branch):
-            branch = MAAS_BRANCH
-            args.maas_branch = branch
+        if args.image_mode == 'source' and not (revision or branch):
+            branch = MAAS_BRANCH if component == 'maas' else METERING_BRANCH
+            setattr(args, component + '_branch', branch)
         if branch:
             if args.image_mode != 'source':
                 p.error('branch selection requires --image-mode source')
@@ -440,6 +444,10 @@ def install(args):
         command += ['--no-sample-users']
     if args.mode == 'mock':
         command += ['--mock-provider', '--price-sources', ROOT / 'configs/pricetag/perf-price-sources.json']
+        if args.demo_fixture:
+            subprocess.run([*prefix, 'podman', 'secret', 'create', 'pricetag-mock-ui-v1', '-'],
+                           input=b'synthetic-anthropic', check=True, stdout=subprocess.DEVNULL, cwd='/tmp')
+            command += ['--managed-mock', '--mock-secret', 'pricetag-mock-ui-v1']
     else:
         run([sys.executable, ROOT / 'scripts/pricetag/providers', 'export'])
         for option, filename in (('--providers', 'providers.json'), ('--models', 'models.json'),
@@ -456,7 +464,7 @@ def install(args):
     print('Keys: /root/pricetag-admin/' + ('{admin,alice,bob}.key' if args.sample_users else 'admin.key'))
     if not args.sample_users:
         print('Create an inference user next: docs/quickstarts/remote-gateway-pricetag/users.md')
-    print('\nNext: open the dashboard, then connect OpenCode (quickstart steps 3–5).')
+    print('\nNext: open the dashboard, then connect OpenCode (quickstart steps 4–6).')
     print('Guide: docs/quickstarts/remote-gateway-pricetag/README.md')
     if args.mode == 'mock':
         print('Benchmark: sudo python3 scripts/pricetag/benchmark')

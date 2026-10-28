@@ -1,11 +1,12 @@
 # Application images
 
-Published images are the default. Source builds are for testing new versions.
+The installer defaults to qualified, digest-pinned management demo images.
+Use source mode to test a different branch or commit before publication.
 Praxis and PostgreSQL remain pinned published images in either mode.
 
 | Mode | MaaS and PriceTag |
 | --- | --- |
-| `--image-mode published` (default) | Pull the qualified MaaS and PriceTag images by digest. No application source checkout or Go build. |
+| `--image-mode published` (default) | Pull the pinned MaaS and PriceTag demo images. No application source checkout or Go build. |
 | `--image-mode source` | Build from a branch or commit on RHEL to test a new version. |
 
 The installer checks image source labels and CPU architecture.
@@ -24,7 +25,7 @@ Run examples below in **this SSH session**. New shell? Restore
 
 ## Published images
 
-Default repositories ([qualified publication](https://github.com/redhat-et/secure-single-server/actions/runs/40324136393)):
+Publication repositories:
 
 ```text
 quay.io/redhat-et/secure-single-server-maas-standalone
@@ -56,10 +57,13 @@ options](providers.md). Never put provider keys in command-line arguments.
 <details>
 <summary>Build from the default source revisions</summary>
 
-Source mode defaults to `feat/standalone-runtime-minimal` in the MaaS fork.
-PriceTag keeps commit `a33b90ad1aea66479dbff99444ca819498589982` by default;
-we do not maintain a modified PriceTag branch. Other revisions require
-compatibility testing and are not selected automatically.
+Source mode defaults to these fork branches:
+
+- [MaaS: feat/standalone-runtime-minimal](https://github.com/Ladas/models-as-a-service/tree/feat/standalone-runtime-minimal).
+- [PriceTag: feat/standalone-demo-reuse-upstream-ui](https://github.com/Ladas/pricetag-metering/tree/feat/standalone-demo-reuse-upstream-ui).
+
+The optional PriceTag follow-up is not selected. Each branch is resolved to a
+full commit before building, recorded in the image label and checked on import.
 
 ```console
 cd ~/secure-single-server
@@ -74,7 +78,7 @@ sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" --image-mode source
 
 For branches, add `--maas-branch BRANCH` and/or `--metering-branch BRANCH`
 to source mode. For pinned commits, use the block below. Sources: [MaaS fork](https://github.com/Ladas/models-as-a-service) and
-[PriceTag metering](https://github.com/redhat-et/pricetag-metering).
+[PriceTag demo fork](https://github.com/Ladas/pricetag-metering).
 
 ```console
 cd ~/secure-single-server

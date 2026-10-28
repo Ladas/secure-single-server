@@ -11,11 +11,16 @@ An external provider is a hosted service or another gateway. Both APIs can share
 an endpoint or use separate endpoints, but must accept the same key. GPT models
 using Responses need `/v1/responses`, not just Chat compatibility.
 
-The helper supports these two fixed profiles. Choose them during installation;
-adding another provider to a running deployment or arbitrary profile names is
-not supported. Older `pricetag/` deployments use the legacy `pricetag` command.
+The installer supports these two fixed profiles. Choose them during installation;
+the helper cannot add arbitrary profile names. Older `pricetag/` deployments use
+the legacy `pricetag` command.
 
-## Refresh models on an existing deployment
+## Reduced demo image
+
+Provider and model routing is configured through the host CLI below. User,
+budget, key and pricing management is available in the browser.
+
+## Refresh models on a CLI-managed deployment
 
 The numbered steps below update an installed external provider. For a fresh
 installation, use the [installer](README.md#3-install) or
@@ -119,9 +124,9 @@ blocks free models.
 | Generated alias-to-price-source mapping | `/etc/praxis-pricetag/price-sources.json` |
 
 `configs/pricetag/price-seeds.json` is not consumed by this installation path;
-editing it does not change active prices. Refresh requires a price for each
-new model's exact upstream ID, then copies it to the new gateway alias.
-Existing alias prices are preserved.
+editing it does not change active prices. Usage is priced by the exact upstream model ID recorded by PriceTag. Existing
+rates are preserved. Missing rates use the configured PriceTag fallback until
+an administrator adds explicit rates; publishing an alias does not add a price.
 
 The gateway `/v1/models` lists configured models. The usage dashboard lists
 models with recorded usage in the selected scope and period. Pricing can contain
@@ -129,8 +134,8 @@ both an upstream ID and its gateway alias; these are separate rate records,
 not duplicate charges.
 
 Use the [pricing UI and APIs](pricing.md) to inspect rates and manage source-catalog
-discounts. Adding an arbitrary missing price still requires the documented SSH
-fallback; existing alias prices are not changed by catalog refresh.
+discounts. Add missing rates through **Administration → Pricing Discounts → Model pricing**. Price the
+upstream ID recorded in usage; catalog refresh does not synchronize copied aliases.
 
 ## 4. Apply the external models to Praxis
 
@@ -146,8 +151,8 @@ setup if only one API is supported. The command:
 - Updates `/etc/praxis-pricetag/gateway/gateway.json`: model catalog, access
   rules, routing entries and request model rewrites.
 - Updates `/etc/praxis-pricetag/models.json`, price-source mappings and saved inputs.
-- Copies source prices for new aliases, restarts Praxis and checks readiness.
-  Failed activation attempts rollback; existing users, usage and alias rates remain.
+- Preserves existing upstream rates, restarts Praxis and checks readiness.
+  Failed activation attempts rollback; existing users, usage and prices remain.
 
 Models removed from selection stop being routed; their historical usage stays.
 Do not edit generated gateway files or rerun `prepare.py` for this operation.
@@ -246,3 +251,5 @@ provider options for a single-provider install. Provider commands also accept
 deleted; remove them through your secret-delivery process after verification.
 
 </details>
+
+For candidate automation over SSH, use the [private management API client](management-api.md).

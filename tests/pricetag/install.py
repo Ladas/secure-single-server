@@ -30,14 +30,14 @@ benchmark = module('benchmark')
 class InstallTest(unittest.TestCase):
     def test_bootstrap_failure_stops_before_marker_and_explains_recovery(self):
         source = (ROOT / 'scripts/pricetag/start').read_text()
-        start = source.index('  if ! as_service podman exec -i pricetag-db psql')
+        start = source.index('  if ! python3 "${SCRIPT_DIR}/metering_admin.py"')
         end = source.index('\nfi', start)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / 'bootstrap.sql').write_text('SELECT 1;')
+            (root / 'bootstrap.json').write_text('{}')
             script = root / 'check.sh'
-            script.write_text('set -eu\nDEPLOY_DIR="$1"\n'
-                              'as_service() { return 1; }\n'
+            script.write_text('set -eu\nDEPLOY_DIR="$1"\nSCRIPT_DIR="$1"\n'
+                              'python3() { return 1; }\n'
                               'note() { echo "$*"; }\n'
                               'die() { echo "$*"; exit 1; }\n' + source[start:end])
             result = subprocess.run(['bash', str(script), directory], text=True, capture_output=True)
@@ -50,7 +50,8 @@ class InstallTest(unittest.TestCase):
         from prepare import POSTGRES
         for mode in ('real', 'mock'):
             with self.subTest(mode=mode):
-                flags = ['--mode', mode, '--hostname', 'gateway.example', '--plan']
+                flags = ['--mode', mode, '--hostname', 'gateway.example', '--plan',
+                         '--image-mode', 'published', '--metering-image', installer.PUBLISHED_METERING_IMAGE]
                 if mode == 'real':
                     flags += ['--provider', 'openai', '--provider', 'external', '--external-api', 'both']
                 output = io.StringIO()
@@ -109,17 +110,18 @@ class InstallTest(unittest.TestCase):
     def image_args(self, *extra):
         return installer.parse_args(['--mode', 'mock', '--hostname', 'gateway.example', '--plan', *extra])
 
-    def test_default_images_are_published_and_source_defaults_are_explicit(self):
+    def test_published_defaults_and_optional_source_branches(self):
         args = self.image_args()
         self.assertEqual(args.image_mode, 'published')
-        self.assertEqual(args.maas_image, installer.PUBLISHED_MAAS_IMAGE)
         self.assertEqual(args.metering_image, installer.PUBLISHED_METERING_IMAGE)
+        self.assertEqual(args.maas_image, installer.PUBLISHED_MAAS_IMAGE)
+        self.assertIsNone(args.metering_branch)
+        self.assertEqual(installer.METERING_REPO, 'https://github.com/Ladas/pricetag-metering.git')
         source = self.image_args('--image-mode', 'source')
         self.assertEqual(source.maas_branch, installer.MAAS_BRANCH)
-        self.assertIsNone(source.metering_branch)
+        self.assertEqual(source.metering_branch, installer.METERING_BRANCH)
         self.assertEqual(source.metering_revision, installer.METERING_COMMIT)
-        for flags in (['--maas-branch', 'feature'],
-                      ['--image-mode', 'source', '--maas-branch', '../bad'],
+        for flags in (['--image-mode', 'source', '--maas-branch', '../bad'],
                       ['--image-mode', 'source', '--maas-branch', 'feature', '--maas-revision', 'a' * 40]):
             with self.assertRaises(SystemExit):
                 self.image_args(*flags)
@@ -144,6 +146,12 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(args.maas_revision, resolved)
             self.assertTrue(any('--expected-commit' in c.args[0] and resolved in c.args[0]
                                 for c in run.call_args_list))
+
+    def test_demo_fixture_is_mock_only(self):
+        self.assertTrue(self.image_args('--demo-fixture').demo_fixture)
+        with self.assertRaises(SystemExit):
+            installer.parse_args(['--mode', 'real', '--provider', 'openai', '--hostname',
+                                  'gateway.example', '--plan', '--demo-fixture'])
 
     def test_checkout_uses_fetched_head_not_stale_local_branch(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(installer, 'run') as run:
@@ -243,7 +251,7 @@ class InstallTest(unittest.TestCase):
 
     def test_interactive_selection_accepts_menu_numbers(self):
         with patch.object(installer.sys.stdin, 'isatty', return_value=True), \
-                patch('builtins.input', side_effect=['2', '2', '2', '1']):
+                patch('builtins.input', side_effect=['2', '2', '2', '2']):
             args = installer.parse_args(['--hostname', 'gateway.example'])
         self.assertEqual(args.provider, ['external'])
         self.assertEqual(args.external_api, 'anthropic')
@@ -364,6 +372,28 @@ class InstallTest(unittest.TestCase):
                     if item.get('filter') == 'load_balancer':
                         item['clusters'][0]['endpoints'] = ['remote.example:443']
             (path / 'gateway/gateway.json').write_text(json.dumps(rendered))
+            with self.assertRaises(ValueError):
+                benchmark.require_mock(path)
+
+    def test_mock_guard_accepts_managed_mock_aliases_only(self):
+        sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
+        import demo_config
+        import gateway
+        document = {'providers': [{'name': 'mock', 'urls': {
+            'openai': 'http://pricetag-provider:18080/v1',
+            'anthropic': 'http://pricetag-provider:18081'}, 'messages_auth': 'x-api-key'}],
+            'models': [{'id': 'mock/cheap', 'model': 'fixture-cheap', 'provider': 'mock',
+                        'apis': ['openai', 'anthropic'], 'context': 32768, 'output': 4096}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / 'quadlets').mkdir(); (path / 'gateway').mkdir()
+            (path / 'models.json').write_text(json.dumps(document['models']))
+            rendered = gateway.render(demo_config.native_inputs(document), document['models'])
+            (path / 'gateway/gateway.json').write_text(json.dumps(rendered))
+            unit = path / 'quadlets/pricetag-gateway.container'
+            unit.write_text('Network=pricetag-mock.network\nSecret=praxis-mock-api-key-v2,type=env,target=CUSTOM_MOCK_API_KEY\n')
+            benchmark.require_mock(path)
+            unit.write_text(unit.read_text().replace('praxis-mock-api-key-v2', 'real-provider-key'))
             with self.assertRaises(ValueError):
                 benchmark.require_mock(path)
 

@@ -266,6 +266,9 @@ class SetupTest(unittest.TestCase):
                 files=setup.refresh_model_files(settings, name=provider_name)
             models=json.loads(files[deploy/'models.json'])
             self.assertEqual(models,[old[0],new])
+            catalog=json.loads(files[deploy/'catalog/models.json'])
+            self.assertEqual(catalog,[{k:m[k] for k in ('id','model','provider')} for m in models])
+            self.assertTrue(all(set(m)=={'id','model','provider'} for m in catalog))
             updated=json.loads(files[deploy/'gateway/gateway.json'])
             self.assertEqual(updated['listeners'],deployed['listeners'])
             before={c['name']:c for c in deployed['filter_chains']}
@@ -292,16 +295,6 @@ class SetupTest(unittest.TestCase):
             self.assertNotIn('manual_jwt',serialized)
             self.assertIn(f'CUSTOM_{provider_name.upper()}_API_KEY',serialized)
             self.assertIn('api.openai.com',serialized)
-
-    def test_migration_prices_only_insert_missing_aliases(self):
-        sql=setup.migration_prices([{'id':'pricetag/rits/zai-org/glm-5-3',
-                                     'model':'rits/zai-org/glm-5-3'}])
-        self.assertTrue(sql.startswith('BEGIN;'))
-        self.assertIn('ON CONFLICT(model) DO NOTHING',sql)
-        self.assertIn('usage_events',sql)
-        self.assertNotIn('DELETE ',sql)
-        self.assertNotIn('UPDATE ',sql)
-        self.assertNotIn('quota',sql)
 
     def test_messages_bearer_header_is_used_for_discovery_and_inference(self):
         seen = []

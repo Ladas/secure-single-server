@@ -40,6 +40,11 @@ def main():
     args.output.mkdir(mode=0o700)
     checks = []
     url = 'https://localhost:8443'
+    origin = next(line.split('=', 1)[1] for line in Path('/etc/praxis-pricetag/metering.env').read_text().splitlines() if line.startswith('MANAGEMENT_PUBLIC_ORIGIN='))
+    models = json.loads(Path('/etc/praxis-pricetag/models.json').read_text())
+    selected = next((m for m in models if m['id'] != m['model'] and set(m['apis']) == {'openai', 'anthropic'}), None)
+    if selected is None:
+        p.error('acceptance requires a dual-API model alias; install mock mode with --demo-fixture')
     tls = ssl.create_default_context(cafile='/etc/praxis-pricetag/ca.pem')
     noauth = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
                                          urllib.request.HTTPSHandler(context=tls))
@@ -54,7 +59,7 @@ def main():
     def request(opener, path, data=None, method=None, headers=None):
         payload = None if data is None else json.dumps(data).encode()
         req = urllib.request.Request(url + path, payload, method=method,
-            headers={'Content-Type': 'application/json', 'Origin': url, **(headers or {})})
+            headers={'Content-Type': 'application/json', 'Origin': origin, **(headers or {})})
         try:
             with opener.open(req, timeout=30) as response:
                 raw = response.read()
@@ -67,7 +72,7 @@ def main():
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
                     urllib.request.HTTPCookieProcessor(jar), urllib.request.HTTPSHandler(context=tls))
         req = urllib.request.Request(url + '/login', urllib.parse.urlencode({'api_key': key}).encode(),
-              headers={'Origin': url, 'Content-Type': 'application/x-www-form-urlencoded'})
+              headers={'Origin': origin, 'Content-Type': 'application/x-www-form-urlencoded'})
         try:
             opener.open(req, timeout=15)
         except urllib.error.HTTPError as error:
@@ -85,14 +90,14 @@ def main():
     browser = login(key)
     admin = login(Path('/root/pricetag-admin/admin.key').read_text().strip())
     check('admin page loads', request(admin, '/admin')[0] == 200)
-    check('personal dashboard explicitly pending upstream',
-          'Dashboard coming soon' in request(browser, '/dashboard')[1])
-    check('ordinary user cannot read dashboard API', request(browser, '/api/v1/dashboard/overview')[0] == 403)
+    check('personal dashboard available', request(browser, '/dashboard')[0] == 200)
+    check('personal dashboard API available', request(browser, '/api/v1/dashboard/overview')[0] == 200)
+    check('own key management available', request(browser, '/me/keys')[0] == 200)
     check('ordinary user cannot open admin page', request(browser, '/admin')[0] == 403)
     check('ordinary user cannot list partner users', request(browser, '/api/v1/admin/partner-users')[0] == 403)
     check('ordinary user cannot edit safety net', request(browser, '/api/v1/admin/safety-net',
                                                           {'default_monthly_usd': 10000}, 'PUT')[0] == 403)
-    for path in ('/me/keys', '/api/v1/admin/keys', '/routing', '/api/v1/users'):
+    for path in ('/api/v1/admin/keys', '/routing', '/api/v1/users'):
         check('unconfigured or private route denied: ' + path, request(admin, path)[0] == 404)
     check('admin dashboard API available', request(admin, '/api/v1/dashboard/overview')[0] == 200)
     check('admin safety net available', request(admin, '/api/v1/admin/safety-net')[0] == 200)
@@ -146,51 +151,21 @@ def main():
     check('another subject cannot inspect the key', maas('/v1/api-keys/' + before[0]['id'],
                                                         who=subject + '-other')[0] in (403, 404))
     check('lifetime above 90 days rejected', maas('/v1/api-keys', {'name': 'too-long', 'expiresIn': '91d'})[0] == 400)
-    body = {'model': 'fixture', 'messages': [{'role': 'user', 'content': 'synthetic acceptance'}], 'max_tokens': 16}
+    body = {'model': selected['id'], 'messages': [{'role': 'user', 'content': 'synthetic acceptance'}], 'max_tokens': 16}
     check('anonymous inference rejected', request(noauth, '/v1/chat/completions', body)[0] == 401)
     check('key inference succeeds', request(noauth, '/v1/chat/completions', body,
                                           headers={'Authorization': 'Bearer ' + key})[0] == 200)
-    # Exercise distinct client and upstream names against the actual image.
-    sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
-    import prepare
-    import gateway
-    gateway_file = Path('/etc/praxis-pricetag/gateway/gateway.json')
-    previous = gateway_file.read_text()
-    uid = pwd.getpwnam('praxis-svc').pw_uid
-    def restart_gateway():
-        subprocess.run(['sudo', '-u', 'praxis-svc', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}',
-                        f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus',
-                        'systemctl', '--user', 'restart', 'pricetag-gateway.service'], check=True, cwd='/tmp')
-        for _ in range(30):
-            try:
-                if request(noauth, '/v1/models')[0] == 200:
-                    return
-            except OSError:
-                pass
-            time.sleep(1)
-        raise RuntimeError('gateway readiness after alias change')
-
-    try:
-        config, alias_models = prepare.mock_inputs()
-        alias_models[0]['id'] = 'mock/fixture'
-        sql("INSERT INTO model_pricing(model,provider,input_cost_per_mtok,output_cost_per_mtok) "
-            "SELECT 'mock/fixture',provider,input_cost_per_mtok,output_cost_per_mtok FROM model_pricing "
-            "WHERE model='fixture' ON CONFLICT(model) DO NOTHING")
-        gateway_file.write_text(json.dumps(gateway.render(config, alias_models), indent=2) + '\n')
-        restart_gateway()
-        for path, auth_headers in [('/v1/chat/completions', {'Authorization': 'Bearer ' + key}),
-                                   ('/v1/messages', {'x-api-key': key, 'anthropic-version': '2023-06-01'})]:
-            alias_body = dict(body, model='mock/fixture')
-            check('registered alias accepted: ' + path, request(noauth, path, alias_body, headers=auth_headers)[0] == 200)
-            check('bare upstream ID denied: ' + path, request(noauth, path, body, headers=auth_headers)[0] in (403, 404))
-            check('spoofed model header denied: ' + path, request(noauth, path, body,
-                  headers={**auth_headers, 'X-Gateway-Model': 'mock/fixture'})[0] in (403, 404))
-            check('unknown alias denied: ' + path, request(noauth, path, dict(body, model='unknown/model'),
-                  headers=auth_headers)[0] in (403, 404))
-            check('alias still requires authentication: ' + path, request(noauth, path, alias_body)[0] == 401)
-    finally:
-        gateway_file.write_text(previous)
-        restart_gateway()
+    # Verify the deployed alias contract without modifying native gateway files.
+    for path, auth_headers in [('/v1/chat/completions', {'Authorization': 'Bearer ' + key}),
+                               ('/v1/messages', {'x-api-key': key, 'anthropic-version': '2023-06-01'})]:
+        check('registered alias accepted: ' + path, request(noauth, path, body, headers=auth_headers)[0] == 200)
+        bare = dict(body, model=selected['model'])
+        check('bare upstream ID denied: ' + path, request(noauth, path, bare, headers=auth_headers)[0] in (403, 404))
+        check('spoofed model header denied: ' + path, request(noauth, path, bare,
+              headers={**auth_headers, 'X-Gateway-Model': selected['id']})[0] in (403, 404))
+        check('unknown alias denied: ' + path, request(noauth, path, dict(body, model='unknown/model'),
+              headers=auth_headers)[0] in (403, 404))
+        check('alias still requires authentication: ' + path, request(noauth, path, body)[0] == 401)
     for _ in range(30):
         spending = spend()
         if spending > 0:
@@ -209,7 +184,7 @@ def main():
     check('revoked replacement rejected', request(noauth, '/v1/chat/completions', body,
           headers={'Authorization': 'Bearer ' + (args.output / 'next.key').read_text().strip()})[0] == 401)
     check('known gap: existing browser session survives key revocation',
-          request(next_browser, '/whoami')[0] == 200)
+          request(next_browser, '/api/v1/whoami')[0] == 200)
     print('Evidence: ' + str(args.output / 'checks.json'))
 
 

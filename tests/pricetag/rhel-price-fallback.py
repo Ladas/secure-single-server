@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Test bootstrap fallback pricing with session-local tables on the mock RHEL host."""
+"""Verify bootstrap pricing through service APIs on the mock RHEL host."""
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 from pathlib import Path
-import pwd
-import subprocess
 import sys
+import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
-import prepare
+import metering_admin
 
 
 def main():
@@ -18,34 +19,29 @@ def main():
     benchmark = importlib.util.module_from_spec(spec)
     loader.exec_module(benchmark)
     benchmark.require_mock(Path('/etc/praxis-pricetag'))
-    uid = pwd.getpwnam('praxis-svc').pw_uid
-    command = ['sudo', '-u', 'praxis-svc', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}',
-               'podman', 'exec', '-i', 'pricetag-db', 'psql', '-X', '-qAt',
-               '-U', 'metering', '-d', 'metering', '-v', 'ON_ERROR_STOP=1']
-    # Temporary tables shadow all bootstrap targets; no deployment data changes.
-    setup = '''CREATE TEMP TABLE quota_policy (LIKE public.quota_policy INCLUDING ALL);
-INSERT INTO quota_policy SELECT * FROM public.quota_policy;
-CREATE TEMP TABLE model_pricing (LIKE public.model_pricing INCLUDING ALL);
-CREATE TEMP TABLE usage_events (LIKE public.usage_events INCLUDING ALL);
-'''
-    models = [{'id': 'test/missing-price', 'model': 'missing-price', 'provider': 'external'}]
-    sql = prepare.bootstrap(models, {}, 5)
-    fallback_query = "SELECT count(*) FROM model_pricing WHERE model='test/missing-price';"
-    missing = subprocess.run(command, input=setup + sql + fallback_query,
-                             text=True, capture_output=True, cwd='/tmp')
-    assert missing.returncode == 0, missing.stderr
-    assert 'PriceTag fallback rates apply' in missing.stderr, missing.stderr
-    assert missing.stdout.strip().splitlines()[-1] == '0', missing.stdout
-    print('PASS: missing price permits bootstrap, warns, and does not invent a rate')
-    seed = '''INSERT INTO model_pricing(model,provider,input_cost_per_mtok,output_cost_per_mtok,
-cache_write_cost_per_mtok,cache_read_cost_per_mtok) VALUES ('missing-price','external',1,2,0,0);
-'''
-    query = "SELECT input_cost_per_mtok=1 AND output_cost_per_mtok=2 FROM model_pricing WHERE model='test/missing-price';"
-    recovered = subprocess.run(command, input=setup + seed + sql + query,
-                               text=True, capture_output=True, cwd='/tmp')
-    assert recovered.returncode == 0, recovered.stderr
-    assert recovered.stdout.strip().splitlines()[-1] == 't', recovered.stdout
-    print('PASS: available source rates populate alias rates')
+    # Unique, unrouted synthetic IDs cannot alter prices of demo traffic.
+    target = 'test-pricing-' + uuid.uuid4().hex
+    source = target + '-source'
+    alias = 'test/' + target
+    models = [{'id': alias, 'model': target, 'provider': 'mock'}]
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        metering_admin.ensure_prices(models)
+    prices = {p['Model']: p for p in metering_admin.request('GET', 'prices')}
+    assert target not in prices and alias not in prices
+    assert 'fallback rates apply' in output.getvalue()
+    print('PASS: missing rate permits setup with a warning and no invented price')
+    metering_admin.request('PUT', 'prices', {
+        'model': source, 'provider': 'mock', 'input_cost_per_mtok': 1,
+        'output_cost_per_mtok': 2, 'cache_write_cost_per_mtok': 0,
+        'cache_read_cost_per_mtok': 0})
+    metering_admin.ensure_prices(models, {alias: source})
+    prices = {p['Model']: p for p in metering_admin.request('GET', 'prices')}
+    assert target in prices and alias not in prices
+    assert prices[target]['InputCost'] == prices[source]['InputCost']
+    assert prices[target]['OutputCost'] == prices[source]['OutputCost']
+    print('PASS: API source copy prices the billed upstream ID, not an unused alias')
+    print('Synthetic un-routed price records retained for audit: ' + target)
 
 
 if __name__ == '__main__':
