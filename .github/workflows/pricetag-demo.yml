@@ -52,7 +52,7 @@ jobs:
           # Independent of private registries or provider credentials. Use the
           # same reviewed source pins as the image publication PR.
           maas=6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-          metering=49e75dc57c9081b5d2bb7e3cfbb4e1099d0b1a36
+          metering=666770c4e31e035c1de236490bbff9dfffe7e047
           for component in maas metering; do
             directory="$RUNNER_TEMP/$component"
             if [[ "$component" == maas ]]; then
