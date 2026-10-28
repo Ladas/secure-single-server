@@ -2,6 +2,7 @@
 // Supply a server certificate and protected key directory; never enable traces
 // or screenshots while a one-time key is visible.
 'use strict';
+const downloadKey=require('./key-download.cjs');
 require('./mock-guard.cjs')();
 const { chromium } = require('playwright');
 const fs = require('node:fs');
@@ -49,15 +50,26 @@ async function done(page, action) {
     await admin.locator('#budget [name=subject]').selectOption('demo-ui-onboard');
     await admin.locator('#budget [name=monthly_usd]').fill('5');
     await done(admin, () => admin.getByRole('button', { name: 'Set override', exact: true }).click());
+    // Verify the expandable per-user overrides list and inheritance.
+    await admin.locator('#budgetDetails summary').click();
+    await admin.locator('#budgetSearch [name=search]').fill('demo-ui-onboard');
+    await done(admin,()=>admin.locator('#budgetSearch button').click());
+    const overrideRow=admin.locator('#budgets tr').filter({hasText:'demo-ui-onboard'});
+    await overrideRow.waitFor();assert.equal(await overrideRow.count(),1);
+    admin.once('dialog',dialog=>dialog.accept());
+    await done(admin,()=>overrideRow.getByRole('button',{name:'Remove override',exact:true}).click());
+    assert.match(await admin.locator('#budgetCurrent').textContent(),/Inherits global default/);
+    await admin.locator('#budget [name=monthly_usd]').fill('5');
+    await done(admin,()=>admin.getByRole('button',{name:'Set override',exact:true}).click());
     await admin.locator('#vtab-people').click();
     await admin.locator('#onboard [name=subject]').selectOption('demo-ui-onboard');
     await admin.locator('#onboard [name=expiresIn]').fill('2d');
     await done(admin, () => admin.getByRole('button', { name: 'Issue key', exact: true }).click());
-    const issued = JSON.parse(await admin.locator('#onboardKey').textContent());
+    const issued = await downloadKey(admin, '#onboardKey');
     assert.ok(issued.key, 'one-time onboarding key missing');
-    await admin.getByRole('button', { name: 'Clear displayed key', exact: true }).click();
-    assert.equal(await admin.locator('#onboardKey').textContent(), '');
-    const { page: user, context: userContext } = await login(issued.key);
+    await admin.locator('#onboardKey').getByRole('button', { name: 'Dismiss key', exact: true }).click();
+    assert.equal(await admin.locator('#onboardKey').isVisible(), false);
+    const { page: user, context: userContext } = await login(issued.key);user.on('dialog', dialog=>dialog.accept());
     assert.equal(await user.locator('#admin').isVisible(), false);
     const statuses = await user.evaluate(async () => {
       const result = [];
@@ -72,12 +84,12 @@ async function done(page, action) {
     await user.locator('#key [name=name]').fill('demo-personal-key');
     await user.locator('#key [name=expiresIn]').fill('1d');
     await done(user, () => user.getByRole('button', { name: 'Create key', exact: true }).click());
-    const personal = JSON.parse(await user.locator('#newKey').textContent());
+    const personal = await downloadKey(user, '#newKey');
     assert.ok(personal.key, 'personal key missing');
     await done(user, () => user.getByRole('button', { name: 'List my keys', exact: true }).click());
     const row = user.locator('#keys p').filter({ hasText: personal.id });
     await done(user, () => row.getByRole('button', { name: 'Revoke', exact: true }).click());
-    assert.equal(await row.count(), 0);
+    assert.equal(await row.locator('.key-status').textContent(), 'revoked');
     await userContext.close();
     await adminContext.close();
     console.log('PASS: UI user onboarding, budget save, finite-key issuance/login, role isolation, own-key creation and revocation');

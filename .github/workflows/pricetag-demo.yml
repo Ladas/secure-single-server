@@ -52,7 +52,7 @@ jobs:
           # Independent of private registries or provider credentials. Use the
           # same reviewed source pins as the image publication PR.
           maas=6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-          metering=2d52613ad1125bd95e98f0dbc0c0b5d20f3a9289
+          metering=49e75dc57c9081b5d2bb7e3cfbb4e1099d0b1a36
           for component in maas metering; do
             directory="$RUNNER_TEMP/$component"
             if [[ "$component" == maas ]]; then
@@ -68,6 +68,8 @@ jobs:
             git -C "$directory" checkout --detach FETCH_HEAD
             test "$(git -C "$directory" rev-parse HEAD)" = "$revision"
           done
+          node --test "$RUNNER_TEMP/metering/tests/ui/key-controls.test.cjs"
+          sudo python3 tests/pricetag/metering-unit.py --source "$RUNNER_TEMP/metering"
           sudo scripts/pricetag/build-maas --source "$RUNNER_TEMP/maas" --expected-commit "$maas" --tag localhost/maas:demo-ci
           sudo python3 scripts/pricetag/build-metering --source "$RUNNER_TEMP/metering" --revision "$metering" --tag localhost/metering:demo-ci
           sudo podman pull quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8

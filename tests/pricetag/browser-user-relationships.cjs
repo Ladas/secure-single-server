@@ -1,4 +1,5 @@
 'use strict';
+const downloadKey=require('./key-download.cjs');
 require('./mock-guard.cjs')();
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path');
@@ -33,7 +34,7 @@ let stage='setup';
   stage='assign and reassign manager';await relationship(ids[2],ids[0]);assert.equal((await users()).find(u=>u.user_id===ids[2]).manager_user_id,ids[0]);
   await relationship(ids[2],ids[1]);assert.equal((await users()).find(u=>u.user_id===ids[2]).manager_user_id,ids[1]);
   stage='reject hierarchy cycle';await relationship(ids[1],ids[2],false);assert.ok(!(await users()).find(u=>u.user_id===ids[1]).manager_user_id);
-  stage='issue member key';await admin.locator('#onboard [name=subject]').selectOption(names[2]);await admin.locator('#onboard [name=expiresIn]').fill('1d');await done(admin,()=>admin.getByRole('button',{name:'Issue key',exact:true}).click());const issued=JSON.parse(await admin.locator('#onboardKey').textContent());await admin.getByRole('button',{name:'Clear displayed key',exact:true}).click();
+  stage='issue member key';await admin.locator('#onboard [name=subject]').selectOption(names[2]);await admin.locator('#onboard [name=expiresIn]').fill('1d');await done(admin,()=>admin.getByRole('button',{name:'Issue key',exact:true}).click());const issued=await downloadKey(admin, '#onboardKey');await admin.locator('#onboardKey').getByRole('button',{name:'Dismiss key',exact:true}).click();
   const member=await login(issued.key);
   async function quota(){return await member.evaluate(async()=>(await(await fetch('/api/v1/whoami')).json()).quota);}
   const before=await quota();

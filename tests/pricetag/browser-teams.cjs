@@ -43,9 +43,17 @@ let stage='setup';
    assert.equal(result.scope.isManager,user.manager);
    assert.deepEqual(result.rows.map(r=>r.slug).sort(),allowed.sort());
    assert.ok(result.rows.every(r=>r.requests>0),'synthetic usage missing');
+   assert.ok(result.rows.every(r=>r.quota_usd>0),'monthly budget missing');
+   assert.ok(result.rows.every(r=>r.quota_spent_usd>=0),'monthly spending missing');
    assert.equal(result.inside,200);assert.equal(result.denied,403);assert.equal(result.rootDenied,403);
    assert.equal(result.directory,403);assert.equal(result.admin,403);
-   if(user.manager){await page.waitForFunction(()=>document.querySelector('#scopeSub')?.textContent.includes('10 people in your tree'));}
+   if(user.manager){
+    await page.waitForFunction(()=>document.querySelector('#scopeSub')?.textContent.includes('10 people in your tree'));
+    await page.waitForFunction(()=>chartsCache && chartsCache.models.length>0);
+    await page.route('**/api/v1/org/charts?**',route=>route.fulfill({status:503,body:'synthetic failure'}));
+    await page.evaluate(()=>loadCharts());await page.locator('#chartsError').waitFor({state:'visible'});
+    await page.unroute('**/api/v1/org/charts?**');await page.evaluate(()=>loadCharts());await page.locator('#chartsError').waitFor({state:'hidden'});
+   }
    console.log('PASS: '+(user.manager?'manager':'personal')+' team '+user.team+' sees '+result.rows.length+' scoped profiles; cross-team and admin access denied');
    await context.close();
   }

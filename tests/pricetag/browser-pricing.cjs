@@ -1,4 +1,5 @@
 'use strict';
+const downloadKey=require('./key-download.cjs');
 require('./mock-guard.cjs')();
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path');
@@ -30,10 +31,15 @@ let stage='setup';
   const subject='demo-price-'+Date.now();stage='onboard price-test user';
   await admin.locator('#user [name=subject]').fill(subject);await admin.locator('#user [name=name]').fill('Demo price verification');await done(admin,()=>admin.locator('#user button').click());
   await admin.locator('#onboard [name=subject]').selectOption(subject);await admin.locator('#onboard [name=expiresIn]').fill('1d');await done(admin,()=>admin.getByRole('button',{name:'Issue key',exact:true}).click());
-  const issued=JSON.parse(await admin.locator('#onboardKey').textContent());await admin.getByRole('button',{name:'Clear displayed key',exact:true}).click();
-  const {page:user}=await login(issued.key);
+  const issued=await downloadKey(admin, '#onboardKey');await admin.locator('#onboardKey').getByRole('button',{name:'Dismiss key',exact:true}).click();
+  const {page:user}=await login(issued.key);user.on('dialog', dialog=>dialog.accept());
   stage='set initial rate through UI';await price(admin,'fixture-cheap',1000,2000);
   async function infer(){const status=await user.evaluate(async key=>(await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},body:JSON.stringify({model:'mock/demo-cheap',messages:[{role:'user',content:'synthetic price verification'}],max_completion_tokens:16})})).status,issued.key);assert.equal(status,200);}
+  stage='readable model rates and edit';
+  await admin.locator('#priceSearch [name=search]').fill('fixture-cheap');
+  await done(admin,()=>admin.locator('#priceSearch button').click());
+  const rateRow=admin.locator('#prices tr').filter({hasText:'fixture-cheap'});assert.equal(await rateRow.count(),1);assert.match(await rateRow.textContent(),/Managed override/);
+  await rateRow.getByRole('button',{name:'Edit rates',exact:true}).click();assert.equal(await admin.locator('#price [name=input_cost_per_mtok]').inputValue(),'1000');
   stage='first charge';await infer();await spend(user,.008);
   stage='change future rate through UI';await price(admin,'fixture-cheap',2000,2000);await spend(user,.008);
   stage='second charge preserves history';await infer();await spend(user,.018);
@@ -54,6 +60,9 @@ let stage='setup';
   },issued.key);}
   stage='paid requests blocked after UI budget change';await policy({...originalPolicy,enforced:true,allowed_over_limit_models:[]});await new Promise(r=>setTimeout(r,17000));
   assert.deepEqual(await inferenceStatuses(),[429,429,429]);
+  stage='configured unused models offered in safety net';
+  await policyPage.locator('#vtab-safety-net').click();
+  await policyPage.waitForFunction(()=>[...document.querySelectorAll('#safety-model-list option')].some(option=>option.value==='fixture-cheap'));
   stage='upstream model exception configured through UI';await policy({...originalPolicy,enforced:true,allowed_over_limit_models:['fixture-cheap']});await new Promise(r=>setTimeout(r,17000));
   const allowed=await inferenceStatuses();console.log('Upstream-ID exception statuses: '+allowed.join(', '));assert.deepEqual(allowed,[200,200,200]);
   stage='exception removed through UI';await policy({...originalPolicy,enforced:true,allowed_over_limit_models:[]});await new Promise(r=>setTimeout(r,17000));assert.deepEqual(await inferenceStatuses(),[429,429,429]);

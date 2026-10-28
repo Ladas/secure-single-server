@@ -43,6 +43,11 @@ def main():
             body.write_text(json.dumps({'subject': subject, 'monthly_usd': 7.25}))
             checked(ROOT / 'scripts/pricetag/manage', 'PUT', 'budgets', '--input', body,
                     '--output', directory / 'budget-result.json')
+            revocations = directory / 'key-count.json'
+            revocations.write_text(json.dumps({'subject': subject, 'dry_run': True}))
+            checked(ROOT / 'scripts/pricetag/manage', 'POST', 'key-revocations',
+                    '--input', revocations, '--output', directory / 'key-count-result.json')
+            assert json.loads((directory / 'key-count-result.json').read_text())['count'] == 1
             def api(method, route, credential, output):
                 return (ROOT / 'scripts/pricetag/api', method, route, '--url', origin,
                         '--key-file', credential, '--ca-file', '/etc/praxis-pricetag/ca.pem',

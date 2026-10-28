@@ -88,6 +88,8 @@ def main():
         for path in (DEPLOY / 'initdb').iterdir():
             path.chmod(0o644)
         (DEPLOY / 'm2m-secret').chmod(0o644)
+        (DEPLOY / 'catalog').chmod(0o755)
+        (DEPLOY / 'catalog/models.json').chmod(0o644)
         for suffix in ('private', 'mock'):
             name = prefix + '-' + suffix
             podman('network', 'create', name)
@@ -130,7 +132,8 @@ def main():
         # Only the metering container and loopback-published host mint keys.
         stage = 'metering'
         meter = start('metering', images[2], private, '--read-only', '--user', '1001:1001',
-                      '-p', '127.0.0.1:18087:8080', '--env-file', DEPLOY / 'metering.env')
+                      '-p', '127.0.0.1:18087:8080', '--env-file', DEPLOY / 'metering.env',
+                      '-v', str(DEPLOY / 'catalog') + ':/etc/gateway-catalog:ro,Z')
         meter_ip = json.loads(podman('inspect', meter))[0]['NetworkSettings']['Networks'][private]['IPAddress']
         podman('rm', '-f', maas)
         containers.remove(maas)

@@ -1,4 +1,5 @@
 'use strict';
+const downloadKey=require('./key-download.cjs');
 require('./mock-guard.cjs')();
 const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path');
@@ -19,10 +20,10 @@ let stage='setup';
   const subject='demo-offboard-'+Date.now();stage='UI onboarding';
   await admin.locator('#user [name=subject]').fill(subject);await admin.locator('#user [name=name]').fill('Offboarding verification');await done(admin,()=>admin.locator('#user button').click());
   await admin.locator('#onboard [name=subject]').selectOption(subject);await admin.locator('#onboard [name=expiresIn]').fill('1d');await done(admin,()=>admin.getByRole('button',{name:'Issue key',exact:true}).click());
-  const issued=JSON.parse(await admin.locator('#onboardKey').textContent());await admin.getByRole('button',{name:'Clear displayed key',exact:true}).click();
-  const {page:user}=await login(issued.key);await user.goto(base+'/management');
+  const issued=await downloadKey(admin, '#onboardKey');await admin.locator('#onboardKey').getByRole('button',{name:'Dismiss key',exact:true}).click();
+  const {page:user}=await login(issued.key);user.on('dialog', dialog=>dialog.accept());await user.goto(base+'/management');
   stage='personal key creation';await user.locator('#key [name=name]').fill('own-key');await user.locator('#key [name=expiresIn]').fill('1h');await done(user,()=>user.locator('#key button').click());
-  const personal=JSON.parse(await user.locator('#newKey').textContent());
+  const personal=await downloadKey(user, '#newKey');
   async function infer(key){return await user.evaluate(async key=>{
    const r=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},body:JSON.stringify({model:'mock/demo-cheap',messages:[{role:'user',content:'offboarding check'}],max_completion_tokens:16})});await r.text();return r.status;
   },key);}

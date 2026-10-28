@@ -11,16 +11,19 @@ and [image publication #92](https://github.com/redhat-et/secure-single-server/pu
 merging first. Source builds use the same reviewed revisions as publication;
 replacing them with qualified registry digests is a later optimization.
 
+The build also runs PriceTag’s Go tests against a disposable PostgreSQL instance
+with the full migration chain, plus the shared key-control JavaScript tests.
+
 ## Coverage
 
 | Area | Assertions |
 | --- | --- |
 | Public boundary | Private management endpoints remain unavailable; forwarded identity headers do not grant privileges. |
 | Users and teams | UI onboarding, manager reassignment, personal/team isolation, 20-user fixture. |
-| Keys | Own-key creation/revocation, short expiry, maximum lifetime, foreign-key denial, demoted-administrator regression. |
+| Keys | Duplicate submission prevention, hidden copy/download, multiple working keys, cross-key usage, expiry countdowns, active/history pagination, owner-only revocation, admin revoke-all and demotion regression. |
 | Offboarding and sessions | Suspended account denial, same-origin view-as/logout confirmation, impersonation restrictions. |
 | Pricing | Catalog reads, discount save/refresh, custom rates, unchanged historical charges and explicit repricing confirmation. |
-| Budgets | Per-user overrides, paid-model denial, global model exceptions and independent legacy token gate. |
+| Budgets | Searchable per-user overrides, removal/inheritance, manager monthly totals, configured-model selection, paid-model denial, global exceptions and independent legacy token gate. |
 
 Provider/model editing through a host adapter is excluded. It belongs to the
 optional follow-up image and is not required by this suite. Browser tests verify
