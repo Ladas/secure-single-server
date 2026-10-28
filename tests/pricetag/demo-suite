@@ -60,7 +60,7 @@ def main():
                 run('browser-'+scenario,['node',str(ROOT/f'tests/pricetag/browser-{scenario}.cjs')],env)
             run('fixture',[sys.executable,str(ROOT/'tests/pricetag/rhel-demo-fixture.py'),'--prefix',fixture_prefix,'--output',str(fixture)])
             shutil.copyfile(directory/'server.pem',fixture/'server.pem')
-            run('browser-teams',['node',str(ROOT/'tests/pricetag/browser-teams.cjs')],{**env,'KEY_DIRECTORY':str(fixture)})
+            run('browser-teams',['node',str(ROOT/'tests/pricetag/browser-teams.cjs')],{**env,'KEY_DIRECTORY':str(fixture),'ADMIN_KEY_DIRECTORY':private})
             run('quota-matrix',[sys.executable,str(ROOT/'tests/pricetag/rhel-quota-matrix.py'),'--output',str(args.output/'quota')])
     finally:
         try:

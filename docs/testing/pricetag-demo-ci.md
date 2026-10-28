@@ -12,16 +12,16 @@ merging first. Source builds use the same reviewed revisions as publication;
 replacing them with qualified registry digests is a later optimization.
 
 The build also runs PriceTag’s Go tests against a disposable PostgreSQL instance
-with the full migration chain, plus the shared key-control JavaScript tests.
+with the full migration chain, plus all PriceTag UI JavaScript unit tests.
 
 ## Coverage
 
 | Area | Assertions |
 | --- | --- |
 | Public boundary | Private management endpoints remain unavailable; forwarded identity headers do not grant privileges. |
-| Users and teams | UI onboarding, manager reassignment, personal/team isolation, 20-user fixture. |
+| Users and teams | UI onboarding and reassignment; rendered personal Usage for members, managers and impersonation; direct API checks for own-user scope, mixed/cross-user filters, forged headers, and cross-team chart denial; 20-user fixture. |
 | Keys | Duplicate submission prevention, hidden copy/download, multiple working keys, cross-key usage, expiry countdowns, active/history pagination, owner-only revocation, admin revoke-all and demotion regression. |
-| Offboarding and sessions | Suspended account denial, same-origin view-as/logout confirmation, impersonation restrictions. |
+| Offboarding and sessions | Existing-session chart denial after suspension, anonymous API denial, same-origin view-as/logout confirmation, impersonation restrictions. |
 | Pricing | Catalog reads, discount save/refresh, custom rates, unchanged historical charges and explicit repricing confirmation. |
 | Budgets | Searchable per-user overrides, removal/inheritance, manager monthly totals, configured-model selection, paid-model denial, global exceptions and independent legacy token gate. |
 

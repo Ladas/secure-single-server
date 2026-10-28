@@ -42,6 +42,9 @@ let stage='setup';
   await done(admin,()=>admin.getByRole('button',{name:'Use global default',exact:true}).click());assert.equal((await quota()).base_usd,before.base_usd);
   stage='edit, suspend and reactivate stable identity';await admin.locator('#vtab-people').click();await admin.locator('#user [name=subject]').fill(names[2]);await admin.locator('#user [name=name]').fill('Renamed member');await done(admin,()=>admin.locator('#user button').click());assert.equal((await users()).find(u=>u.logins.includes(names[2])).user_id,ids[2]);
   await admin.locator('#user [name=active]').selectOption('false');await done(admin,()=>admin.locator('#user button').click());assert.equal(await member.evaluate(async()=>(await fetch('/api/v1/whoami')).status),403);
+  for(const route of ['/api/v1/dashboard/overview','/api/v1/dashboard/models','/api/v1/org/usage','/api/v1/org/charts']){
+   assert.equal(await member.evaluate(async path=>(await fetch(path)).status,route),403,'suspended identity cannot read usage with its existing session');
+  }
   await admin.locator('#user [name=active]').selectOption('true');await done(admin,()=>admin.locator('#user button').click());assert.equal(await member.evaluate(async()=>(await fetch('/api/v1/whoami')).status),200);
   assert.equal((await users()).find(u=>u.logins.includes(names[2])).user_id,ids[2]);assert.equal((await quota()).spent_usd,before.spent_usd);
   console.log('PASS: UI manager reassignment, cycle rejection, override removal/default inheritance and stable-identity edit/suspension/reactivation');

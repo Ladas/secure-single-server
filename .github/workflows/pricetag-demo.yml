@@ -68,7 +68,7 @@ jobs:
             git -C "$directory" checkout --detach FETCH_HEAD
             test "$(git -C "$directory" rev-parse HEAD)" = "$revision"
           done
-          node --test "$RUNNER_TEMP/metering/tests/ui/key-controls.test.cjs"
+          node --test "$RUNNER_TEMP/metering/tests/ui/"*.test.cjs
           sudo python3 tests/pricetag/metering-unit.py --source "$RUNNER_TEMP/metering"
           sudo scripts/pricetag/build-maas --source "$RUNNER_TEMP/maas" --expected-commit "$maas" --tag localhost/maas:demo-ci
           sudo python3 scripts/pricetag/build-metering --source "$RUNNER_TEMP/metering" --revision "$metering" --tag localhost/metering:demo-ci
