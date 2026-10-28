@@ -45,10 +45,16 @@ Perform live user/team, key, budget and pricing changes in the UI. Prepare provi
 Fixture generation and automated assertions may use APIs. Do not use terminal
 management as a substitute for a missing demo UI.
 
+Follow the [browser walkthrough](../quickstarts/remote-gateway-pricetag/demo.md)
+before running the quota test below. The quota test retains a 10B-token
+synthetic event that distorts aggregate usage and savings charts. Use a
+separate host if you need to keep the presentation dashboard available.
+
 ## API qualification
 
-Run on an idle mock deployment. The fixture and tests verify the generated mock
-configuration before mutations. They do not require a provider-management adapter.
+After the presentation, run on an idle mock deployment. The fixture and tests
+verify the generated mock configuration before mutations. They do not require
+a provider-management adapter.
 
 ```sh
 sudo python3 tests/pricetag/rhel-pricing.py \
@@ -57,9 +63,8 @@ sudo python3 tests/pricetag/rhel-quota-matrix.py \
   --output /root/pricetag-admin/demo-quota-checks
 ```
 
-Use a new output directory each run. The quota test creates synthetic usage,
-including a 10B-token safety-gate fixture; exclude these identities from the
-presentation. Tests restore policy and suspend their test identities. A global
+Use a new output directory each run. Tests restore policy and suspend their
+test identities, but retain synthetic accounting history. A global
 post-budget exception bypasses the USD gate, not the legacy token gate.
 
 Clean up the presentation fixture when finished (accounting history is retained):
@@ -69,7 +74,6 @@ sudo python3 tests/pricetag/rhel-demo-fixture.py --cleanup \
   --output /root/pricetag-admin/demo-team-fixture
 ```
 
-Follow the [browser walkthrough](../quickstarts/remote-gateway-pricetag/demo.md)
-for the live presentation. Full automated browser deployment coverage is being
-prepared in a separate CI PR. This reduced image has passed the benchmark API/browser/quota suite; keep hosted
-CI qualification separate from the RHEL installation check.
+Full automated browser deployment coverage is being prepared in a separate CI
+PR. This reduced image has passed the benchmark API/browser/quota suite; keep
+hosted CI qualification separate from the RHEL installation check.

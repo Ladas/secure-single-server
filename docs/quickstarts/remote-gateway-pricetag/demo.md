@@ -62,7 +62,7 @@ As superadmin, open **Administration → Users**:
 
 1. Select the user under **Issue onboarding key**; you do not need to issue a key.
 2. Choose **View selected user’s usage** or **View selected user’s team**.
-   Confirm with **Continue**. The user table also provides **View** and **Team** links.
+   Confirm with **Continue**.
 3. Show the **Viewing as** banner. Personal Usage must contain only the selected
    identity; the team view must contain only that identity's authorized subtree.
 4. Choose **Back to admin view** in the banner and confirm. Aggregate Usage and
