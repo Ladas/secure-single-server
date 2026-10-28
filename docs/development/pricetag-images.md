@@ -6,9 +6,9 @@ The [image workflow](../../.github/workflows/pricetag-images.yml) builds two
 | Image repository | Source |
 | --- | --- |
 | `quay.io/redhat-et/secure-single-server-maas-standalone` | [MaaS standalone revision](https://github.com/Ladas/models-as-a-service/commit/6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d) |
-| `quay.io/redhat-et/secure-single-server-pricetag-metering` | [PriceTag management demo revision](https://github.com/Ladas/pricetag-metering/commit/2d52613ad1125bd95e98f0dbc0c0b5d20f3a9289) |
+| `quay.io/redhat-et/secure-single-server-pricetag-metering` | [PriceTag management demo revision](https://github.com/Ladas/pricetag-metering/commit/49e75dc57c9081b5d2bb7e3cfbb4e1099d0b1a36) |
 
-PriceTag includes the six-commit management demo, scoped dashboards and safety fixes.
+PriceTag includes the management demo, scoped dashboards and the reviewed key, budget and pricing fixes.
 The optional provider/model adapter follow-up is excluded. These changes are
 fork dependencies, not merged upstream features. MaaS is unchanged.
 
@@ -60,7 +60,7 @@ To run the component smoke test against locally built images:
 ```console
 sudo python3 tests/pricetag/component-images.py \
   --maas-image localhost/pricetag-maas:standalone \
-  --metering-image localhost/pricetag-metering:demo-2d52613
+  --metering-image localhost/pricetag-metering:demo-49e75dc
 ```
 
 ARM64 publication, image signatures and SBOM/provenance publication are not
