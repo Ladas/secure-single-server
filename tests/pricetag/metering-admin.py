@@ -1,41 +1,54 @@
 #!/usr/bin/env python3
-"""Standalone provisioning contracts for the pinned partner-user schema."""
+"""Management clients must use service APIs without resetting user state."""
 from pathlib import Path
 import sys
 import unittest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts/pricetag'))
+from unittest.mock import patch
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'scripts/pricetag'))
 import metering_admin
 
-
 class ProvisioningTest(unittest.TestCase):
-    def test_budget_targets_login_and_identity_is_stable(self):
-        sql = metering_admin.provision_sql('alice', "Alice O'Neil", 5)
-        self.assertIn("'user', 'alice', 5", sql)
-        self.assertIn("Alice O''Neil", sql)
-        self.assertIn('partner_user_logins', sql)
-        self.assertIn('org_audit', sql)
-        self.assertNotIn('person_identities', sql)
-        self.assertIn('BEGIN;', sql)
-        self.assertIn('COMMIT;', sql)
+    @patch('metering_admin.request')
+    @patch('metering_admin.os.geteuid',return_value=0)
+    def test_rotation_preserves_budget_and_role(self,uid,request):
+        metering_admin.provision('alice')
+        request.assert_called_once_with('PUT','users',{'subject':'alice'})
 
-    def test_rotation_does_not_change_budget_or_role(self):
-        sql = metering_admin.provision_sql('alice', None, None)
-        self.assertNotIn('quota_overrides', sql)
-        self.assertNotIn("role='super_admin'", sql)
-        self.assertIn('active', sql)
+    @patch('metering_admin.request')
+    @patch('metering_admin.os.geteuid',return_value=0)
+    def test_explicit_budget_is_separate_api_operation(self,uid,request):
+        metering_admin.provision('alice','Alice',5)
+        self.assertEqual(request.call_args_list[0].args,('PUT','users',{'subject':'alice','name':'Alice'}))
+        self.assertEqual(request.call_args_list[1].args,('PUT','budgets',{'subject':'alice','monthly_usd':5}))
 
-    def test_only_explicit_admin_bootstrap_grants_admin(self):
-        self.assertNotIn("role='super_admin'", metering_admin.provision_sql('admin', None, None))
-        self.assertIn("role='super_admin'", metering_admin.provision_sql('admin', None, None, admin=True))
-        with self.assertRaises(ValueError):
-            metering_admin.provision_sql('alice', None, None, admin=True)
+    @patch('metering_admin.request')
+    @patch('metering_admin.os.geteuid',return_value=0)
+    def test_reject_invalid_identity_budget_and_admin(self,uid,request):
+        for subject,budget,admin in [("bad'subject",5,False),('alice',float('nan'),False),('alice',0,False),('alice',.001,False),('alice',5,True)]:
+            with self.assertRaises(ValueError):metering_admin.provision(subject,budget=budget,admin=admin)
+        request.assert_not_called()
 
-    def test_reject_invalid_identity_and_budget(self):
-        for subject, amount in [("a' OR true", 5), ('alice', float('nan')), ('alice', 0), ('alice', .001)]:
-            with self.assertRaises(ValueError):
-                metering_admin.provision_sql(subject, None, amount)
+class PricingTest(unittest.TestCase):
+    @patch('metering_admin.request')
+    def test_existing_upstream_rate_needs_no_alias_copy(self, request):
+        request.return_value = [{'Model': 'upstream-model'}]
+        metering_admin.ensure_prices([{'id': 'external/model', 'model': 'upstream-model', 'provider': 'external'}])
+        request.assert_called_once_with('GET', 'prices')
 
+    @patch('metering_admin.request')
+    def test_explicit_source_populates_billed_id_once(self, request):
+        request.return_value = [{'Model': 'source-model'}]
+        models = [{'id': alias, 'model': 'upstream-model', 'provider': 'external'}
+                  for alias in ('external/one', 'external/two')]
+        metering_admin.ensure_prices(models, {m['id']: 'source-model' for m in models})
+        self.assertEqual(request.call_count, 2)
+        request.assert_called_with('PUT', 'prices', {
+            'model': 'upstream-model', 'provider': 'external', 'source_model': 'source-model'})
 
-if __name__ == '__main__':
-    unittest.main()
+    @patch('metering_admin.request')
+    def test_missing_rate_uses_service_fallback_without_writes(self, request):
+        request.return_value = []
+        metering_admin.ensure_prices([{'id': 'external/model', 'model': 'missing-model', 'provider': 'external'}])
+        request.assert_called_once_with('GET', 'prices')
+
+if __name__=='__main__':unittest.main()

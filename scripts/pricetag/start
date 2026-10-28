@@ -13,7 +13,7 @@ if [[ "${1:-}" == --adopt-existing-database && "$#" == 1 ]]; then
 elif [[ "$#" != 0 ]]; then
   die 'usage: scripts/pricetag/start [--adopt-existing-database]'
 fi
-[[ -f "${DEPLOY_DIR}/bootstrap.sql" ]] || die 'run scripts/pricetag/prepare.py first'
+[[ -f "${DEPLOY_DIR}/bootstrap.json" ]] || die 'run scripts/pricetag/prepare.py first'
 [[ -s "${DEPLOY_DIR}/m2m-secret" ]] || die 'MaaS/PriceTag shared secret is missing; prepare a fresh deployment'
 uid="$(service_uid)"
 units="/etc/containers/systemd/users/${uid}"
@@ -107,8 +107,8 @@ if [[ ! -f "${DEPLOY_DIR}/bootstrap.done" ]]; then
   if [[ "${rows}" != 0 && "${adopt_existing_database}" != 1 ]]; then
     die 'database already has usage; back it up, review schema and model prices, then use --adopt-existing-database'
   fi
-  if ! as_service podman exec -i pricetag-db psql -X -U metering -d metering -v ON_ERROR_STOP=1 < "${DEPLOY_DIR}/bootstrap.sql"; then
-    note 'Price/bootstrap initialization failed; its transaction was rolled back. Gateway startup stopped.'
+  if ! python3 "${SCRIPT_DIR}/metering_admin.py" --bootstrap "${DEPLOY_DIR}/bootstrap.json"; then
+    note 'PriceTag API initialization failed. Gateway startup stopped; inspect service status and rerun start.'
     die 'Keep the prepared files and keys. After fixing the cause, rerun sudo scripts/pricetag/start; do not rerun install or prepare.py.'
   fi
   install -m 0600 /dev/null "${DEPLOY_DIR}/bootstrap.done"

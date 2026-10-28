@@ -10,7 +10,7 @@ from unified_config import active, catalog, render as unified, validate
 
 INFERENCE = ['/v1/chat/completions', '/v1/responses', '/v1/messages']
 DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me', '/welcome',
-             '/whoami', '/api/v1/whoami', '/api/v1/pricing',
+             '/management', '/admin/impersonate', '/me/keys', '/whoami', '/api/v1/whoami', '/api/v1/pricing',
              '/api/v1/dashboard/overview', '/api/v1/dashboard/groups',
              '/api/v1/dashboard/users', '/api/v1/dashboard/directory-users',
              '/api/v1/dashboard/models', '/api/v1/dashboard/tools',
@@ -19,7 +19,7 @@ DASHBOARD = ['/', '/login', '/logout', '/dashboard', '/admin', '/manager', '/me'
              '/api/v1/admin/model-policies', '/api/v1/admin/pricing-discounts',
              '/api/v1/admin/pricing/refresh', '/api/v1/admin/pricing/reprice', '/api/v1/org/scope',
              '/api/v1/org/usage', '/api/v1/org/person', '/api/v1/org/charts']
-DASHBOARD_PREFIXES = ['/api/v1/admin/partner-users/', '/api/v1/admin/pricing/reprice/']
+DASHBOARD_PREFIXES = ['/api/v1/management/', '/me/keys/', '/api/v1/admin/partner-users/', '/api/v1/admin/pricing/reprice/']
 
 
 def render(original, models, origins=None):
@@ -68,6 +68,7 @@ def render(original, models, origins=None):
                     'internal_auth_file': '/run/secrets/pricetag-m2m',
                     'fail_open': False, 'timeout_seconds': 5, 'source': 'secure-single-server',
                     'default_username': '', 'default_model': 'unknown',
+                    'model_policy_check': True,
                     'identity_header_prefix': 'x-tenant-', 'feature_key': 'inference-tokens'})
                 break
         if request_headers is not None and selected:
@@ -104,7 +105,8 @@ def render(original, models, origins=None):
     dashboard = [
             {'filter': 'headers', 'request_remove': ['Authorization', 'X-Api-Key', 'X-MaaS-Username',
                 'X-MaaS-Group', 'X-MaaS-Subscription', 'X-Tenant-Username', 'X-Tenant-Group',
-                'X-Tenant-Subscription', 'X-Tenant-Model', 'X-Forwarded-User']},
+                'X-Tenant-Subscription', 'X-Tenant-Model', 'X-Forwarded-User',
+                'X-Forwarded-Groups', 'X-Forwarded-Real-User']},
             {'filter': 'router', 'routes': [{'path_prefix': '/', 'cluster': 'metering'}]},
             {'filter': 'load_balancer', 'clusters': [
                 {'name': 'metering', 'endpoints': ['pricetag-metering:8080']}]}]

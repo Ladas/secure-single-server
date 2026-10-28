@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Run the private provider-configuration adapter from root-owned installed code."""
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import socket
+import stat
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'scripts/common'))
+from gateway_management import Engine, validate
+from gateway_management_backend import Backend
+from gateway_management_transport import Server
+
+DEPLOY = Path('/etc/praxis-pricetag')
+SOCKET = Path('/run/praxis-gateway-management/adapter.sock')
+
+
+def private_file(path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('adapter credentials and policy must be private root-owned files')
+    return path.read_text()
+
+
+def main():
+    if os.geteuid() != 0:
+        raise ValueError('adapter must run as the host management service')
+    secret = private_file(DEPLOY / 'gateway-management-secret').strip()
+    policy = json.loads(private_file(DEPLOY / 'gateway-management-policy.json'))
+    if not isinstance(policy, dict) or set(policy) != {'approved_origins', 'mock'} or type(policy['mock']) is not bool:
+        raise ValueError('invalid adapter policy')
+    origins = policy['approved_origins']
+    if not isinstance(origins, list) or not origins or any(not isinstance(x, str) for x in origins):
+        raise ValueError('approved origins required')
+    if any(not origin.startswith('https://') for origin in origins):
+        if not policy['mock'] or not (DEPLOY / 'quadlets/pricetag-provider.container').is_file():
+            raise ValueError('HTTP origins are restricted to the mock deployment')
+    loader = importlib.machinery.SourceFileLoader('provider_helpers', str(ROOT / 'scripts/pricetag/providers'))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    helpers = importlib.util.module_from_spec(spec)
+    loader.exec_module(helpers)
+    backend = Backend(helpers)
+    with backend.lock():
+        validate(backend.read(), origins)
+    info = SOCKET.parent.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise ValueError('socket directory must be root-owned and not writable by peers')
+    if SOCKET.exists() or SOCKET.is_symlink():
+        info = SOCKET.lstat()
+        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != 0:
+            raise ValueError('refusing to replace unexpected socket path')
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(1)
+            probe.connect(str(SOCKET))
+        except ConnectionRefusedError:
+            SOCKET.unlink()
+        else:
+            raise ValueError('adapter socket is already active')
+        finally:
+            probe.close()
+    os.umask(0o077)
+    with Server(str(SOCKET), secret, Engine(backend, origins)) as server:
+        # Rootless container UIDs cannot share a host group reliably. Socket
+        # access is authenticated by the dedicated capability, not file mode.
+        SOCKET.chmod(0o666)
+        server.serve_forever()
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError):
+        raise SystemExit('Gateway management adapter failed; inspect host configuration without printing credentials') from None

@@ -454,34 +454,6 @@ def refresh_model_files(settings, name="pricetag"):
     return {path: (json.dumps(value, indent=2) + '\n').encode() for path, value in values.items()}
 
 
-def migration_prices(models):
-    """Insert missing alias prices without repricing historical events or policy."""
-    statements = ['BEGIN;']
-    for model in models:
-        alias, source = model['id'], model['model']
-        if any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}', v) for v in (alias, source)):
-            raise ValueError('Invalid pricing alias/source')
-        statements.append(f"""DO $guard$ BEGIN
-IF NOT EXISTS (SELECT 1 FROM model_pricing WHERE model='{alias}') THEN
-  IF NOT EXISTS (SELECT 1 FROM model_pricing WHERE model='{source}') THEN
-    RAISE EXCEPTION 'Missing reviewed source price for {source}';
-  END IF;
-  IF EXISTS (SELECT 1 FROM usage_events WHERE model='{alias}') THEN
-    RAISE EXCEPTION 'Refusing to reprice historical usage for {alias}';
-  END IF;
-END IF;
-END $guard$;
-INSERT INTO model_pricing(model,provider,input_cost_per_mtok,output_cost_per_mtok,
-cache_write_cost_per_mtok,cache_read_cost_per_mtok,list_input_cost_per_mtok,
-list_output_cost_per_mtok,list_cache_write_cost_per_mtok,list_cache_read_cost_per_mtok)
-SELECT '{alias}',provider,input_cost_per_mtok,output_cost_per_mtok,
-cache_write_cost_per_mtok,cache_read_cost_per_mtok,list_input_cost_per_mtok,
-list_output_cost_per_mtok,list_cache_write_cost_per_mtok,list_cache_read_cost_per_mtok
-FROM model_pricing WHERE model='{source}' ON CONFLICT(model) DO NOTHING;""")
-    statements.append('COMMIT;')
-    return '\n'.join(statements) + '\n'
-
-
 def replacement_files(settings, name='pricetag', refresh=False):
     files = refresh_model_files(settings, name=name) if refresh else {}
     models = [m for m in json.loads((DEPLOY / 'models.json').read_text()) if m['provider'] == name]
@@ -554,7 +526,7 @@ def activate_gateway():
     raise ValueError('gateway did not become healthy after replacement')
 
 
-def install_replacement(files, price_sql=None):
+def install_replacement(files, price_models=None):
     backup = Path(tempfile.mkdtemp(prefix='pricetag-replacement-', dir=STATE))
     originals, stats, manifest = {}, {}, []
     for index, path in enumerate(files):
@@ -567,11 +539,9 @@ def install_replacement(files, price_sql=None):
                          'gid': stats[path].st_gid, 'mode': stats[path].st_mode & 0o777})
     (backup / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print('Private rollback backup:', backup)
-    if price_sql:
-        (backup / 'new-alias-prices.sql').write_text(price_sql)
-        service('podman', 'exec', '-i', 'pricetag-db', 'psql', '-U', 'metering', '-d', 'metering',
-                '-v', 'ON_ERROR_STOP=1', input=price_sql.encode(), check=True)
-        print('Missing alias prices inserted; existing rates and usage unchanged.')
+    if price_models:
+        from metering_admin import ensure_prices
+        ensure_prices(price_models)
 
     def write(path, contents):
         with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.replace-', delete=False) as output:
@@ -598,8 +568,8 @@ def install_replacement(files, price_sql=None):
             raise ValueError('Replacement and automatic recovery failed; restore from ' + str(backup)) from None
         raise ValueError('Replacement failed; previous files and gateway restored. Backup: ' + str(backup)) from None
     print('Provider replacement active. Users, budgets, usage and existing prices preserved.')
-    if price_sql:
-        print('PriceTag routing/catalog refreshed. New alias prices remain available if configuration is rolled back.')
+    if price_models:
+        print('PriceTag routing/catalog refreshed. New upstream price records remain available if configuration is rolled back.')
     print('Old Podman secrets retained for rollback. Verify a real inference request with your harness.')
 
 
@@ -663,8 +633,16 @@ def collect_credential(name, urls, key_file=None):
     return key
 
 
+def require_legacy_configuration():
+    if (DEPLOY / 'gateway-management.json').exists():
+        raise ValueError('Gateway configuration is managed through Account management; '
+                         'use its provider/model UI or management API instead of legacy provider files')
+
+
 def add_provider(name, urls=None, replace=False, check_auth=False, check_inference=None,
                  refresh=False, key_file=None, apis=None, list_models=False, listing_options=None):
+    if not (check_auth or check_inference or list_models):
+        require_legacy_configuration()
     if not key_file and not sys.stdin.isatty():
         raise ValueError('Run interactively over SSH; never pipe provider keys')
     STATE.mkdir(mode=0o700, exist_ok=True)
@@ -708,7 +686,7 @@ def save_provider(name, settings, key, replace=False, refresh=False):
     if result.returncode:
         raise ValueError('Podman secret creation failed; credential values are not shown')
     if active:
-        install_replacement(files, price_sql=migration_prices(settings['models']) if refresh else None)
+        install_replacement(files, price_models=settings['models'] if refresh else None)
         return
     with tempfile.NamedTemporaryFile(mode='w', dir=STATE, prefix='.provider-', delete=False) as output:
         temporary = Path(output.name)
@@ -721,6 +699,7 @@ def save_provider(name, settings, key, replace=False, refresh=False):
 
 
 def export():
+    require_legacy_configuration()
     import yaml
     from provider_config import render
     from unified_config import validate

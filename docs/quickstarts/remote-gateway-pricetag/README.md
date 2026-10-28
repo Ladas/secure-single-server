@@ -7,6 +7,13 @@ OpenCode with a user key and a monthly USD budget.
 SSH/8443 from your IP; Git, Python 3 and OpenCode on your workstation.
 The tested VM has 8 vCPUs, 32 GiB RAM and 150 GiB disk. No GPU is needed.
 
+> **Management candidate:** this branch requires the matching, unpublished
+> PriceTag management changes. The published image defaults do not contain those
+> APIs. For the qualified mock UI demo, follow the
+> [candidate installation](../../testing/pricetag-management-demo.md).
+> The general installation below must use a compatible image before this branch
+> is released; it is not currently a verified path with the published defaults.
+
 ## 1. Set the connection
 
 Run from your checked-out `secure-single-server` repository on your workstation:
@@ -141,8 +148,9 @@ OpenCode merges these with existing settings. Sessions for one user share their 
 Send: **“Reply with just: gateway works.”** In the admin dashboard, select Alice
 (or your chosen user) and confirm the request, model alias and recorded spend.
 Accounting may take a few seconds; free models record zero USD. The default
-allowance is per user; individual overrides are managed through the
-[user helper](users.md), not displayed as individual limits in this UI.
+allowance is per user. With the management candidate, view and change overrides
+in **Account management**; the [user helper](users.md) uses the same service API.
+The published-image dashboard does not include these candidate controls.
 For budget-denial testing, use the separate [mock quota probe](../../testing/pricetag-perf.md#usd-quota-probe).
 
 [Save a native config or switch to the standard OpenCode config directory](clients.md).
@@ -162,7 +170,22 @@ python3 "$REPO/scripts/pricetag/harness" opencode --url "$GATEWAY_URL" \
 
 ## Operations
 
+With the **management candidate**, use Account management for users, team
+relationships, budgets, keys and prices. Provider/model configuration stays in the host CLI
+for the reduced demo image. Personal
+and manager dashboards show scoped usage. For automation, use
+[`scripts/pricetag/api`](management-api.md#remote-https-client) from your workstation
+or [`scripts/pricetag/manage`](management-api.md#host-management-over-ssh) on RHEL.
+Both call service APIs; neither writes business tables. The candidate still
+requires the [separate image/install procedure](../../testing/pricetag-management-demo.md).
+
+Installation and approval of new provider origins remain host operations.
+Quota exceptions permit explicit client model selection; they do not reroute
+a denied request automatically.
+
+
 [Providers](providers.md) · [Users, keys and budgets](users.md) ·
+[Management CLI and API](management-api.md) ·
 [Manual installation](manual.md) · [Mock benchmarks](../../testing/pricetag-perf.md)
 
 **Pilot limits:** keep this host restricted to trusted administrators. MaaS

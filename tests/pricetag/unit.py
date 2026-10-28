@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -37,6 +38,32 @@ maas_loader.exec_module(maas_key)
 
 
 class PreparationTest(unittest.TestCase):
+    def test_demo_installer_plan_and_input_validation(self):
+        command = [sys.executable, str(ROOT / 'scripts/pricetag/install-demo'), '--plan',
+                   '--hostname', 'gateway.example']
+        for component in ('praxis', 'maas', 'metering'):
+            command += ['--' + component + '-image', 'sha256:' + 'a' * 64]
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('synthetic providers', result.stdout)
+        command[4] = 'https://invalid.example/path'
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+
+
+    def test_managed_mock_supports_authenticated_ui_routes(self):
+        original, models = prepare.mock_inputs(managed=True)
+        self.assertEqual([m['id'] for m in models], ['mock/fixture', 'mock/demo-cheap'])
+        self.assertTrue(all(m['provider'] == 'mock' for m in models))
+        result = prepare.render(original, models)
+        for chain in result['filter_chains']:
+            if chain['name'] not in ('openai', 'anthropic'):
+                continue
+            injection = next(f for f in chain['filters'] if f['filter'] == 'credential_injection')
+            self.assertEqual(injection['clusters'][0]['env_var'], 'CUSTOM_MOCK_API_KEY')
+            self.assertNotIn('synthetic-anthropic', json.dumps(result))
+
+
     def test_access_policy_checks_rewritten_model_and_routes_require_alias(self):
         original, models = prepare.mock_inputs()
         models[0]['id'] = 'mock/fixture'
@@ -49,6 +76,15 @@ class PreparationTest(unittest.TestCase):
             rejection = next(f for f in chain['filters'] if f.get('body') == 'Unknown model')
             self.assertEqual(rejection['conditions'],
                              [{'unless': {'headers': {'X-Gateway-Model': 'mock/fixture'}}}])
+
+    def test_admission_checks_the_requested_model(self):
+        original, models = prepare.mock_inputs()
+        result = prepare.render(original, models)
+        for chain in result['filter_chains']:
+            if chain['name'] in ('openai', 'anthropic'):
+                metering = next(f for f in chain['filters'] if f['filter'] == 'external_metering')
+                self.assertTrue(metering['model_policy_check'])
+                self.assertFalse(metering['fail_open'])
 
     def test_admin_model_suggestions_use_dashboard_boundary(self):
         original, models = prepare.mock_inputs()
@@ -66,7 +102,7 @@ class PreparationTest(unittest.TestCase):
         router = next(f for f in edge['filters'] if f['filter'] == 'router')
         guard = next(f for f in edge['filters'] if f.get('body') == 'Route not available')
         for path in ('/api/v1/admin/pricing-discounts', '/api/v1/admin/pricing/refresh',
-                     '/api/v1/admin/pricing/reprice'):
+                     '/api/v1/admin/pricing/reprice', '/admin/impersonate'):
             self.assertIn({'path': path, 'cluster': 'dashboard'}, router['routes'])
             self.assertIn({'unless': {'path': path}}, guard['conditions'])
         self.assertIn({'path_prefix': '/api/v1/admin/pricing/reprice/', 'cluster': 'dashboard'}, router['routes'])

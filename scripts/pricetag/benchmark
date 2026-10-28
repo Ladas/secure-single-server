@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import subprocess
 import sys
 import uuid
@@ -25,11 +26,17 @@ def load_observer():
 
 def require_mock(directory):
     models = json.loads((directory / 'models.json').read_text())
-    if len(models) != 1 or models[0].get('id') != 'fixture' or models[0].get('model') != 'fixture':
+    legacy = len(models) == 1 and models[0].get('id') == 'fixture' and models[0].get('model') == 'fixture'
+    managed = bool(models) and all(m.get('provider') == 'mock' and str(m.get('id', '')).startswith('mock/')
+        and re.fullmatch(r'fixture(?:-[a-z0-9-]+)?', str(m.get('model', ''))) for m in models)
+    if not (legacy or managed):
         raise ValueError('benchmark requires the dedicated fixture-only deployment')
     unit = (directory / 'quadlets/pricetag-gateway.container').read_text()
-    if 'Network=pricetag-mock.network' not in unit or any(line.startswith('Secret=') and 'type=env' in line
-                                                        for line in unit.splitlines()):
+    credential_lines = [line for line in unit.splitlines() if line.startswith('Secret=') and 'type=env' in line]
+    mock_credentials = managed and all(re.fullmatch(
+        r'Secret=(?:pricetag-mock-ui-v[0-9]+|praxis-mock-api-key-v[0-9]+),type=env,target=CUSTOM_MOCK_API_KEY', line)
+        for line in credential_lines)
+    if 'Network=pricetag-mock.network' not in unit or (credential_lines and not mock_credentials):
         raise ValueError('benchmark refuses a deployment with real-provider credentials')
     config = json.loads((directory / 'gateway/gateway.json').read_text())
     endpoints = [endpoint for chain in config['filter_chains'] for item in chain['filters']
@@ -71,6 +78,7 @@ def main():
     if os.geteuid() != 0:
         parser.error('run with sudo on the mock-only RHEL server')
     require_mock(DEPLOY)
+    selected_model = json.loads((DEPLOY / 'models.json').read_text())[0]['id']
     owner = pwd.getpwnam('praxis-svc')
     prefix = ['sudo', '-u', 'praxis-svc', 'env', f'XDG_RUNTIME_DIR=/run/user/{owner.pw_uid}',
               f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{owner.pw_uid}/bus']
@@ -98,7 +106,7 @@ def main():
         common = [sys.executable, str(ROOT / 'scripts/pricetag/perf')]
         subprocess.run(common + ['users', '--tokens', str(output / 'keys'), '--prefix', name,
                        '--count', str(max(args.concurrency))], check=True, cwd='/tmp')
-        command = common + ['run', '--url', 'https://localhost:8443', '--ca', str(DEPLOY / 'ca.pem'),
+        command = common + ['run', '--model', selected_model, '--url', 'https://localhost:8443', '--ca', str(DEPLOY / 'ca.pem'),
                             '--tokens', str(output / 'keys'), '--concurrency', *map(str, args.concurrency),
                             '--requests', str(args.requests), '--think', '0', '--output', str(output / 'requests.json')]
         load = subprocess.Popen(command, cwd='/tmp')

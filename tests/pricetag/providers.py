@@ -24,6 +24,17 @@ from gateway import render as gateway
 
 
 class SetupTest(unittest.TestCase):
+    def test_legacy_mutation_rejects_adapter_managed_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            deploy = Path(directory)
+            (deploy / 'gateway-management.json').write_text('{}')
+            with patch.object(setup, 'DEPLOY', deploy), \
+                    patch.object(setup, 'collect_credential', side_effect=AssertionError('must not prompt')):
+                with self.assertRaisesRegex(ValueError, 'Account management'):
+                    setup.add_provider('external', replace=True)
+                with self.assertRaisesRegex(ValueError, 'Account management'):
+                    setup.export()
+
     def test_list_shows_active_models_without_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
             deploy = Path(directory)
@@ -292,16 +303,6 @@ class SetupTest(unittest.TestCase):
             self.assertNotIn('manual_jwt',serialized)
             self.assertIn(f'CUSTOM_{provider_name.upper()}_API_KEY',serialized)
             self.assertIn('api.openai.com',serialized)
-
-    def test_migration_prices_only_insert_missing_aliases(self):
-        sql=setup.migration_prices([{'id':'pricetag/rits/zai-org/glm-5-3',
-                                     'model':'rits/zai-org/glm-5-3'}])
-        self.assertTrue(sql.startswith('BEGIN;'))
-        self.assertIn('ON CONFLICT(model) DO NOTHING',sql)
-        self.assertIn('usage_events',sql)
-        self.assertNotIn('DELETE ',sql)
-        self.assertNotIn('UPDATE ',sql)
-        self.assertNotIn('quota',sql)
 
     def test_messages_bearer_header_is_used_for_discovery_and_inference(self):
         seen = []

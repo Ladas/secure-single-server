@@ -30,14 +30,14 @@ benchmark = module('benchmark')
 class InstallTest(unittest.TestCase):
     def test_bootstrap_failure_stops_before_marker_and_explains_recovery(self):
         source = (ROOT / 'scripts/pricetag/start').read_text()
-        start = source.index('  if ! as_service podman exec -i pricetag-db psql')
+        start = source.index('  if ! python3 "${SCRIPT_DIR}/metering_admin.py"')
         end = source.index('\nfi', start)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / 'bootstrap.sql').write_text('SELECT 1;')
+            (root / 'bootstrap.json').write_text('{}')
             script = root / 'check.sh'
-            script.write_text('set -eu\nDEPLOY_DIR="$1"\n'
-                              'as_service() { return 1; }\n'
+            script.write_text('set -eu\nDEPLOY_DIR="$1"\nSCRIPT_DIR="$1"\n'
+                              'python3() { return 1; }\n'
                               'note() { echo "$*"; }\n'
                               'die() { echo "$*"; exit 1; }\n' + source[start:end])
             result = subprocess.run(['bash', str(script), directory], text=True, capture_output=True)
@@ -364,6 +364,28 @@ class InstallTest(unittest.TestCase):
                     if item.get('filter') == 'load_balancer':
                         item['clusters'][0]['endpoints'] = ['remote.example:443']
             (path / 'gateway/gateway.json').write_text(json.dumps(rendered))
+            with self.assertRaises(ValueError):
+                benchmark.require_mock(path)
+
+    def test_mock_guard_accepts_managed_mock_aliases_only(self):
+        sys.path.insert(0, str(ROOT / 'scripts/pricetag'))
+        import gateway_management
+        import gateway
+        document = {'providers': [{'name': 'mock', 'urls': {
+            'openai': 'http://pricetag-provider:18080/v1',
+            'anthropic': 'http://pricetag-provider:18081'}, 'messages_auth': 'x-api-key'}],
+            'models': [{'id': 'mock/cheap', 'model': 'fixture-cheap', 'provider': 'mock',
+                        'apis': ['openai', 'anthropic'], 'context': 32768, 'output': 4096}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / 'quadlets').mkdir(); (path / 'gateway').mkdir()
+            (path / 'models.json').write_text(json.dumps(document['models']))
+            rendered = gateway.render(gateway_management.native_inputs(document), document['models'])
+            (path / 'gateway/gateway.json').write_text(json.dumps(rendered))
+            unit = path / 'quadlets/pricetag-gateway.container'
+            unit.write_text('Network=pricetag-mock.network\nSecret=praxis-mock-api-key-v2,type=env,target=CUSTOM_MOCK_API_KEY\n')
+            benchmark.require_mock(path)
+            unit.write_text(unit.read_text().replace('praxis-mock-api-key-v2', 'real-provider-key'))
             with self.assertRaises(ValueError):
                 benchmark.require_mock(path)
 

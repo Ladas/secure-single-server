@@ -1,0 +1,1 @@
+/opt/praxis-gateway-management/scripts/pricetag/gateway-management-serve -- gen_context(system_u:object_r:praxis_gateway_management_exec_t,s0)
