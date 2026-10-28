@@ -1,40 +1,25 @@
 # Management demo on RHEL
 
-**Candidate workflow — reduced-image deployment qualification pending.** Use a dedicated
+**Mock demo — source installation and API/browser acceptance verified on benchmark RHEL.** Use a dedicated
 benchmark VM and the matching PriceTag management candidate. Published PriceTag
 images do not yet contain these management APIs. All inference is synthetic.
 
-## Prepare images
+## Install on a fresh benchmark host
 
-Run on the RHEL VM from this checkout. Set `METERING_SOURCE` to the reviewed
-PriceTag candidate source directory. Build or pull matching standalone MaaS and
-Praxis images using the [installation guide](../quickstarts/remote-gateway-pricetag/README.md).
-Keep these images in root's Podman store. Get their immutable IDs:
-
-```sh
-export REPO="$PWD"
-sudo podman build -f "$REPO/configs/pricetag/Containerfile.metering" \
-  -t localhost/pricetag-metering:management-candidate "$METERING_SOURCE"
-sudo podman images --no-trunc
-```
-
-## Install the mock gateway
-
-Set the public hostname and three image IDs from the previous step. The installer
-imports them into the service account, prepares the Quadlets, starts the services,
-and keeps provider configuration host-managed. It refuses existing data. The reduced PriceTag image does not include provider/model editing in the browser.
+Run from the copied checkout on RHEL. The installer builds the default demo
+branches, imports the images and starts the Quadlet services with two synthetic
+model aliases. No real provider credentials are accepted.
 
 ```sh
-sudo "$REPO/scripts/pricetag/install-demo" \
-  --hostname "$GATEWAY_HOST" \
-  --praxis-image "$PRAXIS_IMAGE_ID" \
-  --maas-image "$MAAS_IMAGE_ID" \
-  --metering-image "$METERING_IMAGE_ID"
+read -r -p 'Gateway IP or DNS: ' GATEWAY_HOST
+sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" \
+  --mode mock --demo-fixture --image-mode source --yes
 ```
 
-Append `--plan` to inspect the steps without changing the host. Installation uses
-synthetic credentials only. Keep TCP 8443 restricted to the testing IPs while
-qualifying the candidate; database and management ports remain private.
+Keep TCP 8443 restricted to the testing IPs. Existing deployments are refused.
+For already-built images, use [image overrides](../quickstarts/remote-gateway-pricetag/images.md)
+or `scripts/pricetag/install-demo --help`. Database and key-management ports stay
+private.
 
 ## Prepare the live UI demo
 
@@ -48,7 +33,7 @@ qualifying the candidate; database and management ports remain private.
    APIs and generates mock usage; it does not write business tables directly.
 
 ```sh
-cd "$REPO"
+cd ~/secure-single-server
 sudo python3 tests/pricetag/rhel-demo-fixture.py \
   --output /root/pricetag-admin/demo-team-fixture
 ```
@@ -87,5 +72,5 @@ sudo python3 tests/pricetag/rhel-demo-fixture.py --cleanup \
 
 Follow the [browser walkthrough](../quickstarts/remote-gateway-pricetag/demo.md)
 for the live presentation. Full automated browser deployment coverage is being
-prepared in a separate CI PR. Previous larger-image browser results are not
-qualification of this reduced demo image.
+prepared in a separate CI PR. This reduced image has passed the benchmark API/browser/quota suite; keep hosted
+CI qualification separate from the RHEL installation check.

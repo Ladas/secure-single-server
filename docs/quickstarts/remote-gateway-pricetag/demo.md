@@ -8,15 +8,15 @@ is not included.
 ## 1. Onboard users and a manager
 
 Sign in at `https://<gateway-host>:8443/login` with the administrator key.
-Open **Account management** (`/management`):
+Open **Administration → Users** (`/admin`):
 
-1. In **Users**, create an ordinary user and a second ordinary user to be their
+1. In **Create or update a login**, create an ordinary user and a second ordinary user to be their
    manager. Keep their login names stable: usage belongs to that identity.
-2. In **Team relationships**, select the first user and their manager, retain
-   the `user` role, and save. A manager does not need administrator privileges.
-3. In **Monthly user budgets**, choose the user and set their monthly USD limit.
+2. In the existing user table, choose the manager in the user’s **Manager**
+   dropdown and retain the `user` role. Changes save immediately. A manager does not need administrator privileges.
+3. In **Administration → Safety Net → Monthly user budgets**, choose the user and set their monthly USD limit.
    **Use global default** removes an override; it does not reset spending.
-4. In **Issue onboarding key**, select each user and choose a name and finite
+4. Return to **Users → Issue onboarding key**, select each user and choose a name and finite
    lifetime. Copy each key once into a private password manager or a mode-0600
    client file. Do not include keys in screenshots or recordings.
 
@@ -44,7 +44,7 @@ prove model quality or a fixed cost reduction.
 
 ## 3. Apply controls and continue on an allowed model
 
-1. In **Account management → Monthly user budgets**, lower the test user's
+1. In **Administration → Safety Net → Monthly user budgets**, lower the test user's
    allowance below their recorded spend. Use an ordinary user: admin accounts
    are exempt from this spending gate.
 2. Send another paid-model request and observe denial after policy caches refresh.
@@ -65,7 +65,7 @@ to verify behavior without spending real money.
 - **Administration → Pricing:** inspect imported catalog prices and their units.
 - **Administration → Pricing Discounts:** save a scoped discount policy and
   verify its effective rates. Saving the policy refreshes prices.
-- **Account management → Model pricing:** the demo image also provides the
+- **Administration → Pricing Discounts → Model pricing:** the demo image also provides the
   optional custom-rate API/UI. Set input, output, cache-read and cache-write
   rates explicitly in USD per million tokens. Use the billed model ID.
 
@@ -75,7 +75,7 @@ See [pricing operations](pricing.md) for refresh, catalog and repricing examples
 
 ## 5. Replace keys and offboard
 
-In the user's **Account management → My keys**, create a replacement key,
+In the user's **My keys** (`/management`), create a replacement key,
 update the client's key file, test it, then revoke the old key. Administrators
 can issue onboarding keys for a selected user. Disabling a user and revoking
 keys are separate controls; test both as described in [user management](users.md).

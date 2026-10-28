@@ -18,15 +18,15 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 MAAS_COMMIT = '6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d'
-METERING_COMMIT = '3f8923d56e05d421e9d3460b2d05e4878b11b805'
+METERING_COMMIT = '2d52613ad1125bd95e98f0dbc0c0b5d20f3a9289'
 MAAS_REPO = 'https://github.com/Ladas/models-as-a-service.git'
 MAAS_BRANCH = 'feat/standalone-runtime-minimal'
 METERING_REPO = 'https://github.com/Ladas/pricetag-metering.git'
-METERING_BRANCH = 'feat/standalone-management-demo'
+METERING_BRANCH = 'feat/standalone-demo-reuse-upstream-ui'
 PRAXIS_IMAGE = 'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8'
 PRAXIS_REVISION = '5667c4acecd0981ae5114cbbf2ee3dcccec9c248'
 MAAS_IMAGE = 'localhost/pricetag-maas:standalone'
-METERING_IMAGE = 'localhost/pricetag-metering:demo-3f8923d'
+METERING_IMAGE = 'localhost/pricetag-metering:demo-2d52613'
 PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:5ca86edad1182787dc391b3486e46f0b83fc621e294b365a74a7b173fbf3631c'
 PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:62a8610521f3d7f5530a0d6dab7bf17cb47658232c2b0a27b16820cfac9d02b5'
 CACHE = Path('/var/cache/pricetag-installer')
@@ -176,6 +176,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=('real', 'mock'), default='real',
                    help='real providers (default); use mock for synthetic benchmarks')
+    p.add_argument('--demo-fixture', action='store_true', help='mock mode only: two model aliases for the UI demo')
     p.add_argument('--hostname', help='public IPv4 or DNS name; no scheme, path or port')
     p.add_argument('--provider', action='append', choices=('openai', 'external', 'pricetag'), default=[],
                    help='real mode requires one or more providers; pricetag is the legacy external profile')
@@ -220,6 +221,8 @@ def parse_args(argv=None):
             args.provider = ['openai', 'external'] if selected == 'both' else [selected]
         else:
             p.error('real mode requires --provider openai and/or --provider external')
+    if args.demo_fixture and args.mode != 'mock':
+        p.error('--demo-fixture requires --mode mock')
     if args.mode == 'mock' and args.provider:
         p.error('mock mode cannot configure real providers')
     if 'external' in args.provider and not args.external_api:
@@ -443,6 +446,10 @@ def install(args):
         command += ['--no-sample-users']
     if args.mode == 'mock':
         command += ['--mock-provider', '--price-sources', ROOT / 'configs/pricetag/perf-price-sources.json']
+        if args.demo_fixture:
+            subprocess.run([*prefix, 'podman', 'secret', 'create', 'pricetag-mock-ui-v1', '-'],
+                           input=b'synthetic-anthropic', check=True, stdout=subprocess.DEVNULL, cwd='/tmp')
+            command += ['--managed-mock', '--mock-secret', 'pricetag-mock-ui-v1']
     else:
         run([sys.executable, ROOT / 'scripts/pricetag/providers', 'export'])
         for option, filename in (('--providers', 'providers.json'), ('--models', 'models.json'),
@@ -459,7 +466,7 @@ def install(args):
     print('Keys: /root/pricetag-admin/' + ('{admin,alice,bob}.key' if args.sample_users else 'admin.key'))
     if not args.sample_users:
         print('Create an inference user next: docs/quickstarts/remote-gateway-pricetag/users.md')
-    print('\nNext: open the dashboard, then connect OpenCode (quickstart steps 3–5).')
+    print('\nNext: open the dashboard, then connect OpenCode (quickstart steps 4–6).')
     print('Guide: docs/quickstarts/remote-gateway-pricetag/README.md')
     if args.mode == 'mock':
         print('Benchmark: sudo python3 scripts/pricetag/benchmark')

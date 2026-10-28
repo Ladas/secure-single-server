@@ -4,8 +4,8 @@ Admin is always created; Alice/Bob are optional. Ordinary users inherit $5/month
 unless configured otherwise. Keys expire within 90 days. Use ordinary-user keys
 for inference: admin is quota-exempt.
 
-With the management candidate installed, **Account management** provides user,
-team, budget and key operations in the browser. The commands below use the same
+With the management candidate installed, **Administration** provides user/manager controls and onboarding keys;
+**Safety Net** includes per-user USD overrides. **My keys** manages personal keys. The commands below use the same
 service APIs; they do not write business tables directly. Published images without
 those APIs are not compatible with this branch's helpers.
 
@@ -128,9 +128,9 @@ reported old IDs after checking their status.
 | View aggregate and user spending | Administrator dashboard |
 | View local users and change administrator roles or manager relationships | Administrator **Users** |
 | Set the default monthly allowance and post-limit model exceptions | Administrator **Safety Net** (`/api/v1/admin/safety-net`) |
-| Create users or change an individual allowance | Account management → Users / Monthly user budgets; SSH `scripts/pricetag/user` uses the same PriceTag APIs |
-| Issue onboarding keys | Account management → Issue onboarding key |
-| Create/list/revoke your own keys | Account management → My keys; SSH `scripts/pricetag/maas-key` remains available |
+| Create users or change an individual allowance | Administration → Users / Safety Net → Monthly user budgets; SSH `scripts/pricetag/user` uses the same PriceTag APIs |
+| Issue onboarding keys | Administration → Users → Issue onboarding key |
+| Create/list/revoke your own keys | My keys (`/management`); SSH `scripts/pricetag/maas-key` remains available |
 | Configure providers, credentials and advertised models | SSH [provider helper](providers.md) |
 | View personal/team spending | My usage / Team usage; team scope follows manager relationships |
 

@@ -1,6 +1,6 @@
 # Management CLI and API
 
-For the management candidate, prefer **Account management** in the browser.
+For the management candidate, use **Administration** for admin operations and **My keys** for personal key operations.
 For automation, `scripts/pricetag/manage` calls the private loopback API with the
 host's protected service credential. It does not print credentials or response
 bodies, and it refuses to overwrite response files.

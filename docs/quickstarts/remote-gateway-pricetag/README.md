@@ -70,7 +70,7 @@ Choose providers, enter their keys at hidden prompts, then confirm with `install
 
 | Option | Purpose |
 | --- | --- |
-| `--no-sample-users` | Create admin only; onboard users in Account management. |
+| `--no-sample-users` | Create admin only; onboard users in Administration → Users. |
 | `--monthly-usd 10` | Set the default per-user monthly allowance. |
 | `--image-mode source` | Build application images; see [image options](images.md). |
 | `--mode mock` | Use synthetic providers for [benchmarks](../../testing/pricetag-perf.md). |
@@ -101,8 +101,9 @@ ssh "${SSH_OPTS[@]}" "$RHEL_HOST" \
 ```
 
 Open the URL, accept the deployment certificate and paste the admin key.
-Open **Account management** at `/management` to create users, assign managers,
-set budgets and issue keys. Follow the [UI demo walkthrough](demo.md) for the
+Open **Administration** at `/admin`: **Users** handles onboarding and managers;
+**Safety Net** handles budgets. **My keys** at `/management` handles personal keys.
+Follow the [UI demo walkthrough](demo.md) for the
 admin, personal and team views, spending controls and pricing.
 
 ## 5. Prepare the local connection
@@ -150,7 +151,7 @@ Send: **“Reply with just: gateway works.”** In the admin dashboard, select A
 (or your chosen user) and confirm the request, model alias and recorded spend.
 Accounting may take a few seconds; free models record zero USD. The default
 allowance is per user. With the management candidate, view and change overrides
-in **Account management**; the [user helper](users.md) uses the same service API.
+in **Administration → Safety Net**; the [user helper](users.md) uses the same service API.
 The published-image dashboard does not include these candidate controls.
 For budget-denial testing, use the separate [mock quota probe](../../testing/pricetag-perf.md#usd-quota-probe).
 
@@ -171,14 +172,15 @@ python3 "$REPO/scripts/pricetag/harness" opencode --url "$GATEWAY_URL" \
 
 ## Operations
 
-With the **management candidate**, use Account management for users, team
-relationships, budgets, keys and prices. Provider/model configuration stays in the host CLI
+With the **management candidate**, use Administration for users, team
+relationships, budgets, onboarding keys and prices; use My keys for personal keys. Provider/model configuration stays in the host CLI
 for the reduced demo image. Personal
 and manager dashboards show scoped usage. For automation, use
 [`scripts/pricetag/api`](management-api.md#remote-https-client) from your workstation
 or [`scripts/pricetag/manage`](management-api.md#host-management-over-ssh) on RHEL.
-Both call service APIs; neither writes business tables. The candidate still
-requires the [separate image/install procedure](../../testing/pricetag-management-demo.md).
+Both call service APIs; neither writes business tables. Use the
+[mock demo setup](../../testing/pricetag-management-demo.md) for synthetic
+quota-exhaustion and team-fixture tests.
 
 Installation and approval of new provider origins remain host operations.
 Quota exceptions permit explicit client model selection; they do not reroute

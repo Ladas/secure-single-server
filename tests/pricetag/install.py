@@ -113,7 +113,7 @@ class InstallTest(unittest.TestCase):
     def test_demo_source_defaults_exclude_optional_followup(self):
         args = self.image_args()
         self.assertEqual(args.image_mode, 'source')
-        self.assertEqual(args.metering_branch, 'feat/standalone-management-demo')
+        self.assertEqual(args.metering_branch, 'feat/standalone-demo-reuse-upstream-ui')
         self.assertEqual(installer.METERING_REPO, 'https://github.com/Ladas/pricetag-metering.git')
         source = self.image_args('--image-mode', 'source')
         self.assertEqual(source.maas_branch, installer.MAAS_BRANCH)
@@ -145,6 +145,12 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(args.maas_revision, resolved)
             self.assertTrue(any('--expected-commit' in c.args[0] and resolved in c.args[0]
                                 for c in run.call_args_list))
+
+    def test_demo_fixture_is_mock_only(self):
+        self.assertTrue(self.image_args('--demo-fixture').demo_fixture)
+        with self.assertRaises(SystemExit):
+            installer.parse_args(['--mode', 'real', '--provider', 'openai', '--hostname',
+                                  'gateway.example', '--plan', '--demo-fixture'])
 
     def test_checkout_uses_fetched_head_not_stale_local_branch(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(installer, 'run') as run:

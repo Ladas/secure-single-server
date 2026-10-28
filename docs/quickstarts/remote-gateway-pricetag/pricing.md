@@ -92,7 +92,7 @@ it is not part of routine future-price maintenance.
 
 ## Optional custom model rates
 
-The candidate's **Account management → Model pricing** and
+The candidate's **Administration → Pricing Discounts → Model pricing** and
 `PUT /api/v1/management/prices` add/change arbitrary rates or copy a source rate.
 This is an optional extension, not an existing upstream capability. The prepared
 demo image still includes it; current custom-price bootstrap paths depend on it.
