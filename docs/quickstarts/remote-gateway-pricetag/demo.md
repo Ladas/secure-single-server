@@ -14,11 +14,12 @@ Open **Administration → Users** (`/admin`):
    manager. Keep their login names stable: usage belongs to that identity.
 2. In the existing user table, choose the manager in the user’s **Manager**
    dropdown and retain the `user` role. Changes save immediately. A manager does not need administrator privileges.
-3. In **Administration → Safety Net → Monthly user budgets**, choose the user and set their monthly USD limit.
+3. In **Administration → Safety Net → Per-user monthly overrides**, choose the user and set their monthly USD limit.
    **Use global default** removes an override; it does not reset spending.
 4. Return to **Users → Issue onboarding key**, select each user and choose a name and finite
-   lifetime. Copy each key once into a private password manager or a mode-0600
-   client file. Do not include keys in screenshots or recordings.
+   lifetime. This creates an additional key, not a rotation. Use **Copy key** or
+   **Download .key**; the secret is never displayed. Keep the downloaded file private
+   (`chmod 600 /path/to/pricetag.key`) and pass its path to the client helper. Do not include keys in screenshots or recordings.
 
 Repeat for more users. The UI supports individual creation; the automated
 [20-user mock fixture](../../testing/pricetag-management-demo.md) prepares a
@@ -44,7 +45,7 @@ prove model quality or a fixed cost reduction.
 
 ## 3. Apply controls and continue on an allowed model
 
-1. In **Administration → Safety Net → Monthly user budgets**, lower the test user's
+1. In **Administration → Safety Net → Per-user monthly overrides**, lower the test user's
    allowance below their recorded spend. Use an ordinary user: admin accounts
    are exempt from this spending gate.
 2. Send another paid-model request and observe denial after policy caches refresh.
@@ -59,6 +60,9 @@ can still cost money. The legacy token gate remains independent. Concurrent and
 in-flight requests can overshoot the USD allowance; this is not a reserved-funds
 hard cap. Use the [mock quota tests](../../testing/pricetag-management-demo.md)
 to verify behavior without spending real money.
+
+The picker stores the **billed model ID**. Gateway aliases sharing that ID share
+the exception. This exception list is global; it is not a per-user model allowlist.
 
 ## 4. Review prices and discounts
 
@@ -76,8 +80,10 @@ See [pricing operations](pricing.md) for refresh, catalog and repricing examples
 ## 5. Replace keys and offboard
 
 In the user's **My keys** (`/management`), create a replacement key,
-update the client's key file, test it, then revoke the old key. Administrators
-can issue onboarding keys for a selected user. Disabling a user and revoking
+download it, update the client's key-file path, test it, then revoke the old key.
+Active keys appear first; revoked/expired records are in expandable history.
+Expiry dates and countdowns show when a key will stop working. Administrators
+can issue onboarding keys, check active-key counts and **Revoke all keys** for a selected user. Disabling a user and revoking
 keys are separate controls; test both as described in [user management](users.md).
 Do not claim key revocation also terminates every existing browser session.
 

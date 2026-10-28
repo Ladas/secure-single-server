@@ -77,7 +77,7 @@ sudo python3 scripts/pricetag/manage PUT budgets \
   --output /root/gateway-management/budget-result.json
 ```
 
-The same resource names are available for `users`, `prices`, `policy` and `keys`. They use the candidate
+The same resource names are available for `users`, `prices`, `policy`, `keys` and `key-revocations`. They use the candidate
 PriceTag management API schemas. The server validates allowed methods and fields;
 this client does not bypass authorization or manipulate database tables.
 
@@ -87,3 +87,24 @@ this client does not bypass authorization or manipulate database tables.
 output error does not prove that key issuance failed server-side.
 The client retains its private response file for inspection and does not retry.
 Remove private request files when no longer needed.
+
+## Count or revoke all keys for a user
+
+`POST /api/v1/management/key-revocations` requires administrator access. Use
+`{"subject":"carol","dry_run":true}` to count active keys without changing them.
+Change `dry_run` to `false` only when ready to revoke every active key across that
+user’s linked logins. Other users are unaffected; new keys issued afterward remain
+valid. Existing browser sessions are not terminated; suspend the user for full
+offboarding.
+
+Use the HTTPS helper above, or save the request in a root-private JSON file and
+run on RHEL:
+
+```sh
+sudo python3 scripts/pricetag/manage POST key-revocations \
+  --input /root/gateway-management/key-revocations-input.json \
+  --output /root/gateway-management/key-revocations-result.json
+```
+
+A partial upstream failure is reported explicitly. Retrying revocation is safe;
+never automatically retry key issuance.

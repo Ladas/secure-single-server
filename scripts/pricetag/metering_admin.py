@@ -18,7 +18,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def request(method, resource, payload=None):
     if os.geteuid() != 0:
         raise ValueError('run with sudo on the gateway host')
-    if resource not in ('users', 'budgets', 'prices', 'policy', 'keys'):
+    if resource not in ('users', 'budgets', 'prices', 'policy', 'keys', 'key-revocations'):
         raise ValueError('unsupported management resource')
     secret = (DEPLOY / 'management-secret').read_text().strip()
     if not secret:

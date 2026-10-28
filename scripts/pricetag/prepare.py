@@ -182,6 +182,7 @@ def main():
         'MANAGEMENT_API_SECRET': management_secret,
         'MANAGEMENT_PUBLIC_ORIGIN': f'https://{args.hostname}:8443',
         'USER_DASHBOARDS_ENABLED': 'true',
+        'GATEWAY_MODELS_FILE': '/etc/gateway-catalog/models.json',
         'KEY_SERVICE_URL': 'http://pricetag-maas:8080',
         'KEY_SERVICE_USER_HEADER': 'X-MaaS-Username',
         'KEY_SERVICE_GROUPS_HEADER': 'X-MaaS-Group',
@@ -196,6 +197,9 @@ def main():
     (args.directory / 'management-secret').write_text(management_secret + '\n')
     (args.directory / 'bootstrap.json').write_text(json.dumps({'models': models, 'sources': sources, 'monthly_usd': args.monthly_usd}) + '\n')
     (args.directory / 'models.json').write_text(json.dumps(models, indent=2) + '\n')
+    catalog = args.directory / 'catalog'
+    catalog.mkdir(mode=0o750)
+    (catalog / 'models.json').write_text(json.dumps([{k: m[k] for k in ('id', 'model', 'provider')} for m in models]) + '\n')
     (args.directory / 'price-sources.json').write_text(json.dumps(sources, indent=2) + '\n')
     (units / 'pricetag.network').write_text(
         '[Network]\nNetworkName=pricetag-private\nDriver=bridge\nSubnet=10.77.0.0/24\n')
@@ -229,7 +233,8 @@ def main():
         'Environment=METRICS_SECURE=false\nEnvironment=METRICS_ADDRESS=127.0.0.1:9090\n' + app, '1G')
     container('pricetag-metering', 'PriceTag metering and dashboards', 'pricetag-db.service',
         f'Image={args.metering_image}\nPull=never\nNetworkAlias=pricetag-metering\n'
-        f'EnvironmentFile={args.directory}/metering.env\nPublishPort=127.0.0.1:18087:8080\n' + app, '2G',
+        f'EnvironmentFile={args.directory}/metering.env\nPublishPort=127.0.0.1:18087:8080\n'
+        f'Volume={args.directory}/catalog:/etc/gateway-catalog:ro\n' + app, '2G',
         network='pricetag.network:ip=10.77.0.12')
     dependencies = 'pricetag-metering.service'
     if args.mock_provider:

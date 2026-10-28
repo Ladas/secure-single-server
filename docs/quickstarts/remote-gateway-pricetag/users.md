@@ -57,6 +57,29 @@ To read a saved key for login or secure copying:
 sudo cat /root/pricetag-admin/carol.key
 ```
 
+## Manage keys in the dashboard
+
+**Administration → Users** creates an identity without a key. **Issue onboarding key**
+adds a key; it does not replace existing keys. Choose **Copy key** or **Download .key**,
+then **Dismiss key**. The secret is never displayed or saved in browser storage.
+
+Users manage their own keys under **My keys**. Active keys appear first, with expiry
+and remaining lifetime. **Revoke** stops a key; revoked/expired records remain in
+expandable history. Permanent deletion is not supported. The deployed MaaS cleanup
+API targets expired ephemeral keys, not ordinary revoked key records.
+
+Administrators can **Check active keys** and **Revoke all keys** for the selected
+user. These actions cover all linked logins. Revocation does not disable the user
+or end an existing browser session; suspend the account to block both. A new key
+can be created later. Do not share administrator keys with ordinary users.
+
+Downloaded files contain only the credential. Keep the file private and use its
+path in the [OpenCode setup](clients.md):
+
+```sh
+chmod 600 /path/to/pricetag.key
+```
+
 ## Rotate or revoke a key
 
 ```console
@@ -128,7 +151,7 @@ reported old IDs after checking their status.
 | View aggregate and user spending | Administrator dashboard |
 | View local users and change administrator roles or manager relationships | Administrator **Users** |
 | Set the default monthly allowance and post-limit model exceptions | Administrator **Safety Net** (`/api/v1/admin/safety-net`) |
-| Create users or change an individual allowance | Administration → Users / Safety Net → Monthly user budgets; SSH `scripts/pricetag/user` uses the same PriceTag APIs |
+| Create users or change an individual allowance | Administration → Users / Safety Net → Per-user monthly overrides; SSH `scripts/pricetag/user` uses the same PriceTag APIs |
 | Issue onboarding keys | Administration → Users → Issue onboarding key |
 | Create/list/revoke your own keys | My keys (`/management`); SSH `scripts/pricetag/maas-key` remains available |
 | Configure providers, credentials and advertised models | SSH [provider helper](providers.md) |

@@ -90,6 +90,22 @@ it is not part of routine future-price maintenance.
 
 </details>
 
+## Where prices and history are stored
+
+PriceTag stores current rates in PostgreSQL (`model_pricing`). Custom-rate saves
+are audited in `org_audit`, including resolved input/output/cache rates. New custom
+saves are marked **Managed override**: imports and discount refreshes leave those
+rates unchanged. Change them explicitly through the Model pricing form/API.
+Imported rates continue to follow the configured discount policy.
+
+Recorded usage retains its event-time charge. Changing a rate does not rewrite
+old spending; use the separate preview/confirm repricing API only for an intended
+historical correction. The audit log is not an automatically applied historical
+rate schedule.
+
+**Model pricing → Current model rates** provides search, pagination and **Edit
+rates**. Check all four USD-per-million-token rates before saving. Zero means free.
+
 ## Optional custom model rates
 
 The candidate's **Administration → Pricing Discounts → Model pricing** and

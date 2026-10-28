@@ -8,7 +8,7 @@ import stat
 
 from metering_admin import request
 
-RESOURCES = ('users', 'budgets', 'prices', 'policy', 'keys')
+RESOURCES = ('users', 'budgets', 'prices', 'policy', 'keys', 'key-revocations')
 
 
 def main():

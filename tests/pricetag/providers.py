@@ -266,6 +266,9 @@ class SetupTest(unittest.TestCase):
                 files=setup.refresh_model_files(settings, name=provider_name)
             models=json.loads(files[deploy/'models.json'])
             self.assertEqual(models,[old[0],new])
+            catalog=json.loads(files[deploy/'catalog/models.json'])
+            self.assertEqual(catalog,[{k:m[k] for k in ('id','model','provider')} for m in models])
+            self.assertTrue(all(set(m)=={'id','model','provider'} for m in catalog))
             updated=json.loads(files[deploy/'gateway/gateway.json'])
             self.assertEqual(updated['listeners'],deployed['listeners'])
             before={c['name']:c for c in deployed['filter_chains']}

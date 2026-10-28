@@ -450,6 +450,7 @@ def refresh_model_files(settings, name="pricetag"):
     print('Historical usage and existing prices are retained, including removed models.')
     values = {DEPLOY / 'gateway/gateway.json': updated, STATE / 'providers.json': providers,
               DEPLOY / 'models.json': models, STATE / 'models.json': models,
+              DEPLOY / 'catalog/models.json': [{k: m[k] for k in ('id', 'model', 'provider')} for m in models],
               DEPLOY / 'price-sources.json': prices, STATE / 'prices.json': prices}
     return {path: (json.dumps(value, indent=2) + '\n').encode() for path, value in values.items()}
 
