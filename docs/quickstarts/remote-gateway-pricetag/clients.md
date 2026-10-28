@@ -170,3 +170,26 @@ when models change. Project settings can override global settings.
 [Custom certificates](https://opencode.ai/docs/network/#custom-certificates)
 
 </details>
+
+<details>
+<summary>External Claude rejects thinking.adaptive.block_binding</summary>
+
+OpenCode may inject a thinking extension that an Anthropic-compatible gateway
+rejects. The helper sets this compatibility option for recognized adaptive-thinking
+Claude models, using upstream model metadata rather than the public alias:
+
+```json
+"options": {
+  "thinking": { "type": "adaptive", "blockBinding": false }
+}
+```
+
+This retains adaptive thinking and omits the unsupported binding field. It does
+not change authentication, routing or model limits. Verified with OpenCode 1.19.5;
+[upstream opt-out](https://github.com/anomalyco/opencode/pull/46820).
+Restart the helper for a session config, or regenerate a saved native config
+before restarting OpenCode. This is a workstation change; no gateway rebuild is
+needed. OpenCode 2 requires separate qualification because its compatibility
+configuration differs ([tracked issue](https://github.com/anomalyco/opencode/issues/52325)).
+
+</details>

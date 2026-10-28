@@ -27,8 +27,8 @@ PRAXIS_IMAGE = 'quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516
 PRAXIS_REVISION = '5667c4acecd0981ae5114cbbf2ee3dcccec9c248'
 MAAS_IMAGE = 'localhost/pricetag-maas:standalone'
 METERING_IMAGE = 'localhost/pricetag-metering:demo-666770c'
-PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:5ca86edad1182787dc391b3486e46f0b83fc621e294b365a74a7b173fbf3631c'
-PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:62a8610521f3d7f5530a0d6dab7bf17cb47658232c2b0a27b16820cfac9d02b5'
+PUBLISHED_MAAS_IMAGE = 'quay.io/redhat-et/secure-single-server-maas-standalone@sha256:0bec6ef57fa5b10a7bef8f4df8d98f932c9d7fc96798f7bfc0cd77b504790fa8'
+PUBLISHED_METERING_IMAGE = 'quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:02494463ca905e8342c39f707310e4aa2c8a14670625da5c9fdd750e7622220a'
 CACHE = Path('/var/cache/pricetag-installer')
 DEPLOY = Path('/etc/praxis-pricetag')
 ADMIN = Path('/root/pricetag-admin')
@@ -272,12 +272,10 @@ def parse_args(argv=None):
             args.image_mode = 'published'
         elif interactive and not args.yes:
             args.image_mode = choice('Application images:', {
-                'published': 'Use compatible published images (explicit digests required)',
-                'source': 'Build the management demo branches'}, 'source')
+                'published': 'Use tested published images (recommended)',
+                'source': 'Build the management demo branches'}, 'published')
         else:
-            args.image_mode = 'source'
-    if args.image_mode == 'published' and not args.metering_image:
-        p.error('the management demo requires a compatible --metering-image digest; use --image-mode source until publication')
+            args.image_mode = 'published'
     for component in ('maas', 'metering'):
         revision = getattr(args, component + '_revision')
         branch = getattr(args, component + '_branch')

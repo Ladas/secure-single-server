@@ -21,33 +21,18 @@ cd ~/secure-single-server
 sudo scripts/common/install --prepare
 ```
 
-Build the pinned MaaS standalone runtime and unmodified PriceTag revision:
+Pull the same digest-pinned images as the installer:
 
 ```console
-git clone --branch feat/standalone-runtime-minimal \
-  https://github.com/Ladas/models-as-a-service.git ~/models-as-a-service
-git -C ~/models-as-a-service checkout --detach 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-sudo scripts/pricetag/build-maas --source ~/models-as-a-service \
-  --expected-commit 6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-git clone https://github.com/redhat-et/pricetag-metering.git ~/pricetag-metering
-sudo scripts/pricetag/build-metering --source ~/pricetag-metering
+PRAXIS_REF=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8
+MAAS_REF=quay.io/redhat-et/secure-single-server-maas-standalone@sha256:0bec6ef57fa5b10a7bef8f4df8d98f932c9d7fc96798f7bfc0cd77b504790fa8
+METERING_REF=quay.io/redhat-et/secure-single-server-pricetag-metering@sha256:02494463ca905e8342c39f707310e4aa2c8a14670625da5c9fdd750e7622220a
+for image in "$PRAXIS_REF" "$MAAS_REF" "$METERING_REF"; do
+  sudo podman pull "$image" || exit 1
+done
 ```
 
-Pull Praxis; its source label must be `5667c4acecd0981ae5114cbbf2ee3dcccec9c248`.
-For prebuilt MaaS/PriceTag images, use the [installer's published mode](images.md).
-
-```console
-PRAXIS_IMAGE=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8
-sudo podman pull "$PRAXIS_IMAGE"
-sudo podman image inspect "$PRAXIS_IMAGE" \
-  --format '{{index .Labels "org.opencontainers.image.revision"}}'
-```
-
-The revision must match the source above. See the
-[publication and smoke-test workflow](https://github.com/opendatahub-io/praxis-experimental/actions/runs/39430750786).
-
-Import all three local images into the rootless service account and capture
-their immutable IDs. Set `PRAXIS_IMAGE` to the image built or pulled above:
+Import into the service account and capture immutable local IDs:
 
 ```console
 set -o pipefail
@@ -57,21 +42,22 @@ svc() {
     XDG_RUNTIME_DIR="/run/user/$PRICETAG_UID" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$PRICETAG_UID/bus" "$@")
 }
-PRAXIS_IMAGE=quay.io/opendatahub/praxis-experimental@sha256:502f120fed7b8e516ce1d78396045c8f72673672351432b9dc2e61baf5c13ac8
-PRAXIS_ID=$(sudo podman image inspect "$PRAXIS_IMAGE" --format '{{.Id}}')
-sudo podman save "$PRAXIS_IMAGE" | svc podman load
-sudo podman save localhost/pricetag-maas:standalone | svc podman load
-sudo podman save localhost/pricetag-metering:upstream-a33b90a | svc podman load
+for image in "$PRAXIS_REF" "$MAAS_REF" "$METERING_REF"; do
+  sudo podman save "$image" | svc podman load || exit 1
+done
+PRAXIS_ID=$(sudo podman image inspect "$PRAXIS_REF" --format '{{.Id}}')
+MAAS_ID=$(sudo podman image inspect "$MAAS_REF" --format '{{.Id}}')
+METERING_ID=$(sudo podman image inspect "$METERING_REF" --format '{{.Id}}')
 PRAXIS_IMAGE=$(svc podman image inspect "$PRAXIS_ID" --format '{{.Id}}')
-MAAS_IMAGE=$(svc podman image inspect localhost/pricetag-maas:standalone --format '{{.Id}}')
-METERING_IMAGE=$(svc podman image inspect localhost/pricetag-metering:upstream-a33b90a --format '{{.Id}}')
+MAAS_IMAGE=$(svc podman image inspect "$MAAS_ID" --format '{{.Id}}')
+METERING_IMAGE=$(svc podman image inspect "$METERING_ID" --format '{{.Id}}')
 PRAXIS_IMAGE="sha256:${PRAXIS_IMAGE#sha256:}"
 MAAS_IMAGE="sha256:${MAAS_IMAGE#sha256:}"
 METERING_IMAGE="sha256:${METERING_IMAGE#sha256:}"
 ```
 
-Stop if any image ID is not `sha256:` followed by 64 lowercase hexadecimal
-characters. Image build support does not publish or sign images.
+Stop on any import failure. [Image options](images.md) explains source builds for
+another branch or commit; they are optional, not required for this deployment.
 
 ## 2. Configure providers
 

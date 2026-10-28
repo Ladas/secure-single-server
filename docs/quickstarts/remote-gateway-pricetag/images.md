@@ -1,14 +1,13 @@
 # Application images
 
-Source builds are the temporary default for the management demo. The separate
-image-build PR must publish and qualify matching images before digest defaults
-can replace them.
+The installer defaults to qualified, digest-pinned management demo images.
+Use source mode to test a different branch or commit before publication.
 Praxis and PostgreSQL remain pinned published images in either mode.
 
 | Mode | MaaS and PriceTag |
 | --- | --- |
-| `--image-mode published` | Supply a compatible PriceTag digest explicitly; old published images lack the required APIs. No application source checkout or Go build. |
-| `--image-mode source` (default) | Build from a branch or commit on RHEL to test a new version. |
+| `--image-mode published` (default) | Pull the pinned MaaS and PriceTag demo images. No application source checkout or Go build. |
+| `--image-mode source` | Build from a branch or commit on RHEL to test a new version. |
 
 The installer checks image source labels and CPU architecture.
 
@@ -26,7 +25,7 @@ Run examples below in **this SSH session**. New shell? Restore
 
 ## Published images
 
-Publication repositories (the previous release predates the management APIs):
+Publication repositories:
 
 ```text
 quay.io/redhat-et/secure-single-server-maas-standalone

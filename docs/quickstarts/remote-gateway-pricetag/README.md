@@ -7,9 +7,9 @@ OpenCode with a user key and a monthly USD budget.
 SSH/8443 from your IP; Git, Python 3 and OpenCode on your workstation.
 The tested VM has 8 vCPUs, 32 GiB RAM and 150 GiB disk. No GPU is needed.
 
-> **Management demo:** the installer currently builds the reviewed MaaS and
-> PriceTag demo branches. Published management images are pending; see
-> [image options](images.md). The optional provider editor is not included.
+> The installer uses digest-pinned published MaaS and PriceTag demo images.
+> [Source builds](images.md) remain available for testing another branch or commit.
+> The optional provider editor is not included.
 
 ## 1. Set the connection
 
@@ -63,7 +63,7 @@ Choose providers, enter their keys at hidden prompts, then confirm with `install
 - **Providers:** OpenAI, an external OpenAI-compatible/Messages service, or both.
 - **Users:** admin is required; Alice/Bob are optional. Choose **Admin only** to
   [create your own user](users.md#create-a-user) afterward.
-- **Defaults:** real providers, demo source builds, $5/month per ordinary user.
+- **Defaults:** real providers, published images, $5/month per ordinary user.
 
 <details>
 <summary>Installer options and logs</summary>
@@ -154,7 +154,7 @@ Send: **“Reply with just: gateway works.”** In the admin dashboard, select A
 Accounting may take a few seconds; free models record zero USD. The default
 allowance is per user. With the management candidate, view and change overrides
 in **Administration → Safety Net**; the [user helper](users.md) uses the same service API.
-The published-image dashboard does not include these candidate controls.
+The pinned published demo image includes these controls. Older images may not.
 For budget-denial testing, use the separate [mock quota probe](../../testing/pricetag-perf.md#usd-quota-probe).
 
 [Save a native config or switch to the standard OpenCode config directory](clients.md).

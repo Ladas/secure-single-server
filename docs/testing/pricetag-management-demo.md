@@ -1,19 +1,18 @@
 # Management demo on RHEL
 
-**Mock demo — source installation and API/browser acceptance verified on benchmark RHEL.** Use a dedicated
-benchmark VM and the matching PriceTag management candidate. Published PriceTag
-images do not yet contain these management APIs. All inference is synthetic.
+**Mock demo:** use a dedicated benchmark VM and the pinned published management
+images. All inference is synthetic; no real provider credentials are needed.
 
 ## Install on a fresh benchmark host
 
-Run from the copied checkout on RHEL. The installer builds the default demo
-branches, imports the images and starts the Quadlet services with two synthetic
+Run from the copied checkout on RHEL. The installer pulls the pinned published
+images, imports them and starts the Quadlet services with two synthetic
 model aliases. No real provider credentials are accepted.
 
 ```sh
 read -r -p 'Gateway IP or DNS: ' GATEWAY_HOST
 sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" \
-  --mode mock --demo-fixture --image-mode source --yes
+  --mode mock --demo-fixture --yes
 ```
 
 Keep TCP 8443 restricted to the testing IPs. Existing deployments are refused.
@@ -25,7 +24,7 @@ private.
 
 1. Sign in at `https://<gateway-host>:8443/login` using the administrator key at
    `/root/pricetag-admin/admin.key`. Transfer/display keys only in a private terminal.
-2. Open **Account management → Model pricing**. Configure illustrative rates for
+2. Open **Administration → Pricing Discounts → Model pricing**. Configure illustrative rates for
    upstream IDs `fixture` and `fixture-cheap`; label them synthetic. For example,
    USD/MTok input/output rates of 1,000/2,000 and 100/200 make the mock differences
    visible. Set both cache rates explicitly. These are demo rates, not vendor prices.

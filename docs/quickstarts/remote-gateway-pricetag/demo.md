@@ -2,7 +2,7 @@
 
 Start with the [quickstart](README.md). Use synthetic providers on a dedicated
 host for budget-exhaustion tests; real-provider requests incur charges.
-Use the current [source-built demo image](images.md) for the complete flow below.
+Use the [default published demo images](images.md) for the complete flow below.
 Provider/model routing is configured through the CLI; the optional provider editor
 is not included.
 

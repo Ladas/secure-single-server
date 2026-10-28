@@ -110,17 +110,18 @@ class InstallTest(unittest.TestCase):
     def image_args(self, *extra):
         return installer.parse_args(['--mode', 'mock', '--hostname', 'gateway.example', '--plan', *extra])
 
-    def test_demo_source_defaults_exclude_optional_followup(self):
+    def test_published_defaults_and_optional_source_branches(self):
         args = self.image_args()
-        self.assertEqual(args.image_mode, 'source')
-        self.assertEqual(args.metering_branch, 'feat/standalone-demo-reuse-upstream-ui')
+        self.assertEqual(args.image_mode, 'published')
+        self.assertEqual(args.metering_image, installer.PUBLISHED_METERING_IMAGE)
+        self.assertEqual(args.maas_image, installer.PUBLISHED_MAAS_IMAGE)
+        self.assertIsNone(args.metering_branch)
         self.assertEqual(installer.METERING_REPO, 'https://github.com/Ladas/pricetag-metering.git')
         source = self.image_args('--image-mode', 'source')
         self.assertEqual(source.maas_branch, installer.MAAS_BRANCH)
         self.assertEqual(source.metering_branch, installer.METERING_BRANCH)
         self.assertEqual(source.metering_revision, installer.METERING_COMMIT)
-        for flags in (['--image-mode', 'published'],
-                      ['--image-mode', 'source', '--maas-branch', '../bad'],
+        for flags in (['--image-mode', 'source', '--maas-branch', '../bad'],
                       ['--image-mode', 'source', '--maas-branch', 'feature', '--maas-revision', 'a' * 40]):
             with self.assertRaises(SystemExit):
                 self.image_args(*flags)

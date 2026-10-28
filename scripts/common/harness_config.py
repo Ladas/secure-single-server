@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 import os
+import re
 from pathlib import Path
 import runpy
 import shutil
@@ -42,6 +43,12 @@ def opencode_model(entry, api):
         model.update(provider={'npm': '@ai-sdk/openai'}, reasoning=True,
                      options={'store': False, 'reasoningEffort': 'medium',
                               'include': ['reasoning.encrypted_content']})
+    elif api == 'anthropic' and re.match(
+            r'^claude-(?:(?:opus|sonnet)-(?:4-[678]|5)(?:-|$)|haiku-5(?:-|$))', upstream):
+        # OpenCode's automatic binding control is rejected by some Messages
+        # gateways. Keep adaptive thinking explicit: a partial thinking object
+        # replaces OpenCode defaults and otherwise drops the thinking type.
+        model['options'] = {'thinking': {'type': 'adaptive', 'blockBinding': False}}
     elif api == 'openai' and 'qwen' in upstream:
         model.update(reasoning=True, interleaved={'field': 'reasoning'})
     return model
