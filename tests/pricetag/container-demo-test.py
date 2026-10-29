@@ -62,6 +62,17 @@ class AuditMetadataTests(unittest.TestCase):
         self.assertEqual(smoke.signal_denials(line.replace('comm="pg_ctl"', 'comm="unrelated"')), [])
         self.assertEqual(smoke.signal_denials(line.replace('apparmor="DENIED"', 'apparmor="ALLOWED"')), [])
 
+    def test_ci_profile_covers_observed_stacked_signal_peers(self):
+        policy = Path(__file__).with_name('ci.apparmor').read_text()
+        for peer in ('crun//&pricetag-demo-ci', 'pricetag-demo-ci//&crun'):
+            with self.subTest(peer=peer):
+                audit = ('apparmor="DENIED" operation="signal" profile="pricetag-demo-ci" '
+                         f'peer="{peer}" comm="pg_ctl" signal=int denied_mask="send"')
+                observed = smoke.signal_denials(audit)[0]['peer']
+                self.assertIn(f'signal (send,receive) peer="{observed}",', policy)
+        self.assertNotIn('signal (send,receive) peer=*,', policy)
+        self.assertIn('deny mount,', policy)
+
     def test_journal_error_does_not_publish_exception(self):
         output = io.StringIO()
         with patch.object(smoke.subprocess, 'run', side_effect=OSError('private details')), \

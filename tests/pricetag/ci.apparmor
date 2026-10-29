@@ -13,7 +13,9 @@ profile pricetag-demo-ci flags=(attach_disconnected,mediate_deleted) {
 
   signal (receive) peer=unconfined,
   signal (send,receive) peer=pricetag-demo-ci,
+  # Stacked label ordering differs across AppArmor/runtime versions.
   signal (send,receive) peer="pricetag-demo-ci//&crun",
+  signal (send,receive) peer="crun//&pricetag-demo-ci",
   # Permit host runtime cleanup, as in current containers/common.
   signal (receive) peer={/usr/bin/,/usr/sbin/,}crun*,
   signal (receive) peer={/usr/bin/,/usr/sbin/,}podman,
