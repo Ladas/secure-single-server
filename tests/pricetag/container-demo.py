@@ -102,7 +102,7 @@ def postgres_identity():
     return tuple(map(int, result))
 
 
-def wait_database(database, attempts=90):
+def wait_database(database, attempts=90, database_name="maas"):
     """Wait for the final TCP server, retaining the last failed probe privately."""
     last_error = None
     for _ in range(attempts):
@@ -111,7 +111,7 @@ def wait_database(database, attempts=90):
         try:
             podman('exec', database, 'sh', '-c',
                    'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -w -h 127.0.0.1 '
-                   '-U postgres -d maas -Atc "SELECT 1"')
+                   '-U postgres -d "$1" -Atc "SELECT 1"', 'probe', database_name)
             return
         except subprocess.CalledProcessError as error:
             last_error = error
@@ -119,6 +119,15 @@ def wait_database(database, attempts=90):
             break
         time.sleep(1)
     raise last_error
+
+
+def bootstrap_database(database):
+    """Use the installer's stdin bootstrap, without a host SQL bind mount."""
+    wait_database(database, database_name='postgres')
+    with (DEPLOY / 'initdb/10-create-databases.sql').open() as sql:
+        run(['podman', 'exec', '-i', database, 'psql', '-X', '-U', 'postgres',
+             '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'], stdin=sql)
+    wait_database(database)
 
 
 def database_state(database):
@@ -164,10 +173,7 @@ def main():
         for path in (DEPLOY / 'gateway').iterdir():
             path.chmod(0o644)
         (DEPLOY / 'gateway').chmod(0o755)
-        (DEPLOY / 'initdb').chmod(0o755)
         (DEPLOY / 'maas-db-url').chmod(0o644)
-        for path in (DEPLOY / 'initdb').iterdir():
-            path.chmod(0o644)
         (DEPLOY / 'm2m-secret').chmod(0o644)
         (DEPLOY / 'catalog').chmod(0o755)
         (DEPLOY / 'catalog/models.json').chmod(0o644)
@@ -197,9 +203,8 @@ def main():
                    # Do not inherit Podman's host-dependent tmpfs size (64 MiB
                    # cannot hold bootstrap databases plus PostgreSQL WAL).
                    '--tmpfs', '/var/lib/postgresql/data:rw,size=1g,mode=1777',
-                   '-e', 'PGDATA=/var/lib/postgresql/data/pgdata',
-                   '-v', str(DEPLOY / 'initdb') + ':/docker-entrypoint-initdb.d:ro,Z')
-        wait_database(db)
+                   '-e', 'PGDATA=/var/lib/postgresql/data/pgdata')
+        bootstrap_database(db)
         stage = 'maas'
         maas = start('maas', images[1], private, '--read-only', '--user', '1001:1001',
                     '-p', '127.0.0.1:18086:8080',

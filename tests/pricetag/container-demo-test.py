@@ -3,7 +3,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, mock_open
 import subprocess
 import json
 
@@ -69,6 +69,31 @@ class DatabaseIdentityTests(unittest.TestCase):
                     demo.postgres_identity()
 
 
+class BootstrapTests(unittest.TestCase):
+    def test_sql_uses_stdin_and_readiness_is_checked_before_and_after(self):
+        events = []
+        with patch.object(demo, 'wait_database', side_effect=lambda *a, **k: events.append(('ready', k))), \
+                patch.object(demo, 'run', side_effect=lambda *a, **k: events.append(('sql', a, k))) as run, \
+                patch.object(Path, 'open', mock_open(read_data='private SQL')) as sql:
+            demo.bootstrap_database('db')
+        self.assertEqual([event[0] for event in events], ['ready', 'sql', 'ready'])
+        self.assertEqual(events[0][1], {'database_name': 'postgres'})
+        command = run.call_args.args[0]
+        self.assertIn('ON_ERROR_STOP=1', command)
+        self.assertIn('-i', command)
+        self.assertNotIn('private SQL', ' '.join(command))
+        self.assertIs(run.call_args.kwargs['stdin'], sql.return_value)
+
+    def test_sql_error_aborts_before_application_readiness(self):
+        error = subprocess.CalledProcessError(1, ['psql'])
+        with patch.object(demo, 'wait_database') as ready, \
+                patch.object(demo, 'run', side_effect=error), \
+                patch.object(Path, 'open', mock_open(read_data='bad SQL')):
+            with self.assertRaises(subprocess.CalledProcessError):
+                demo.bootstrap_database('db')
+        ready.assert_called_once_with('db', database_name='postgres')
+
+
 class ReadinessTests(unittest.TestCase):
     def test_stopped_database_preserves_probe_error(self):
         error = subprocess.CalledProcessError(1, ['podman'], stderr='private diagnostic')
@@ -85,8 +110,9 @@ class ReadinessTests(unittest.TestCase):
                 patch.object(demo.time, 'sleep'):
             demo.wait_database('isolated-db')
         probe = command.call_args.args
-        self.assertIn('-h 127.0.0.1', probe[-1])
-        self.assertIn('PGPASSWORD="$POSTGRES_PASSWORD"', probe[-1])
+        self.assertIn('-h 127.0.0.1', probe[-3])
+        self.assertIn('PGPASSWORD="$POSTGRES_PASSWORD"', probe[-3])
+        self.assertEqual(probe[-1], 'maas')
 
     def test_timeout_preserves_probe_error(self):
         error = subprocess.CalledProcessError(1, ['podman'], stderr='Connection refused')

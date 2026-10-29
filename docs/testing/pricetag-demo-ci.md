@@ -70,8 +70,12 @@ The disposable PostgreSQL container starts directly as the pinned image’s
 non-root `postgres` account with all capabilities dropped and
 `no-new-privileges`. It creates a private `0700` data directory below a bounded
 1 GiB tmpfs, independent of host defaults. This avoids the image’s root-to-user
-`gosu` step, where the hosted runner stalled before PostgreSQL initialization. Storage/bootstrap failures produce fixed diagnostic codes and startup milestones
-(configuration, data sync, application SQL and final listener). Raw database logs
+`gosu` step, where the hosted runner stalled before PostgreSQL initialization.
+Application database bootstrap follows the installer: wait for PostgreSQL, pass
+SQL through stdin with `ON_ERROR_STOP=1`, then verify the application database.
+The generated SQL stays private on the host and is not bind-mounted into the
+container. Storage/bootstrap failures produce fixed diagnostic codes and startup milestones
+(configuration, data sync and final listener). Raw database logs
 remain private. A readiness timeout alone does not establish a storage failure.
 
 Containers and generated deployment credentials are removed afterward. Ports
