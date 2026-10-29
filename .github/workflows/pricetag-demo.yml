@@ -41,11 +41,16 @@ jobs:
       - name: Install test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman python3-yaml openssl curl
+          sudo apt-get install -y podman apparmor-utils python3-yaml openssl curl
           python3 tests/pricetag/container-demo-test.py
           node tests/pricetag/mock-guard.test.cjs
           npm ci --prefix tests/pricetag/browser --ignore-scripts
           sudo tests/pricetag/browser/node_modules/.bin/playwright install --with-deps chromium
+      - name: Configure confined CI container profile
+        run: |
+          sudo apparmor_parser --replace tests/pricetag/ci.apparmor
+          sudo install -d -m 0755 /etc/containers/containers.conf.d
+          printf '[containers]\napparmor_profile="pricetag-demo-ci"\n' | sudo tee /etc/containers/containers.conf.d/99-pricetag-demo.conf >/dev/null
       - name: Qualify isolated PostgreSQL runtime
         run: sudo python3 tests/pricetag/database-smoke.py
       - name: Build pinned application sources

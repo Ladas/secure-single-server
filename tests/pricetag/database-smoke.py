@@ -38,6 +38,8 @@ def main():
                   '-e', 'PGDATA=/var/lib/postgresql/data/pgdata', demo.POSTGRES],
                  env={**os.environ, 'POSTGRES_PASSWORD': password})
         started = True
+        print('Database AppArmor profile: ' + demo.podman(
+            'inspect', '--format', '{{.AppArmorProfile}}', name), flush=True)
         demo.wait_database(name, database_name='postgres')
         print('PASS: isolated PostgreSQL initialization and authenticated TCP query')
     except Exception:

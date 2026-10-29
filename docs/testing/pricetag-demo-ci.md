@@ -106,3 +106,14 @@ AppArmor/SELinux status. GitHub uses an AMD64 Ubuntu 24.04 VM; a Mac Podman VM
 may use ARM64 Fedora CoreOS. Running Ubuntu inside that VM does not reproduce
 the hosted kernel or security policy. Local passes are regression evidence;
 the hosted job must pass before CI qualification is complete.
+
+The Ubuntu CI job loads `tests/pricetag/ci.apparmor` as its container profile.
+It preserves the Podman default filesystem, mount and kernel-interface denials,
+adding signal permission for the same profile stacked with `crun`. This addresses
+[container-libs #805](https://github.com/podman-container-tools/container-libs/issues/805):
+`no-new-privileges` can otherwise prevent `pg_ctl` from stopping its own temporary
+PostgreSQL server. AppArmor, seccomp, dropped capabilities and
+`no-new-privileges` remain enabled. The profile and configuration are installed
+only on the disposable CI host; the RHEL installer retains its SELinux setup.
+The database preflight reports the selected profile and exercises PostgreSQL's
+bootstrap start/stop sequence before accepting readiness.
