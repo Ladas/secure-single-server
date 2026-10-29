@@ -6,9 +6,9 @@ demo sources, starts PostgreSQL and Praxis, and runs the API/browser/quota suite
 against synthetic inference. No provider keys, SSH credentials or publishing
 secrets are required.
 
-This change depends on [management demo #91](https://github.com/redhat-et/secure-single-server/pull/91)
+The [management demo #91](https://github.com/redhat-et/secure-single-server/pull/91)
 and [image publication #92](https://github.com/redhat-et/secure-single-server/pull/92)
-merging first. Source builds use the same reviewed revisions as publication;
+are merged. Source builds use the same reviewed revisions as publication;
 replacing them with qualified registry digests is a later optimization.
 
 The build also runs PriceTag’s Go tests against a disposable PostgreSQL instance
@@ -65,6 +65,10 @@ sudo python3 tests/pricetag/container-demo.py \
   --node-modules "$PWD/tests/pricetag/browser/node_modules" \
   --output /var/tmp/pricetag-demo-acceptance
 ```
+
+The disposable PostgreSQL data directory uses a bounded 1 GiB tmpfs, independent
+of host defaults. Storage/bootstrap failures produce fixed diagnostic codes; raw
+database logs remain private.
 
 Containers and generated deployment credentials are removed afterward. Ports
 are bound to loopback. Private diagnostic logs stay in the output directory;

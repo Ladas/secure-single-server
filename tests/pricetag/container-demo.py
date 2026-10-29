@@ -47,6 +47,17 @@ def ready(url):
     raise RuntimeError('service readiness timeout')
 
 
+def database_failure_reason(diagnostic):
+    """Return a fixed public code without copying potentially secret log text."""
+    for message, code in (
+            ('No space left on device', 'database-storage-full'),
+            ('Permission denied', 'database-permission-denied'),
+            ('Out of memory', 'database-out-of-memory')):
+        if message in diagnostic:
+            return code
+    return 'database-bootstrap-failed'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--maas-image', required=True)
@@ -108,7 +119,9 @@ def main():
             return name
         stage = 'postgres'
         db = start('db', POSTGRES, private, '--env-file', DEPLOY / 'postgres.env',
-                   '--tmpfs', '/var/lib/postgresql/data:rw',
+                   # Do not inherit Podman's host-dependent tmpfs size (64 MiB
+                   # cannot hold bootstrap databases plus PostgreSQL WAL).
+                   '--tmpfs', '/var/lib/postgresql/data:rw,size=1g',
                    '-v', str(DEPLOY / 'initdb') + ':/docker-entrypoint-initdb.d:ro,Z')
         for _ in range(90):
             try:
@@ -201,7 +214,12 @@ def main():
                 log.write(error.stderr or '')
             for container in containers:
                 subprocess.run(['podman', 'logs', '--tail', '30', container], stdout=log, stderr=log)
-        (args.output / 'failure.json').write_text(json.dumps({'passed': False, 'stage': stage}) + '\n')
+        failure = {'passed': False, 'stage': stage}
+        if stage == 'postgres':
+            # Classify only known messages; never publish logs or exception text.
+            diagnostic = (args.output / 'diagnostics-private.log').read_text()
+            failure['reason'] = database_failure_reason(diagnostic)
+        (args.output / 'failure.json').write_text(json.dumps(failure) + '\n')
         print('FAIL: ' + stage + '; private diagnostics retained, no credentials printed', file=sys.stderr)
         raise SystemExit(1) from None
     finally:
