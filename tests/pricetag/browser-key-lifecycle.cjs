@@ -5,7 +5,7 @@ const {chromium}=require('playwright');
 const fs=require('node:fs'),path=require('node:path');
 const {X509Certificate,createHash}=require('node:crypto');
 const assert=require('node:assert/strict');
-let stage='setup';
+let stage='setup', throttledResponses=0;
 (async()=>{
  if(process.env.MOCK_DEPLOYMENT_CONFIRMED!=='yes')throw new Error('mock confirmation required');
  const dir=process.env.KEY_DIRECTORY,base=process.env.GATEWAY_URL;
@@ -13,7 +13,7 @@ let stage='setup';
  const cert=new X509Certificate(fs.readFileSync(path.join(dir,'server.pem')));
  const pin=createHash('sha256').update(cert.publicKey.export({type:'spki',format:'der'})).digest('base64');
  const browser=await chromium.launch({args:['--ignore-certificate-errors-spki-list='+pin]});
- async function login(key){const context=await browser.newContext();const page=await context.newPage();await page.goto(base+'/login');await page.locator('#api_key').fill(key);await Promise.all([page.waitForURL(u=>u.pathname!=='/login'),page.getByRole('button',{name:'Sign In',exact:true}).click()]);return {context,page};}
+ async function login(key){const context=await browser.newContext();const page=await context.newPage();page.on('response',r=>{if(r.status()===429)throttledResponses++;});await page.goto(base+'/login');await page.locator('#api_key').fill(key);await Promise.all([page.waitForURL(u=>u.pathname!=='/login'),page.getByRole('button',{name:'Sign In',exact:true}).click()]);return {context,page};}
  async function done(page,action){await page.locator('#status').evaluate(el=>el.textContent='');await action();await page.waitForFunction(()=>document.querySelector('#status').textContent==='Done');}
  try{
   const {page:admin}=await login(fs.readFileSync(keyPath,'utf8').trim());await admin.goto(base+'/admin');await admin.locator('#admin').waitFor({state:'visible'});
@@ -41,7 +41,8 @@ let stage='setup';
   const second=await create('deliberate-additional-key','1h');assert.notEqual(first.id,second.id);
   assert.equal(await infer(first.key),200);assert.equal(await infer(second.key),200);
   const otherLogin=await login(second.key);await otherLogin.page.goto(base+'/manager');
-  await otherLogin.page.waitForFunction(async()=>{const r=await fetch('/api/v1/org/usage');const rows=await r.json();return rows.length===1&&rows[0].requests>=2;},{},{timeout:30000});
+  stage='cross-key usage aggregation';
+  await otherLogin.page.waitForFunction(async()=>{const r=await fetch('/api/v1/org/usage');if(!r.ok)throw new Error('usage API HTTP '+r.status);const rows=await r.json();return rows.length===1&&rows[0].requests>=2;},{},{timeout:30000});
   await otherLogin.page.evaluate(()=>loadCharts());
   await otherLogin.page.waitForFunction(()=>chartsCache?.overview?.total_requests>=2 && chartsCache.models.length>0);
   await otherLogin.context.close();
@@ -89,7 +90,9 @@ let stage='setup';
   ?' (actual '+error.actual+', expected '+error.expected+')':'';
  // Capture only a known test filename and numeric location, never the message,
  // assertion values, source text or the rest of a potentially sensitive stack.
+ const reason=[['Execution context was destroyed','navigation'],['Cannot read properties of null','missing-element'],['Timeout','timeout'],['Unexpected token','invalid-json'],['Target page','page-closed'],['frame was detached','frame-detached'],['is not a function','missing-function']].find(([message])=>String(error.message||'').includes(message));
+ const httpStatus=String(error.message||'').match(/usage API HTTP (\d{3})/);
  const location=String(error.stack||'').match(/(?:browser-key-lifecycle|key-download)\.cjs:(\d+):(\d+)/);
- console.error('FAIL at '+stage+status+(location?' (source '+location[0]+')':'')+'; sensitive details withheld');
+ console.error('FAIL at '+stage+status+' (HTTP 429 responses '+throttledResponses+')'+(reason?' (reason '+reason[1]+')':'')+(httpStatus?' (usage HTTP '+httpStatus[1]+')':'')+(location?' (source '+location[0]+')':'')+'; sensitive details withheld');
  process.exitCode=1;
 });

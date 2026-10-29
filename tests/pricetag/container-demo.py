@@ -90,6 +90,18 @@ def database_processes(database):
     return sorted({row.strip() if row.strip() in known else 'other' for row in rows})
 
 
+def postgres_identity():
+    """Resolve the pinned image's account instead of assuming Debian/Alpine IDs."""
+    result = podman('run', '--rm', '--network', 'none', '--read-only',
+                    '--cap-drop', 'all', '--security-opt', 'no-new-privileges',
+                    '--entrypoint', 'sh', POSTGRES, '-c',
+                    'id -u postgres; id -g postgres').splitlines()
+    if len(result) != 2 or not all(value.isascii() and value.isdecimal()
+                                  and 0 < int(value) < 2**31 for value in result):
+        raise ValueError('PostgreSQL image must declare a non-root user and group')
+    return tuple(map(int, result))
+
+
 def wait_database(database, attempts=90):
     """Wait for the final TCP server, retaining the last failed probe privately."""
     last_error = None
@@ -172,14 +184,20 @@ def main():
             containers.append(name)
             podman('run', '-d', '--name', name, '--network', network,
                    '--network-alias', 'pricetag-' + role,
-                   *([] if role == 'db' else ['--cap-drop', 'all']),
+                   '--cap-drop', 'all',
                    '--security-opt', 'no-new-privileges', *options, image)
             return name
         stage = 'postgres'
-        db = start('db', POSTGRES, private, '--env-file', DEPLOY / 'postgres.env',
+        # Start as the image account directly: the hosted runner stalled in
+        # gosu before initdb. The non-root entrypoint creates its own 0700
+        # PGDATA below a private writable tmpfs, so no chown is needed.
+        database_uid, database_gid = postgres_identity()
+        db = start('db', POSTGRES, private, '--user', f'{database_uid}:{database_gid}',
+                   '--env-file', DEPLOY / 'postgres.env',
                    # Do not inherit Podman's host-dependent tmpfs size (64 MiB
                    # cannot hold bootstrap databases plus PostgreSQL WAL).
-                   '--tmpfs', '/var/lib/postgresql/data:rw,size=1g',
+                   '--tmpfs', '/var/lib/postgresql/data:rw,size=1g,mode=1777',
+                   '-e', 'PGDATA=/var/lib/postgresql/data/pgdata',
                    '-v', str(DEPLOY / 'initdb') + ':/docker-entrypoint-initdb.d:ro,Z')
         wait_database(db)
         stage = 'maas'

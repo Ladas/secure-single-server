@@ -52,6 +52,23 @@ class StartupEvidenceTests(unittest.TestCase):
             self.assertEqual(demo.database_processes('isolated-db'), ['bash', 'initdb', 'other'])
 
 
+class DatabaseIdentityTests(unittest.TestCase):
+    def test_image_account_is_resolved_without_privileges_or_network(self):
+        with patch.object(demo, 'podman', return_value='70\n70') as command:
+            self.assertEqual(demo.postgres_identity(), (70, 70))
+        args=command.call_args.args
+        self.assertIn('no-new-privileges', args)
+        self.assertIn('--read-only', args)
+        self.assertIn('none', args)
+        self.assertIn('--cap-drop', args)
+
+    def test_invalid_or_root_account_is_rejected(self):
+        for output in ('0\n0', '70', '70\nsecret', '70\n70\nextra', '-1\n70'):
+            with self.subTest(output=output), patch.object(demo, 'podman', return_value=output):
+                with self.assertRaises(ValueError):
+                    demo.postgres_identity()
+
+
 class ReadinessTests(unittest.TestCase):
     def test_stopped_database_preserves_probe_error(self):
         error = subprocess.CalledProcessError(1, ['podman'], stderr='private diagnostic')

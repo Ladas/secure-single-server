@@ -66,8 +66,11 @@ sudo python3 tests/pricetag/container-demo.py \
   --output /var/tmp/pricetag-demo-acceptance
 ```
 
-The disposable PostgreSQL data directory uses a bounded 1 GiB tmpfs, independent
-of host defaults. Storage/bootstrap failures produce fixed diagnostic codes and startup milestones
+The disposable PostgreSQL container starts directly as the pinned image’s
+non-root `postgres` account with all capabilities dropped and
+`no-new-privileges`. It creates a private `0700` data directory below a bounded
+1 GiB tmpfs, independent of host defaults. This avoids the image’s root-to-user
+`gosu` step, where the hosted runner stalled before PostgreSQL initialization. Storage/bootstrap failures produce fixed diagnostic codes and startup milestones
 (configuration, data sync, application SQL and final listener). Raw database logs
 remain private. A readiness timeout alone does not establish a storage failure.
 
