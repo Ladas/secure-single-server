@@ -28,6 +28,30 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(demo.database_failure_reason(''), 'database-bootstrap-failed')
 
 
+class StartupEvidenceTests(unittest.TestCase):
+    def test_startup_progress_is_fixed_codes_not_log_text(self):
+        logs = ('secret=value\ncreating configuration files ... ok\n'
+                'running bootstrap script ... ok\nperforming post-bootstrap initialization ... ok\n'
+                'syncing data to disk ... ')
+        self.assertEqual(demo.database_startup_progress(logs),
+                         ['configuration-created', 'bootstrap-complete', 'post-bootstrap-complete',
+                          'data-sync-started'])
+        self.assertEqual(demo.database_startup_progress('password=secret'), [])
+
+    def test_complete_startup_and_application_sql_are_distinct(self):
+        logs = ('syncing data to disk ... ok\n'
+                '/usr/local/bin/docker-entrypoint.sh: running '
+                '/docker-entrypoint-initdb.d/10-create-databases.sql\n'
+                'PostgreSQL init process complete; ready for start up.\n')
+        self.assertEqual(demo.database_startup_progress(logs),
+                         ['data-sync-started', 'data-sync-complete', 'application-sql-started',
+                          'entrypoint-complete'])
+
+    def test_process_evidence_is_allowlisted_without_arguments(self):
+        with patch.object(demo, 'podman', return_value='COMMAND\nbash\ninitdb\nsecret-value\n'):
+            self.assertEqual(demo.database_processes('isolated-db'), ['bash', 'initdb', 'other'])
+
+
 class ReadinessTests(unittest.TestCase):
     def test_stopped_database_preserves_probe_error(self):
         error = subprocess.CalledProcessError(1, ['podman'], stderr='private diagnostic')

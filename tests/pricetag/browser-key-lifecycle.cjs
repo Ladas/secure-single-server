@@ -84,4 +84,12 @@ let stage='setup';
   const later=await create('after-revocation','1h');assert.equal(await infer(later.key),200);
   console.log('PASS: UI-created keys revoke and expire; cross-user revocation rejected; excessive lifetime rejected; replacement works');
  }finally{await browser.close();}
-})().catch(error=>{const status=typeof error.actual==='number'&&typeof error.expected==='number'?' (actual '+error.actual+', expected '+error.expected+')':'';console.error('FAIL at '+stage+status+'; sensitive details withheld');process.exitCode=1});
+})().catch(error=>{
+ const status=typeof error.actual==='number'&&typeof error.expected==='number'
+  ?' (actual '+error.actual+', expected '+error.expected+')':'';
+ // Capture only a known test filename and numeric location, never the message,
+ // assertion values, source text or the rest of a potentially sensitive stack.
+ const location=String(error.stack||'').match(/(?:browser-key-lifecycle|key-download)\.cjs:(\d+):(\d+)/);
+ console.error('FAIL at '+stage+status+(location?' (source '+location[0]+')':'')+'; sensitive details withheld');
+ process.exitCode=1;
+});

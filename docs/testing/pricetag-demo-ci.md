@@ -67,8 +67,9 @@ sudo python3 tests/pricetag/container-demo.py \
 ```
 
 The disposable PostgreSQL data directory uses a bounded 1 GiB tmpfs, independent
-of host defaults. Storage/bootstrap failures produce fixed diagnostic codes; raw
-database logs remain private.
+of host defaults. Storage/bootstrap failures produce fixed diagnostic codes and startup milestones
+(configuration, data sync, application SQL and final listener). Raw database logs
+remain private. A readiness timeout alone does not establish a storage failure.
 
 Containers and generated deployment credentials are removed afterward. Ports
 are bound to loopback. Private diagnostic logs stay in the output directory;

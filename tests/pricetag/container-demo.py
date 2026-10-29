@@ -66,6 +66,30 @@ def database_failure_reason(diagnostic):
     return 'database-bootstrap-failed'
 
 
+def database_startup_progress(diagnostic):
+    """Publish known bootstrap milestones, never interpolated log contents."""
+    markers = (
+        ('creating configuration files ... ok', 'configuration-created'),
+        ('running bootstrap script ... ok', 'bootstrap-complete'),
+        ('performing post-bootstrap initialization ... ok', 'post-bootstrap-complete'),
+        ('syncing data to disk ...', 'data-sync-started'),
+        ('syncing data to disk ... ok', 'data-sync-complete'),
+        ('listening on Unix socket', 'socket-listening'),
+        ('running /docker-entrypoint-initdb.d/10-create-databases.sql', 'application-sql-started'),
+        ('PostgreSQL init process complete; ready for start up.', 'entrypoint-complete'),
+        ('listening on IPv4 address', 'tcp-listening'),
+    )
+    return [code for marker, code in markers if marker in diagnostic]
+
+
+def database_processes(database):
+    """Report allowlisted process names only; never arguments or arbitrary text."""
+    known = {'postgres', 'initdb', 'pg_ctl', 'psql', 'bash', 'sh', 'find',
+             'chown', 'chmod', 'sleep', 'gosu', 'su-exec'}
+    rows = podman('top', database, 'comm').splitlines()[1:]
+    return sorted({row.strip() if row.strip() in known else 'other' for row in rows})
+
+
 def wait_database(database, attempts=90):
     """Wait for the final TCP server, retaining the last failed probe privately."""
     last_error = None
@@ -240,15 +264,18 @@ def main():
                 log.write(error.stdout or '')
                 log.write(error.stderr or '')
             for container in containers:
-                subprocess.run(['podman', 'logs', '--tail', '30', container], stdout=log, stderr=log)
+                subprocess.run(['podman', 'logs', '--tail', '200', container], stdout=log, stderr=log)
         failure = {'passed': False, 'stage': stage}
         if stage == 'postgres':
             # Classify only known messages; never publish logs or exception text.
             diagnostic = (args.output / 'diagnostics-private.log').read_text()
             failure['reason'] = database_failure_reason(diagnostic)
+            failure['startup_progress'] = database_startup_progress(diagnostic)
             if 'db' in locals():
                 try:
                     failure['database'] = database_state(db)
+                    if failure['database'].get('Running'):
+                        failure['processes'] = database_processes(db)
                 except (subprocess.CalledProcessError, ValueError, KeyError):
                     failure['database'] = {'inspect_failed': True}
         (args.output / 'failure.json').write_text(json.dumps(failure) + '\n')
