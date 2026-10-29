@@ -47,6 +47,29 @@ class DatabaseSmokeTests(unittest.TestCase):
         self.assertEqual(process.call_args_list[-1].args[0][1:3], ['rm', '-f'])
 
 
+class AuditMetadataTests(unittest.TestCase):
+    def test_signal_policy_metadata_preserved_but_sensitive_fields_omitted(self):
+        line = ('apparmor="DENIED" operation="signal" profile="pricetag-demo-ci" '
+                'peer="pricetag-demo-ci//&/usr/bin/crun" comm="pg_ctl" '
+                'signal=int requested_mask="send" denied_mask="send" '
+                'name="private-file" argv="private-token"')
+        rows = smoke.signal_denials(line)
+        self.assertEqual(rows[0]['peer'], 'pricetag-demo-ci//&/usr/bin/crun')
+        self.assertEqual(rows[0]['signal'], 'int')
+        self.assertNotIn('private', json.dumps(rows))
+        self.assertEqual(smoke.signal_denials(line + '\n' + line), rows)
+        self.assertEqual(smoke.signal_denials(line.replace('operation="signal"', 'operation="open"')), [])
+        self.assertEqual(smoke.signal_denials(line.replace('comm="pg_ctl"', 'comm="unrelated"')), [])
+        self.assertEqual(smoke.signal_denials(line.replace('apparmor="DENIED"', 'apparmor="ALLOWED"')), [])
+
+    def test_journal_error_does_not_publish_exception(self):
+        output = io.StringIO()
+        with patch.object(smoke.subprocess, 'run', side_effect=OSError('private details')), \
+                contextlib.redirect_stderr(output):
+            smoke.report_signal_denials(123)
+        self.assertEqual(output.getvalue().strip(), 'AppArmor audit metadata unavailable')
+
+
 class DiagnosticTests(unittest.TestCase):
     def test_known_failures_emit_only_fixed_codes(self):
         for message, expected in (

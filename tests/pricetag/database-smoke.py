@@ -2,6 +2,9 @@
 """Qualify the CI PostgreSQL runtime before building application images."""
 import importlib.util
 import os
+import json
+import re
+import time
 from pathlib import Path
 import secrets
 import subprocess
@@ -13,6 +16,36 @@ demo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(demo)
 
 
+def signal_denials(log):
+    """Extract policy metadata only; never publish raw kernel/audit messages."""
+    rows = []
+    for line in log.splitlines():
+        fields = {key: quoted or plain for key, quoted, plain in
+                  re.findall(r'(\w+)=(?:"([^"]*)"|(\S+))', line)}
+        if fields.get('apparmor') != 'DENIED' or fields.get('operation') != 'signal':
+            continue
+        if fields.get('comm') not in {'pg_ctl', 'postgres', 'bash', 'sh', 'crun', 'podman'}:
+            continue
+        row = {key: fields[key] for key in
+               ('profile', 'peer', 'comm', 'signal', 'requested_mask', 'denied_mask')
+               if key in fields and re.fullmatch(r'[A-Za-z0-9_./&+,:() *=-]{1,256}', fields[key])}
+        if row not in rows:
+            rows.append(row)
+    return rows[-20:]
+
+
+def report_signal_denials(since):
+    try:
+        result = subprocess.run(
+            ['journalctl', '-k', '--since', '@' + str(since), '--no-pager', '-o', 'cat'],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        if result.returncode:
+            raise RuntimeError('journal unavailable')
+        print('AppArmor signal denials: ' + json.dumps(signal_denials(result.stdout)), file=sys.stderr)
+    except (OSError, RuntimeError, subprocess.TimeoutExpired):
+        print('AppArmor audit metadata unavailable', file=sys.stderr)
+
+
 def main():
     if os.geteuid() != 0:
         raise SystemExit('Run on the disposable CI host as root.')
@@ -20,6 +53,7 @@ def main():
     name = 'pricetag-db-smoke-' + uuid.uuid4().hex[:10]
     password = secrets.token_urlsafe(32)
     started = False
+    since = int(time.time())
     try:
         print(demo.podman('version'), flush=True)
         print(demo.podman('info', '--format',
@@ -49,6 +83,7 @@ def main():
             logs = subprocess.run(['podman', 'logs', name], text=True,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             print((logs.stdout + logs.stderr).replace(password, '[redacted]'), file=sys.stderr)
+        report_signal_denials(since)
         print('FAIL: isolated PostgreSQL preflight; application tests were not started', file=sys.stderr)
         raise SystemExit(1) from None
     finally:

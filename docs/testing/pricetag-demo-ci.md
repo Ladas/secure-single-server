@@ -109,11 +109,20 @@ the hosted job must pass before CI qualification is complete.
 
 The Ubuntu CI job loads `tests/pricetag/ci.apparmor` as its container profile.
 It preserves the Podman default filesystem, mount and kernel-interface denials,
-adding signal permission for the same profile stacked with `crun`. This addresses
+adding signal permission for the same profile stacked with `crun`. This targets
 [container-libs #805](https://github.com/podman-container-tools/container-libs/issues/805):
 `no-new-privileges` can otherwise prevent `pg_ctl` from stopping its own temporary
-PostgreSQL server. AppArmor, seccomp, dropped capabilities and
+PostgreSQL server. The hosted preflight still fails at that stop operation; the
+selected container profile is confirmed, but the denying stacked layer must be
+identified from kernel audit metadata before claiming a fix. AppArmor, seccomp, dropped capabilities and
 `no-new-privileges` remain enabled. The profile and configuration are installed
 only on the disposable CI host; the RHEL installer retains its SELinux setup.
 The database preflight reports the selected profile and exercises PostgreSQL's
 bootstrap start/stop sequence before accepting readiness.
+
+On a preflight failure, the job also extracts recent kernel AppArmor signal
+denials for PostgreSQL/runtime processes. It prints only profile, peer, process
+name, signal and permission masks. Raw audit records, file paths from denied
+file operations and command arguments are not published. These records identify
+which layer of a stacked profile rejected the signal; a selected container
+profile alone does not establish that the host runtime profile allows it.
