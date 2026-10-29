@@ -52,10 +52,44 @@ def database_failure_reason(diagnostic):
     for message, code in (
             ('No space left on device', 'database-storage-full'),
             ('Permission denied', 'database-permission-denied'),
-            ('Out of memory', 'database-out-of-memory')):
+            ('Operation not permitted', 'database-operation-not-permitted'),
+            ('Out of memory', 'database-out-of-memory'),
+            ('password authentication failed', 'database-authentication-failed'),
+            ('no pg_hba.conf entry', 'database-client-not-allowed'),
+            ('database "maas" does not exist', 'database-maas-missing'),
+            ('syntax error', 'database-bootstrap-syntax-error'),
+            ('Connection refused', 'database-connection-refused'),
+            ('No such file or directory', 'database-file-or-socket-missing'),
+            ('container state improper', 'database-container-stopped')):
         if message in diagnostic:
             return code
     return 'database-bootstrap-failed'
+
+
+def wait_database(database, attempts=90):
+    """Wait for the final TCP server, retaining the last failed probe privately."""
+    last_error = None
+    for _ in range(attempts):
+        # During init scripts PostgreSQL only listens on its Unix socket. A TCP
+        # probe avoids treating the temporary bootstrap server as ready.
+        try:
+            podman('exec', database, 'sh', '-c',
+                   'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -w -h 127.0.0.1 '
+                   '-U postgres -d maas -Atc "SELECT 1"')
+            return
+        except subprocess.CalledProcessError as error:
+            last_error = error
+        if podman('inspect', '--format', '{{.State.Running}}', database) != 'true':
+            break
+        time.sleep(1)
+    raise last_error
+
+
+def database_state(database):
+    """Expose only numeric/boolean state; never environment or raw errors."""
+    state = json.loads(podman('inspect', database))[0]['State']
+    return {key: state[key] for key in ('Running', 'ExitCode', 'OOMKilled')
+            if type(state.get(key)) in (bool, int)}
 
 
 def main():
@@ -123,14 +157,7 @@ def main():
                    # cannot hold bootstrap databases plus PostgreSQL WAL).
                    '--tmpfs', '/var/lib/postgresql/data:rw,size=1g',
                    '-v', str(DEPLOY / 'initdb') + ':/docker-entrypoint-initdb.d:ro,Z')
-        for _ in range(90):
-            try:
-                podman('exec', db, 'psql', '-U', 'postgres', '-d', 'maas', '-Atc', 'SELECT 1')
-                break
-            except subprocess.CalledProcessError:
-                time.sleep(1)
-        else:
-            raise RuntimeError('database bootstrap failed')
+        wait_database(db)
         stage = 'maas'
         maas = start('maas', images[1], private, '--read-only', '--user', '1001:1001',
                     '-p', '127.0.0.1:18086:8080',
@@ -219,6 +246,11 @@ def main():
             # Classify only known messages; never publish logs or exception text.
             diagnostic = (args.output / 'diagnostics-private.log').read_text()
             failure['reason'] = database_failure_reason(diagnostic)
+            if 'db' in locals():
+                try:
+                    failure['database'] = database_state(db)
+                except (subprocess.CalledProcessError, ValueError, KeyError):
+                    failure['database'] = {'inspect_failed': True}
         (args.output / 'failure.json').write_text(json.dumps(failure) + '\n')
         print('FAIL: ' + stage + '; private diagnostics retained, no credentials printed', file=sys.stderr)
         raise SystemExit(1) from None
