@@ -6,10 +6,45 @@ import unittest
 from unittest.mock import patch, mock_open
 import subprocess
 import json
+import contextlib
+import io
 
 spec = importlib.util.spec_from_file_location('container_demo', Path(__file__).with_name('container-demo.py'))
 demo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(demo)
+
+
+smoke_spec = importlib.util.spec_from_file_location('database_smoke', Path(__file__).with_name('database-smoke.py'))
+smoke = importlib.util.module_from_spec(smoke_spec)
+smoke_spec.loader.exec_module(smoke)
+
+
+class DatabaseSmokeTests(unittest.TestCase):
+    def test_failure_logs_only_disposable_database_and_redacts_password(self):
+        output = io.StringIO()
+        logs = subprocess.CompletedProcess([], 0, 'Permission denied: /dev/null\npassword=synthetic-secret', '')
+        with patch.object(smoke.os, 'geteuid', return_value=0), \
+                patch.object(smoke.os, 'umask'), \
+                patch.object(smoke.secrets, 'token_urlsafe', return_value='synthetic-secret'), \
+                patch.object(smoke.demo, 'podman', return_value='runtime info'), \
+                patch.object(smoke.demo, 'postgres_identity', return_value=(70, 70)), \
+                patch.object(smoke.demo, 'run') as run, \
+                patch.object(smoke.demo, 'wait_database', side_effect=RuntimeError('private error')), \
+                patch.object(smoke.subprocess, 'run', return_value=logs) as process, \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            with self.assertRaises(SystemExit) as caught:
+                smoke.main()
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn('Permission denied: /dev/null', output.getvalue())
+        self.assertNotIn('synthetic-secret', output.getvalue())
+        self.assertNotIn('private error', output.getvalue())
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index('--network') + 1], 'none')
+        self.assertNotIn('synthetic-secret', command)
+        self.assertNotIn('-v', command)
+        self.assertNotIn('-p', command)
+        self.assertEqual(process.call_args_list[0].args[0][1], 'logs')
+        self.assertEqual(process.call_args_list[-1].args[0][1:3], ['rm', '-f'])
 
 
 class DiagnosticTests(unittest.TestCase):

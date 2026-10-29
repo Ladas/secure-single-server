@@ -86,3 +86,23 @@ raw service logs.
 Container CI validates application behavior and generated gateway configuration.
 It does **not** validate RHEL Quadlets, SELinux or fresh-host installation. Keep
 [benchmark RHEL qualification](pricetag-management-demo.md) as a separate check.
+
+### Database preflight and environment parity
+
+CI first starts the pinned PostgreSQL image alone, without host mounts,
+application data or published ports, on a network with no external connectivity.
+It verifies initialization and an authenticated TCP query before building the
+application images. On failure, only this disposable container's startup log is
+printed, with its generated test password redacted. Application logs remain private.
+
+Run the same preflight on a disposable Linux test host with:
+
+```bash
+sudo python3 tests/pricetag/database-smoke.py
+```
+
+The preflight records Podman version, CPU architecture, OCI runtime and
+AppArmor/SELinux status. GitHub uses an AMD64 Ubuntu 24.04 VM; a Mac Podman VM
+may use ARM64 Fedora CoreOS. Running Ubuntu inside that VM does not reproduce
+the hosted kernel or security policy. Local passes are regression evidence;
+the hosted job must pass before CI qualification is complete.
