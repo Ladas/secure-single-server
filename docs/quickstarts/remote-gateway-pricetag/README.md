@@ -7,8 +7,9 @@ OpenCode with a user key and a monthly USD budget.
 SSH/8443 from your IP; Git, Python 3 and OpenCode on your workstation.
 The tested VM has 8 vCPUs, 32 GiB RAM and 150 GiB disk. No GPU is needed.
 
-> The installer uses digest-pinned published MaaS and PriceTag demo images.
-> [Source builds](images.md) remain available for testing another branch or commit.
+> The default published images include the administration, user-key, quota and
+> pricing controls described below. To test newer source, choose **Build latest
+> demo branches** or add `--image-mode source`; see [image options](images.md).
 > The optional provider editor is not included.
 
 ## 1. Set the connection

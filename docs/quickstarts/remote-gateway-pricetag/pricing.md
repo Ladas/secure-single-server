@@ -1,18 +1,17 @@
 # Manage pricing
 
-Use **Administration → Pricing Discounts** for imported-model discounts. The
+Use **Administration → Discounts** for imported-model discounts. The
 pricing view lists rates; historical repricing is an administrator API operation.
-These are existing PriceTag capabilities. The candidate fixes discount policy
-persistence and preserves recorded charges when future rates change.
+These are existing PriceTag capabilities. The pinned image includes discount-persistence and historical-charge fixes.
 
 | Operation | UI / API |
 | --- | --- |
 | List all rates, including unused models | Pricing view; `GET /api/v1/pricing?used=0` |
-| Read/change imported discounts | Pricing Discounts; `GET/PUT /api/v1/admin/pricing-discounts` |
+| Read/change imported discounts | Discounts; `GET/PUT /api/v1/admin/pricing-discounts` |
 | Refresh imported prices | Discount save triggers refresh; `POST /api/v1/admin/pricing/refresh` |
 | Preview/confirm historical repricing | API only: `POST /api/v1/admin/pricing/reprice` |
 | Read repricing status | `GET /api/v1/admin/pricing/reprice/OPERATION_ID` |
-| **Optional:** add arbitrary custom rates | Candidate Model pricing UI/API; see below |
+| **Optional:** add arbitrary custom rates | Model pricing UI/API in the pinned image; see below |
 
 ## Catalog and discounts
 
@@ -108,10 +107,10 @@ rates**. Check all four USD-per-million-token rates before saving. Zero means fr
 
 ## Optional custom model rates
 
-The candidate's **Administration → Pricing Discounts → Model pricing** and
+**Administration → Model pricing** and
 `PUT /api/v1/management/prices` add/change arbitrary rates or copy a source rate.
-This is an optional extension, not an existing upstream capability. The prepared
-demo image still includes it; current custom-price bootstrap paths depend on it.
+This is an optional extension, not an existing upstream capability. The pinned
+demo image includes it; current custom-price bootstrap paths depend on it.
 
 Supply all four USD-per-million-token rates: input, output, cache read and cache
 write. Use zero only deliberately. A copied source rate is a snapshot; later
@@ -121,6 +120,10 @@ source refreshes do not synchronize it automatically.
 metering; adding an alias-only price does not price the rewritten event. Adding a
 price does not publish a gateway route. Configure models with the
 [provider helper](providers.md).
+
+Managed rates survive imports and discount refreshes. There is currently no UI/API
+action to resume imported pricing or restore an earlier effective rate. Entering
+a previous rate manually keeps it managed; it does not re-enable imports.
 
 ## Missing-price fallback
 

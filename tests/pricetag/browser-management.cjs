@@ -45,13 +45,30 @@ async function done(page, action) {
     await admin.locator('#admin').waitFor({ state: 'visible' });
     await admin.locator('#user [name=subject]').fill('demo-ui-onboard');
     await admin.locator('#user [name=name]').fill('Demo UI Onboarding');
-    await done(admin, () => admin.locator('#user button').click());
-    await admin.locator('#vtab-safety-net').click();
+    await done(admin, () => admin.getByRole('button',{name:'Save user',exact:true}).click());
+    assert.equal(await admin.locator('#partner-users-page-size').inputValue(), '5');
+    await admin.locator('#partner-users-search').fill('demo-ui-onboard');
+    const managedRow=admin.locator('#partner-users-list tbody tr').filter({hasText:'demo-ui-onboard'});
+    await managedRow.waitFor();
+    await managedRow.locator('.partner-role').focus();await admin.keyboard.press('Enter');await admin.keyboard.press('Escape');
+    assert.equal(await admin.locator('#partner-detail-ov.show').count(),0);
+    await managedRow.locator('.partner-manager').click();await admin.keyboard.press('Escape');
+    assert.equal(await admin.locator('#partner-detail-ov.show').count(),0);
+    await managedRow.getByRole('button',{name:'Edit',exact:true}).click();
+    assert.equal(await admin.locator('#user [name=subject]').inputValue(),'demo-ui-onboard');
+    assert.equal(await admin.locator('#user [name=subject]').getAttribute('readonly'),'');
+    await admin.locator('#newUser').click();
+    assert.equal(await admin.locator('#user [name=subject]').getAttribute('readonly'),null);
+    const userCard=await admin.locator('#tab-people > .card').boundingBox();
+    await admin.locator('#vtab-user-quota').click();
+    const quotaCard=await admin.locator('#tab-user-quota > .card').boundingBox();
+    assert.equal(quotaCard.x,userCard.x);assert.equal(quotaCard.width,userCard.width);
     await admin.locator('#budget [name=subject]').selectOption('demo-ui-onboard');
     await admin.locator('#budget [name=monthly_usd]').fill('5');
     await done(admin, () => admin.getByRole('button', { name: 'Set override', exact: true }).click());
-    // Verify the expandable per-user overrides list and inheritance.
-    await admin.locator('#budgetDetails summary').click();
+    // The overrides table is always visible beneath the editor.
+    assert.equal(await admin.locator('#budgetDetails').isVisible(),true);
+    assert.equal(await admin.locator('#status').isVisible(),false);
     await admin.locator('#budgetSearch [name=search]').fill('demo-ui-onboard');
     await done(admin,()=>admin.locator('#budgetSearch button').click());
     const overrideRow=admin.locator('#budgets tr').filter({hasText:'demo-ui-onboard'});
@@ -61,8 +78,7 @@ async function done(page, action) {
     assert.match(await admin.locator('#budgetCurrent').textContent(),/Inherits global default/);
     await admin.locator('#budget [name=monthly_usd]').fill('5');
     await done(admin,()=>admin.getByRole('button',{name:'Set override',exact:true}).click());
-    await admin.locator('#vtab-people').click();
-    await admin.locator('#onboard [name=subject]').selectOption('demo-ui-onboard');
+    await admin.locator('#vtab-user-keys').click();await admin.locator('#onboard [name=subject]').selectOption('demo-ui-onboard');
     await admin.locator('#onboard [name=expiresIn]').fill('2d');
     await done(admin, () => admin.getByRole('button', { name: 'Issue key', exact: true }).click());
     const issued = await downloadKey(admin, '#onboardKey');
@@ -73,12 +89,12 @@ async function done(page, action) {
     assert.equal(await user.locator('#admin').isVisible(), false);
     const statuses = await user.evaluate(async () => {
       const result = [];
-      for (const route of ['/api/v1/management/users', '/api/v1/management/prices', '/api/v1/admin/partner-users']) {
+      for (const route of ['/api/v1/management/users', '/api/v1/management/prices', '/api/v1/admin/partner-users', '/api/v1/admin/partner-users/00000000-0000-0000-0000-000000000001/keys']) {
         result.push((await fetch(route, { headers: { 'X-Forwarded-User': 'admin', 'X-MaaS-Username': 'admin' } })).status);
       }
       return result;
     });
-    assert.deepEqual(statuses, [403, 403, 403]);
+    assert.deepEqual(statuses, [403, 403, 403, 403]);
     await done(user, () => user.getByRole('button', { name: 'List my keys', exact: true }).click());
     assert.ok(await user.locator('#keys button').count(), 'issued key absent from personal list');
     await user.locator('#key [name=name]').fill('demo-personal-key');

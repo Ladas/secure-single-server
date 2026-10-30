@@ -4,10 +4,9 @@ Admin is always created; Alice/Bob are optional. Ordinary users inherit $5/month
 unless configured otherwise. Keys expire within 90 days. Use ordinary-user keys
 for inference: admin is quota-exempt.
 
-With the management candidate installed, **Administration** provides user/manager controls and onboarding keys;
-**Safety Net** includes per-user USD overrides. **My keys** manages personal keys. The commands below use the same
-service APIs; they do not write business tables directly. Published images without
-those APIs are not compatible with this branch's helpers.
+**Administration → Users** manages identities and manager relationships;
+**User quota** manages per-user USD overrides; **User keys** issues onboarding keys.
+**My keys** manages personal keys. The commands below use the same service APIs.
 
 ## Open the management session
 
@@ -59,8 +58,12 @@ sudo cat /root/pricetag-admin/carol.key
 
 ## Manage keys in the dashboard
 
-**Administration → Users** creates an identity without a key. **Issue onboarding key**
-adds a key; it does not replace existing keys. Choose **Copy key** or **Download .key**,
+**Administration → Users** creates an identity without a key. Search by login or
+name, filter all/active/inactive users, and use **Edit** to update the selected login.
+The table defaults to five users per page. Select a row to inspect active keys
+and confirm **Revoke all keys**.
+
+**Administration → User keys → Issue onboarding key** adds a key; it does not replace existing keys. Choose **Copy key** or **Download .key**,
 then **Dismiss key**. The secret is never displayed or saved in browser storage.
 
 Users manage their own keys under **My keys**. Active keys appear first, with expiry
@@ -82,7 +85,7 @@ chmod 600 /path/to/pricetag.key
 
 ## Inspect a user's view
 
-As superadmin, select the user in **Administration → Users → Issue onboarding key**
+As superadmin, select the user in **Administration → User keys → Issue onboarding key**
 and choose **View selected user’s usage** or **View selected user’s team**.
 Confirm **Continue**; no key needs to be issued or copied. The **Viewing as** banner
 identifies the target. Use **Back to admin view** and confirm to restore your view.
@@ -163,8 +166,8 @@ reported old IDs after checking their status.
 | View aggregate and user spending | Administrator dashboard |
 | View local users and change administrator roles or manager relationships | Administrator **Users** |
 | Set the default monthly allowance and post-limit model exceptions | Administrator **Safety Net** (`/api/v1/admin/safety-net`) |
-| Create users or change an individual allowance | Administration → Users / Safety Net → Per-user monthly overrides; SSH `scripts/pricetag/user` uses the same PriceTag APIs |
-| Issue onboarding keys | Administration → Users → Issue onboarding key |
+| Create users or change an individual allowance | Administration → Users / User quota → Per-user monthly quota overrides; SSH `scripts/pricetag/user` uses the same PriceTag APIs |
+| Issue onboarding keys | Administration → User keys → Issue onboarding key |
 | Create/list/revoke your own keys | My keys (`/management`); SSH `scripts/pricetag/maas-key` remains available |
 | Configure providers, credentials and advertised models | SSH [provider helper](providers.md) |
 | View personal/team spending | Usage is personal for users/managers; My team follows manager relationships |
