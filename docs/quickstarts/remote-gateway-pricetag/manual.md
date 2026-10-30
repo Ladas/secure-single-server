@@ -130,7 +130,7 @@ Preparation refuses existing directories. Startup installs persistent systemd
 Quadlets for PostgreSQL, MaaS, PriceTag and Praxis. Do not rerun preparation over
 an existing deployment; upgrades require separate qualification.
 
-<details>
+<details markdown="1">
 <summary>Private network and trusted services</summary>
 
 MaaS trusts host loopback and the three `/32` service addresses assigned to MaaS,

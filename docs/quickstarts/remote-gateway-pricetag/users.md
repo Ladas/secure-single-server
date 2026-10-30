@@ -111,7 +111,7 @@ To revoke a specific key, copy its ID from `list`:
 sudo python3 scripts/pricetag/maas-key revoke --subject carol --key-id OLD_KEY_ID
 ```
 
-<details>
+<details markdown="1">
 <summary>Copy a rotated key and switch OpenCode</summary>
 
 Run in the **workstation installation shell**, after exiting SSH:
@@ -131,7 +131,7 @@ of the key file it already references and restart OpenCode.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>Rotate with an overlap while clients switch</summary>
 
 ```console
@@ -143,7 +143,7 @@ Switch the client, verify inference, then revoke the old key by ID.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>Find saved keys or recover access</summary>
 
 ```console
@@ -158,7 +158,7 @@ reported old IDs after checking their status.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>Dashboard versus CLI: supported operations</summary>
 
 | Task | Available interface |
@@ -179,7 +179,7 @@ post-limit exception list, so no model bypasses the USD limit.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>Administration boundaries and upstream API gaps</summary>
 
 - The matching PriceTag demo image is required.
@@ -209,4 +209,4 @@ post-limit exception list, so no model bypasses the USD limit.
   fresh-install guide. Use the [mock benchmark](../../testing/pricetag-perf.md)
   to measure resource and storage growth.
 
-For candidate automation over SSH, use the [private management API client](management-api.md).
+For automation over SSH, use the [private management API client](management-api.md).

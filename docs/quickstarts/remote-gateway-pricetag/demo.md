@@ -129,8 +129,8 @@ See [pricing operations](pricing.md) for refresh, catalog and repricing examples
 3. **Revoke** the old key. Active keys appear first; expandable history lists
    revoked/expired records with status, expiry dates and remaining lifetime.
    This is revocation, not permanent record deletion.
-4. As superadmin, use **Administration → Users → select a user → Revoke all keys** to
-   **Check active keys** or **Revoke all keys** for a selected identity. New keys
+4. As superadmin, open **Administration → Users**, select a user, then
+   **Check active keys** or confirm **Revoke all keys**. New keys
    can still be issued afterward; this action does not disable the account.
 5. To offboard, save the login as **Inactive** under **Create or update a user**.
    Verify that its existing browser session cannot read usage and its inference
@@ -140,7 +140,7 @@ Key revocation does not itself end an existing dashboard session. Suspension
 blocks access; reactivation can make unrevoked, unexpired keys usable again.
 See [users and keys](users.md) for CLI equivalents and overlap rotation.
 
-<details>
+<details markdown="1">
 <summary>Automated verification of these boundaries</summary>
 
 The [mock demo suite](../../testing/pricetag-management-demo.md) exercises the

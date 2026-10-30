@@ -30,8 +30,8 @@ updates and repricing do not require direct database access.
 
 ## CLI from the installation shell
 
-Use the connection variables from the quickstart and a private administrator key
-file. The client logs in over verified HTTPS with an in-memory session. Output
+First complete [workstation administrator access](management-api.md#prepare-workstation-administrator-access).
+Run these commands in its private management directory. The client logs in over verified HTTPS with an in-memory session. Output
 files must not already exist.
 
 ```sh
@@ -56,7 +56,7 @@ pricing_api POST /api/v1/admin/pricing/refresh --output price-refresh.json
 The helper creates private files. Do not paste provider or user keys into request
 JSON, URLs or command arguments. See [management authentication](management-api.md).
 
-<details>
+<details markdown="1">
 <summary>Historical repricing — preview before confirmation</summary>
 
 Create a private request file containing a **specific model and bounded UTC

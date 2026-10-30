@@ -36,7 +36,7 @@ The published images target `linux/amd64`. They are pinned in
 `scripts/pricetag/install.py`; no moving `latest` tag is used. Override them only
 to test another publication.
 
-<details>
+<details markdown="1">
 <summary>Override published MaaS and PriceTag images</summary>
 
 ```console
@@ -54,7 +54,7 @@ options](providers.md). Never put provider keys in command-line arguments.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>Build from the default source revisions</summary>
 
 Source mode defaults to these fork branches:
@@ -73,7 +73,7 @@ sudo scripts/pricetag/install --hostname "$GATEWAY_HOST" --image-mode source
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>Build another branch or commit</summary>
 
 For branches, add `--maas-branch BRANCH` and/or `--metering-branch BRANCH`
@@ -95,7 +95,7 @@ PriceTag schema/API changes need compatibility testing.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>Image verification and upgrade limits</summary>
 
 Revision options also set expected source labels for published images. A mismatch
