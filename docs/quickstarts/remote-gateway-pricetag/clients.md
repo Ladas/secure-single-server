@@ -2,7 +2,7 @@
 
 Use the [dynamic launch](README.md#6-run-opencode) for a fresh catalog on every
 start. Expand an option below to save a configuration, configure OpenCode
-manually, or connect the desktop app.
+manually, or use the desktop app with the remote gateway.
 First complete [local connection setup](README.md#5-prepare-the-local-connection);
 these examples use its workstation shell variables.
 
@@ -226,42 +226,54 @@ configuration differs ([tracked issue](https://github.com/anomalyco/opencode/iss
 
 </details>
 
+## OpenCode Desktop on macOS
+
+Desktop uses the same provider configuration as the CLI and manages its own
+background process. **No separate CLI server, server password or running
+terminal is needed.** Inference goes to the remote Praxis gateway over HTTPS.
+
+1. Complete **Save native configuration** above, choosing your user key. Then
+   complete **Use the standard config directory** to install or merge the
+   provider settings into `~/.config/opencode/opencode.json`.
+2. Complete that section's **CA setup** once: it saves
+   `NODE_EXTRA_CA_CERTS` with the absolute path to `ca.pem` in `~/.zshrc`.
+   Keep both the CA and user-key files at their configured paths. No private CA
+   key is needed, and no system-wide certificate trust change is required.
+3. Fully quit OpenCode Desktop, then open it from Applications. Keep its default
+   **local/built-in server**, open your project and select a `praxis-openai` or
+   `praxis-anthropic` model. Send a short request and check its usage in PriceTag.
+
+The remote gateway belongs in the providers' `baseURL`, **not** the Desktop
+server picker. If you previously configured `http://127.0.0.1:4096`, remove that
+custom server selection and use Desktop's default backend.
+
+OpenCode Desktop **1.19.5** loads the macOS login-shell environment before starting
+its backend, including the configured CA path. These provider settings target
+OpenCode 1.x; OpenCode 2 needs separate configuration qualification. The Desktop
+steps have been checked against 1.19.5 source; an end-to-end Desktop smoke test is
+still required on your installed version.
+
 <details markdown="1">
-<summary>OpenCode Desktop — use a local server with explicit CA trust</summary>
+<summary>Switch users, refresh models or troubleshoot certificates</summary>
 
-Use the saved config above. Start the installed OpenCode CLI backend from your
-project directory; keep this shell running. This makes CA handling explicit
-instead of depending on whether a Finder-launched app inherits shell variables.
-
-```console
-cd /path/to/your/project
-unset OPENCODE_CONFIG_CONTENT
-export OPENCODE_CONFIG=/absolute/path/to/opencode.json
-export NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem
-export NO_PROXY=localhost,127.0.0.1
-export OPENCODE_SERVER_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-printf %s "$OPENCODE_SERVER_PASSWORD" | pbcopy  # macOS: copy the local-server password
-opencode serve --hostname 127.0.0.1 --port 4096
-```
-
-In **OpenCode Desktop → server picker**, add `http://127.0.0.1:4096` with username
-`opencode` and the generated server password (copied to the clipboard on macOS).
-On other platforms, use your password manager or clipboard tool before starting
-`serve`.
-
-This password protects the local OpenCode backend; it is separate from the user
-key in your config. Clear the clipboard afterward. The backend connects to Praxis
-using HTTPS and the configured CA. Do not enter the gateway URL as the desktop's
-OpenCode server URL, and do not bind this backend to a public interface.
-
-Choose a project and a gateway model in the desktop app. Use compatible CLI and
-desktop versions; the gateway configuration was qualified with OpenCode 1.19.5,
-not OpenCode 2. Desktop interaction still needs a manual smoke test on your
-installed version. Switch users by changing both provider key-file references,
-then restarting the backend.
-
-[Desktop server selection](https://opencode.ai/docs/troubleshooting/#fix-server-connection-issues) ·
-[Server authentication](https://opencode.ai/docs/server/#authentication) ·
-[CA trust](https://opencode.ai/docs/network/#custom-certificates)
+- **Switch user:** change both providers' `options.apiKey` to the other user's
+  `{file:/absolute/path/to/user.key}` and fully restart Desktop. Keep key files
+  private (`chmod 600`); never paste the key into the configuration.
+- **Refresh models:** regenerate the saved config, merge it into the global config
+  and restart Desktop. Project config can override global settings.
+- **CA changes:** update the `NODE_EXTRA_CA_CERTS` path in `~/.zshrc` and restart.
+  It must point to a readable PEM file. If you already need other private CAs,
+  use one PEM bundle containing all required certificates.
+- **Certificate error:** ensure the gateway hostname matches the certificate and
+  the CA path is correct. Desktop's shell-environment probe has a five-second
+  timeout; a slow or failing shell startup can prevent it loading the CA setting.
+  Review Desktop logs in that case. Never disable TLS verification.
+- **Publicly trusted gateway certificate:** omit the gateway's extra CA setting.
+  Keep any CA configuration required for other services.
 
 </details>
+
+[OpenCode custom CA documentation](https://opencode.ai/docs/network/#custom-certificates) ·
+[Desktop server selection](https://opencode.ai/docs/troubleshooting/#fix-server-connection-issues) ·
+[Desktop 1.19.5 environment loading](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/desktop/src/main/server.ts) ·
+[Desktop 1.19.5 shell probe](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/desktop/src/main/shell-env.ts)

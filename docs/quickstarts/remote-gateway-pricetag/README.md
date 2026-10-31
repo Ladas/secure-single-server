@@ -60,6 +60,9 @@ ssh -t "${SSH_OPTS[@]}" "$RHEL_HOST" \
 ```
 
 Choose providers, enter their keys at hidden prompts, then confirm with `install`.
+To test the latest table and **My keys** UI, select **Build latest demo branches**
+at the application-image prompt. This fetches the current PriceTag demo branch
+and prints the exact commit being built; published images retain the released UI.
 
 - **Providers:** OpenAI, an external OpenAI-compatible/Messages service, or both.
 - **Users:** admin is required; Alice/Bob are optional. Choose **Admin only** to
@@ -158,7 +161,8 @@ allowance is per user. View and change overrides
 in **Administration → User quota**; the [user helper](users.md) uses the same service API.
 For budget-denial testing, use the separate [mock quota probe](../../testing/pricetag-perf.md#usd-quota-probe).
 
-[Manual configuration, saved launcher and desktop app](clients.md).
+[Manual configuration and saved launcher](clients.md) ·
+[OpenCode Desktop setup](clients.md#opencode-desktop-on-macos).
 
 <details markdown="1">
 <summary>What the harness helper does</summary>

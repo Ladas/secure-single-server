@@ -55,13 +55,14 @@ options](providers.md). Never put provider keys in command-line arguments.
 </details>
 
 <details markdown="1">
-<summary>Build from the default source revisions</summary>
+<summary>Build from the latest demo branches</summary>
 
 Source mode defaults to these fork branches:
 
 - [MaaS: feat/standalone-runtime-minimal](https://github.com/Ladas/models-as-a-service/tree/feat/standalone-runtime-minimal).
 - [PriceTag: feat/standalone-demo-reuse-upstream-ui](https://github.com/Ladas/pricetag-metering/tree/feat/standalone-demo-reuse-upstream-ui).
 
+This includes the latest **My keys** and administration-table changes.
 The optional PriceTag follow-up is not selected. Each branch is resolved to a
 full commit before building, recorded in the image label and checked on import.
 
