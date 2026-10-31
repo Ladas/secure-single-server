@@ -1,10 +1,12 @@
-# Saved OpenCode configuration
+# OpenCode: manual configuration and desktop
 
-Optional alternatives to the [dynamic launch](README.md#6-run-opencode).
+Use the [dynamic launch](README.md#6-run-opencode) for a fresh catalog on every
+start. Expand an option below to save a configuration, configure OpenCode
+manually, or connect the desktop app.
 First complete [local connection setup](README.md#5-prepare-the-local-connection);
 these examples use its workstation shell variables.
 
-<details>
+<details markdown="1">
 <summary>Save native configuration and a launcher — no exports needed on later runs</summary>
 
 Run in the **workstation setup shell** after connection setup. Requires `jq`.
@@ -70,11 +72,18 @@ referenced key file and restart OpenCode. Keep keys outside project repositories
 
 </details>
 
-<details>
-<summary>Resulting OpenCode config — two-model example</summary>
+<details markdown="1">
+<summary>Manual config — direct OpenAI and external OpenAI/Messages</summary>
 
 Inspect your generated file with `jq . "$CLIENT_DIR/opencode.json"` in the setup
-shell. It uses your URL, key path and model limits; for example:
+shell, or save the example below as your private `opencode.json` without using
+our helper. Replace the gateway URL and key path. Include only aliases advertised
+by your gateway and copy their `praxis.context` / `praxis.output` values from
+`/v1/models`; these example limits are not discovery from the upstream provider.
+
+`praxis-openai` groups both direct `openai/` and external `external/` aliases by
+API dialect. `praxis-anthropic` handles external Messages aliases. These are
+connections to Praxis, not direct connections to the upstream services.
 
 ```json
 {
@@ -89,6 +98,17 @@ shell. It uses your URL, key path and model limits; for example:
       "models": {
         "openai/gpt-5.4-mini": {
           "name": "openai/gpt-5.4-mini",
+          "limit": {"context": 400000, "output": 128000},
+          "provider": {"npm": "@ai-sdk/openai"},
+          "reasoning": true,
+          "options": {
+            "store": false,
+            "reasoningEffort": "medium",
+            "include": ["reasoning.encrypted_content"]
+          }
+        },
+        "external/gpt-5.4-mini": {
+          "name": "external/gpt-5.4-mini",
           "limit": {"context": 400000, "output": 128000},
           "provider": {"npm": "@ai-sdk/openai"},
           "reasoning": true,
@@ -122,12 +142,20 @@ shell. It uses your URL, key path and model limits; for example:
 }
 ```
 
+Save this file outside your project repository and protect it and the key with
+`chmod 600`. To run directly from a project shell:
+
+```console
+NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem \
+OPENCODE_CONFIG=/absolute/path/to/opencode.json opencode
+```
+
 Both providers reference the same private user-key file. GPT uses the Responses
 SDK; Messages uses the Anthropic SDK. The launcher supplies the CA separately.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>Use the standard config directory and run just opencode</summary>
 
 First generate the config using the **Save native configuration** block above.
@@ -175,7 +203,7 @@ when models change. Project settings can override global settings.
 
 </details>
 
-<details>
+<details markdown="1">
 <summary>External Claude rejects thinking.adaptive.block_binding</summary>
 
 OpenCode may inject a thinking extension that an Anthropic-compatible gateway
@@ -195,5 +223,45 @@ Restart the helper for a session config, or regenerate a saved native config
 before restarting OpenCode. This is a workstation change; no gateway rebuild is
 needed. OpenCode 2 requires separate qualification because its compatibility
 configuration differs ([tracked issue](https://github.com/anomalyco/opencode/issues/52325)).
+
+</details>
+
+<details markdown="1">
+<summary>OpenCode Desktop — use a local server with explicit CA trust</summary>
+
+Use the saved config above. Start the installed OpenCode CLI backend from your
+project directory; keep this shell running. This makes CA handling explicit
+instead of depending on whether a Finder-launched app inherits shell variables.
+
+```console
+cd /path/to/your/project
+unset OPENCODE_CONFIG_CONTENT
+export OPENCODE_CONFIG=/absolute/path/to/opencode.json
+export NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem
+export NO_PROXY=localhost,127.0.0.1
+export OPENCODE_SERVER_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+printf %s "$OPENCODE_SERVER_PASSWORD" | pbcopy  # macOS: copy the local-server password
+opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+In **OpenCode Desktop → server picker**, add `http://127.0.0.1:4096` with username
+`opencode` and the generated server password (copied to the clipboard on macOS).
+On other platforms, use your password manager or clipboard tool before starting
+`serve`.
+
+This password protects the local OpenCode backend; it is separate from the user
+key in your config. Clear the clipboard afterward. The backend connects to Praxis
+using HTTPS and the configured CA. Do not enter the gateway URL as the desktop's
+OpenCode server URL, and do not bind this backend to a public interface.
+
+Choose a project and a gateway model in the desktop app. Use compatible CLI and
+desktop versions; the gateway configuration was qualified with OpenCode 1.19.5,
+not OpenCode 2. Desktop interaction still needs a manual smoke test on your
+installed version. Switch users by changing both provider key-file references,
+then restarting the backend.
+
+[Desktop server selection](https://opencode.ai/docs/troubleshooting/#fix-server-connection-issues) ·
+[Server authentication](https://opencode.ai/docs/server/#authentication) ·
+[CA trust](https://opencode.ai/docs/network/#custom-certificates)
 
 </details>
