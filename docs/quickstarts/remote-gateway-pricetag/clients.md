@@ -226,54 +226,132 @@ configuration differs ([tracked issue](https://github.com/anomalyco/opencode/iss
 
 </details>
 
-## OpenCode Desktop on macOS
+## OpenCode Desktop
 
-Desktop uses the same provider configuration as the CLI and manages its own
-background process. **No separate CLI server, server password or running
-terminal is needed.** Inference goes to the remote Praxis gateway over HTTPS.
+Desktop manages its own background process. **No separate CLI server or running
+terminal is needed.** It sends inference to the remote gateway over HTTPS.
 
-1. Complete **Save native configuration** above, choosing your user key. Then
-   complete **Use the standard config directory** to install or merge the
-   provider settings into `~/.config/opencode/opencode.json`.
-2. Complete that section's **CA setup** once: it saves
-   `NODE_EXTRA_CA_CERTS` with the absolute path to `ca.pem` in `~/.zshrc`.
-   Keep both the CA and user-key files at their configured paths. No private CA
-   key is needed, and no system-wide certificate trust change is required.
-3. Fully quit OpenCode Desktop, then open it from Applications. Keep its default
-   **local/built-in server**, open your project and select a `praxis-openai` or
-   `praxis-anthropic` model. Send a short request and check its usage in PriceTag.
+Use the global configuration file:
 
-The remote gateway belongs in the providers' `baseURL`, **not** the Desktop
-server picker. If you previously configured `http://127.0.0.1:4096`, remove that
-custom server selection and use Desktop's default backend.
+| Platform | Default config path |
+| --- | --- |
+| macOS / Linux | `~/.config/opencode/opencode.json` |
+| Windows | `%USERPROFILE%\.config\opencode\opencode.json` |
 
-OpenCode Desktop **1.19.5** loads the macOS login-shell environment before starting
-its backend, including the configured CA path. These provider settings target
-OpenCode 1.x; OpenCode 2 needs separate configuration qualification. The Desktop
-steps have been checked against 1.19.5 source; an end-to-end Desktop smoke test is
-still required on your installed version.
+If `XDG_CONFIG_HOME` is set, use its `opencode` directory instead.
+
+1. Save or merge the provider configuration from **Save native configuration** or
+   **Manual config** above. Preserve existing JSON/JSONC settings and keep each
+   provider's `apiKey` as a reference to your private user-key file.
+2. Configure the gateway CA **once**, using your platform's instructions below.
+   This setting applies to the backend process, not to an individual provider.
+   Skip it for a publicly trusted gateway certificate.
+3. Fully quit Desktop and reopen it normally from Applications, Start or your
+   application menu. Keep the default **local/built-in server**, open a project,
+   select a `praxis-openai` or `praxis-anthropic` model and send a short request.
+   Check that request in PriceTag.
+
+On Windows, forward slashes avoid JSON escaping in the key reference, for example
+`{file:C:/Users/YOUR_USER/.config/praxis-pricetag/alice.key}`.
+
+The gateway URL belongs in provider `baseURL`, **not** the Desktop server picker.
+Remove any previous custom `http://127.0.0.1:4096` selection. Keep your CA and key
+files at their configured paths; no private CA key is needed.
+
+<details markdown="1">
+<summary>macOS — one-time CA setup, then launch from Applications or the Dock</summary>
+
+For the default **zsh** shell, add this line to `~/.zshrc` (or
+`$ZDOTDIR/.zshrc` if you configured `ZDOTDIR`), using your CA's absolute path:
+
+```sh
+export NODE_EXTRA_CA_CERTS="/absolute/path/to/ca.pem"
+```
+
+Alternatively, append it from the quickstart's **workstation setup shell**:
+
+```console
+printf '\nexport NODE_EXTRA_CA_CERTS=%q\n' "$CLIENT_DIR/ca.pem" >> "${ZDOTDIR:-$HOME}/.zshrc"
+```
+
+Add it only once; edit the existing line when changing the CA. If Bash is your
+login shell, use `~/.bash_profile` instead. Fully quit Desktop, then reopen it
+from Applications or the Dock. Desktop loads the login-shell environment when
+starting its backend; you do not need to launch it from Terminal.
+
+</details>
+
+<details markdown="1">
+<summary>Windows — one-time user environment variable, then launch from Start</summary>
+
+Open **Edit environment variables for your account** from Start. Under **User
+variables**, create or edit:
+
+- **Name:** `NODE_EXTRA_CA_CERTS`
+- **Value:** the full path to your CA PEM file, such as
+  `C:\Users\YOUR_USER\.config\praxis-pricetag\ca.pem` (without surrounding quotes).
+
+Or run this once in **PowerShell**, replacing the path:
+
+```powershell
+$ca = (Resolve-Path -LiteralPath 'C:\Users\YOUR_USER\.config\praxis-pricetag\ca.pem' -ErrorAction Stop).Path
+[Environment]::SetEnvironmentVariable('NODE_EXTRA_CA_CERTS', $ca, 'User')
+```
+
+Fully quit Desktop and reopen it from Start. If it still has the old environment,
+sign out of Windows and sign back in. No administrator rights, open PowerShell
+window or WSL configuration are required for the native Windows app. Keep the
+user-key file in your private Windows profile.
+
+</details>
+
+<details markdown="1">
+<summary>Linux — one-time shell setup, then launch from the application menu</summary>
+
+For a native Desktop installation, add this line to your shell's startup file,
+using the absolute path to your CA:
+
+```sh
+export NODE_EXTRA_CA_CERTS="/absolute/path/to/ca.pem"
+```
+
+- **Bash:** `~/.bashrc`.
+- **Zsh:** `~/.zshrc` (or `$ZDOTDIR/.zshrc`).
+- **Fish:** run `set -Ux NODE_EXTRA_CA_CERTS /absolute/path/to/ca.pem` once.
+
+Edit an existing setting instead of adding conflicting entries. Fully quit
+Desktop, then reopen it from the application menu. Desktop reads the shell
+environment for its backend; no terminal needs to remain open. Sandboxed packages
+also need access to the config, CA and key files inside their sandbox.
+
+</details>
+
+These steps are based on **OpenCode Desktop 1.19.5** startup code and platform
+environment-variable documentation. Desktop GUI smoke tests on each platform
+remain pending. The provider examples use OpenCode 1.x syntax. OpenCode 2
+[normalizes supported V1 settings](https://opencode.ai/v2/docs/migrate-v1/),
+including provider definitions and the provider allowlist; Desktop 2 end-to-end
+inference qualification remains pending.
 
 <details markdown="1">
 <summary>Switch users, refresh models or troubleshoot certificates</summary>
 
 - **Switch user:** change both providers' `options.apiKey` to the other user's
   `{file:/absolute/path/to/user.key}` and fully restart Desktop. Keep key files
-  private (`chmod 600`); never paste the key into the configuration.
+  private (`chmod 600` on macOS/Linux); never paste the key into the configuration.
 - **Refresh models:** regenerate the saved config, merge it into the global config
   and restart Desktop. Project config can override global settings.
-- **CA changes:** update the `NODE_EXTRA_CA_CERTS` path in `~/.zshrc` and restart.
-  It must point to a readable PEM file. If you already need other private CAs,
-  use one PEM bundle containing all required certificates.
-- **Certificate error:** ensure the gateway hostname matches the certificate and
-  the CA path is correct. Desktop's shell-environment probe has a five-second
-  timeout; a slow or failing shell startup can prevent it loading the CA setting.
-  Review Desktop logs in that case. Never disable TLS verification.
-- **Publicly trusted gateway certificate:** omit the gateway's extra CA setting.
-  Keep any CA configuration required for other services.
+- **CA changes:** update the platform setting above and restart. The file must be
+  readable PEM. If other services require additional private CAs, use one PEM
+  bundle containing all required certificates.
+- **Certificate error:** check the CA path and gateway hostname. On macOS/Linux,
+  Desktop's shell probe has a five-second timeout; a slow or failing shell startup
+  can prevent loading the setting. Review Desktop logs. Never disable TLS checks.
 
 </details>
 
 [OpenCode custom CA documentation](https://opencode.ai/docs/network/#custom-certificates) ·
 [Desktop server selection](https://opencode.ai/docs/troubleshooting/#fix-server-connection-issues) ·
 [Desktop 1.19.5 environment loading](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/desktop/src/main/server.ts) ·
-[Desktop 1.19.5 shell probe](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/desktop/src/main/shell-env.ts)
+[Desktop 1.19.5 shell probe](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/desktop/src/main/shell-env.ts) ·
+[Windows user environment variables](https://learn.microsoft.com/en-us/dotnet/api/system.environment.setenvironmentvariable?view=netcore-3.0)

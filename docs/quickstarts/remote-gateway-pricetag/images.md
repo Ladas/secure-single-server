@@ -62,7 +62,8 @@ Source mode defaults to these fork branches:
 - [MaaS: feat/standalone-runtime-minimal](https://github.com/Ladas/models-as-a-service/tree/feat/standalone-runtime-minimal).
 - [PriceTag: feat/standalone-demo-reuse-upstream-ui](https://github.com/Ladas/pricetag-metering/tree/feat/standalone-demo-reuse-upstream-ui).
 
-This includes the latest **My keys** and administration-table changes.
+This includes the latest **My keys** tabs, administration-table changes and
+impersonation confirmation dialog.
 The optional PriceTag follow-up is not selected. Each branch is resolved to a
 full commit before building, recorded in the image label and checked on import.
 

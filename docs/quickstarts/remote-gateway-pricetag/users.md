@@ -66,7 +66,8 @@ and confirm **Revoke all keys**.
 **Administration → User keys → Issue onboarding key** adds a key; it does not replace existing keys. Choose **Copy key** or **Download .key**,
 then **Dismiss key**. The secret is never displayed or saved in browser storage.
 
-Users manage their own keys under **My keys**. Active keys appear first, with expiry
+Users open **My keys** from the top navigation. The **My keys** tab lists keys;
+**Create key** issues a new key with private copy/download controls. Active keys appear first, with expiry
 and remaining lifetime. **Revoke** stops a key; revoked/expired records remain in
 expandable history. Permanent deletion is not supported. The deployed MaaS cleanup
 API targets expired ephemeral keys, not ordinary revoked key records.

@@ -162,7 +162,7 @@ in **Administration → User quota**; the [user helper](users.md) uses the same 
 For budget-denial testing, use the separate [mock quota probe](../../testing/pricetag-perf.md#usd-quota-probe).
 
 [Manual configuration and saved launcher](clients.md) ·
-[OpenCode Desktop setup](clients.md#opencode-desktop-on-macos).
+[OpenCode Desktop setup](clients.md#opencode-desktop).
 
 <details markdown="1">
 <summary>What the harness helper does</summary>

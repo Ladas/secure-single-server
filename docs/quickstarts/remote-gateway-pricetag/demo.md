@@ -62,7 +62,8 @@ As superadmin, open **Administration → User keys**:
 
 1. Select the user under **Issue onboarding key**; you do not need to issue a key.
 2. Choose **View selected user’s usage** or **View selected user’s team**.
-   Confirm with **Continue**.
+   Confirm in the **Change dashboard view** dialog with **Continue**.
+   **Cancel** or Escape keeps the current view; direct URLs use a styled confirmation page.
 3. Show the **Viewing as** banner. Personal Usage must contain only the selected
    identity; the team view must contain only that identity's authorized subtree.
 4. Choose **Back to admin view** in the banner and confirm. Aggregate Usage and
@@ -120,7 +121,7 @@ See [pricing operations](pricing.md) for refresh, catalog and repricing examples
 
 ## 6. Replace keys and offboard
 
-1. Sign in as the user and open **My keys** (`/management`). Create another key
+1. Sign in as the user and open **My keys** (`/management`), then the **Create key** tab. Create another key
    with a distinct name and allowed finite lifetime. Deliberate additional keys
    are supported; repeated submissions while creation is pending are ignored.
 2. **Copy key** or **Download .key**, then **Dismiss key**. The secret is not

@@ -60,7 +60,7 @@ jobs:
           # Independent of private registries or provider credentials. Use the
           # reviewed source candidate, independently of published image digests.
           maas=6ac4c80ebc95f590e5f24593ac15bb80c7f9fa1d
-          metering=3932df1e5738aef13a5bad9498322209af36a033
+          metering=44ef1faf3d2c7fc2fc840cd41a07a2c8d64a2731
           for component in maas metering; do
             directory="$RUNNER_TEMP/$component"
             if [[ "$component" == maas ]]; then
@@ -79,6 +79,8 @@ jobs:
           node --test "$RUNNER_TEMP/metering/tests/ui/"*.test.cjs
           sudo env NODE_PATH="$GITHUB_WORKSPACE/tests/pricetag/browser/node_modules" \
             node "$RUNNER_TEMP/metering/tests/ui/table-browser.cjs"
+          sudo env NODE_PATH="$GITHUB_WORKSPACE/tests/pricetag/browser/node_modules" \
+            node "$RUNNER_TEMP/metering/tests/ui/session-dialog-browser.cjs"
           sudo python3 tests/pricetag/metering-unit.py --source "$RUNNER_TEMP/metering"
           sudo scripts/pricetag/build-maas --source "$RUNNER_TEMP/maas" --expected-commit "$maas" --tag localhost/maas:demo-ci
           sudo python3 scripts/pricetag/build-metering --source "$RUNNER_TEMP/metering" --revision "$metering" --tag localhost/metering:demo-ci

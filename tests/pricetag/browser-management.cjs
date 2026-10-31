@@ -98,10 +98,12 @@ async function done(page, action) {
     assert.deepEqual(statuses, [403, 403, 403, 403]);
     await done(user, () => user.getByRole('button', { name: 'Refresh', exact: true }).click());
     assert.ok(await user.locator('#keys button').count(), 'issued key absent from personal list');
+    await user.getByRole('tab', {name:'Create key',exact:true}).click();
     await user.locator('#key [name=name]').fill('demo-personal-key');
     await user.locator('#key [name=expiresIn]').fill('1d');
     await done(user, () => user.getByRole('button', { name: 'Create key', exact: true }).click());
     const personal = await downloadKey(user, '#newKey');
+    await user.getByRole('tab', {name:'My keys',exact:true}).click();
     assert.ok(personal.key, 'personal key missing');
     await done(user, () => user.getByRole('button', { name: 'Refresh', exact: true }).click());
     const row = user.locator('#keys tr[data-key-id="' + personal.id + '"]');

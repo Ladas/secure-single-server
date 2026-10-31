@@ -22,7 +22,7 @@ let stage='setup';
   await admin.locator('#vtab-user-keys').click();await admin.locator('#onboard [name=subject]').selectOption(subject);await admin.locator('#onboard [name=expiresIn]').fill('1d');await done(admin,()=>admin.getByRole('button',{name:'Issue key',exact:true}).click());
   const issued=await downloadKey(admin, '#onboardKey');await admin.locator('#onboardKey').getByRole('button',{name:'Dismiss key',exact:true}).click();
   const {page:user}=await login(issued.key);user.on('dialog', dialog=>dialog.accept());await user.goto(base+'/management');
-  stage='personal key creation';await user.locator('#key [name=name]').fill('own-key');await user.locator('#key [name=expiresIn]').fill('1h');await done(user,()=>user.locator('#key button').click());
+  stage='personal key creation';await user.getByRole('tab',{name:'Create key',exact:true}).click();await user.locator('#key [name=name]').fill('own-key');await user.locator('#key [name=expiresIn]').fill('1h');await done(user,()=>user.locator('#key button').click());
   const personal=await downloadKey(user, '#newKey');
   async function infer(key){return await user.evaluate(async key=>{
    const r=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},body:JSON.stringify({model:'mock/demo-cheap',messages:[{role:'user',content:'offboarding check'}],max_completion_tokens:16})});await r.text();return r.status;
