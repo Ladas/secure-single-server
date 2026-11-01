@@ -79,6 +79,9 @@ let stage='setup', throttledResponses=0;
   assert.match(await user.locator('#keyPages').textContent(),/Page 1 of /);
   stage='key search and status filters';
   await user.locator('#keySearch input').fill('pagination-50');
+  // The newest key is already visible before the debounced search runs.
+  // Wait for the filtered table, not merely the presence of that existing row.
+  await user.waitForFunction(()=>document.querySelectorAll('#keys tbody tr[data-key-id]').length===1);
   await user.locator('#keys tbody tr[data-key-id]').filter({hasText:'pagination-50'}).waitFor();
   assert.equal(await user.locator('#keys tbody tr[data-key-id]').count(),1);
   assert.match(await user.locator('#keyPages').textContent(),/Page 1 of 1/);

@@ -42,8 +42,10 @@ async function done(page, action) {
   }
   try {
     const { page: admin, context: adminContext } = await login(readKey('admin'));
+    await admin.getByRole('link', {name:'My team',exact:true}).waitFor();
     await admin.goto(base + '/admin');
     await admin.locator('#admin').waitFor({ state: 'visible' });
+    await admin.getByRole('link', {name:'My team',exact:true}).waitFor();
     await admin.locator('#user [name=subject]').fill('demo-ui-onboard');
     await admin.locator('#user [name=name]').fill('Demo UI Onboarding');
     await done(admin, () => admin.getByRole('button',{name:'Save user',exact:true}).click());
@@ -87,6 +89,7 @@ async function done(page, action) {
     await admin.locator('#onboardKey').getByRole('button', { name: 'Dismiss key', exact: true }).click();
     assert.equal(await admin.locator('#onboardKey').isVisible(), false);
     const { page: user, context: userContext } = await login(issued.key);user.on('dialog', dialog=>dialog.accept());
+    assert.equal(await user.getByRole('link', {name:'My team',exact:true}).count(),0);
     assert.equal(await user.locator('#admin').isVisible(), false);
     const statuses = await user.evaluate(async () => {
       const result = [];
