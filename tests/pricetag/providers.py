@@ -671,8 +671,9 @@ class SetupTest(unittest.TestCase):
                     ('openai/gpt-6-luna', 'openai', '/v1/responses'),
                     ('pricetag/gpt-6-luna', 'pricetag-openai', '/v1/responses'),
                     ('pricetag/claude-sonnet-5-5', 'pricetag-anthropic', '/v1/messages')):
-                self.assertIn({'path': path, 'headers': {'X-Gateway-Model': alias},
-                               'cluster': cluster}, nodes)
+                self.assertIn({'kind': 'inference_model', 'name': alias,
+                               'site': 'single-server', 'cluster': cluster}, nodes)
+                self.assertIn({'unless': {'path': path}}, nodes)
                 self.assertTrue(any(
                     node.get('request_replace') == [{'pointer': '/model', 'value': alias.split('/', 1)[1]}]
                     and node.get('conditions') == [{'when': {'methods': ['POST'],

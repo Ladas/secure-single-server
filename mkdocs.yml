@@ -109,6 +109,7 @@ nav:
       - Model escalation: docs/examples/model-escalation/README.md
   - Development:
       - MaaS and PriceTag image publication: docs/development/pricetag-images.md
+      - PriceTag gateway routing: docs/development/pricetag-routing.md
   - Testing:
       - Testing guide: docs/testing/README.md
       - Compatibility matrix: docs/testing/compatibility.md

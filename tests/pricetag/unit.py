@@ -38,6 +38,52 @@ maas_loader.exec_module(maas_key)
 
 
 class PreparationTest(unittest.TestCase):
+    def test_alias_candidates_select_native_clusters_without_changing_models(self):
+        original, models = prepare.mock_inputs(managed=True)
+        result = prepare.render(original, models)
+        for chain in result['filter_chains']:
+            api = chain['name']
+            if api not in ('openai', 'anthropic'):
+                continue
+            filters = chain['filters']
+            self.assertNotIn('router', [f['filter'] for f in filters])
+            routes = [f for f in filters if f['filter'] == 'intelligent_route']
+            self.assertEqual(len(routes), 1)
+            self.assertEqual(routes[0], {
+                'filter': 'intelligent_route', 'local_site': 'single-server',
+                'model_header': 'X-Gateway-Model', 'skip_paths': [],
+                'candidates': [{'kind': 'inference_model', 'name': m['id'],
+                                'site': 'single-server', 'cluster': 'mock-' + api}
+                               for m in models]})
+            replacements = [f['request_replace'][0] for f in filters
+                            if f['filter'] == 'json_body' and 'request_replace' in f]
+            self.assertEqual(replacements, [{'pointer': '/model', 'value': m['model']}
+                                            for m in models])
+            names = [f['filter'] for f in filters]
+            for guard in ('api_key_auth', 'identity_header_guard', 'model_access'):
+                self.assertLess(names.index(guard), names.index('intelligent_route'))
+            self.assertLess(names.index('intelligent_route'), names.index('credential_injection'))
+            self.assertLess(names.index('external_metering'), names.index('load_balancer'))
+
+    def test_same_upstream_model_on_two_providers_keeps_distinct_candidates(self):
+        from demo_config import native_inputs
+        document = {'providers': [
+            {'name': name, 'urls': {'openai': 'https://' + name + '.example/v1'},
+             'messages_auth': 'x-api-key'} for name in ('first', 'second')]}
+        models = [{'id': name + '/shared', 'provider': name, 'model': 'shared',
+                   'apis': ['openai'], 'context': 32768, 'output': 4096}
+                  for name in ('first', 'second')]
+        result = prepare.render(native_inputs(document), models)
+        chain = next(c for c in result['filter_chains'] if c['name'] == 'openai')
+        route = next(f for f in chain['filters'] if f['filter'] == 'intelligent_route')
+        self.assertEqual([(c['name'], c['cluster']) for c in route['candidates']],
+                         [('first/shared', 'first-openai'), ('second/shared', 'second-openai')])
+        credentials = next(f for f in chain['filters'] if f['filter'] == 'credential_injection')
+        self.assertEqual([(c['name'], c['env_var']) for c in credentials['clusters']],
+                         [('first-openai', 'CUSTOM_FIRST_API_KEY'), ('second-openai', 'CUSTOM_SECOND_API_KEY')])
+        access = next(f for f in chain['filters'] if f['filter'] == 'model_access')
+        self.assertEqual(access['models'], ['shared'])
+
     def test_demo_installer_plan_and_input_validation(self):
         command = [sys.executable, str(ROOT / 'scripts/pricetag/install-demo'), '--plan',
                    '--hostname', 'gateway.example']
@@ -217,7 +263,7 @@ class PreparationTest(unittest.TestCase):
                         self.assertTrue(any(f['filter'] == 'static_response' and
                                             f.get('status') == 404 and not f.get('conditions')
                                             for f in filters))
-                        self.assertFalse(any(f['filter'] in ('router', 'load_balancer', 'external_metering')
+                        self.assertFalse(any(f['filter'] in ('router', 'intelligent_route', 'load_balancer', 'external_metering')
                                              for f in filters))
 
     def test_internal_model_headers_survive_router_selection_then_are_removed_before_upstream(self):
@@ -225,7 +271,7 @@ class PreparationTest(unittest.TestCase):
         rendered = prepare.render(original, models)
         for chain in (c for c in rendered['filter_chains'] if c['name'] in ('openai', 'anthropic')):
             names = [item['filter'] for item in chain['filters']]
-            self.assertLess(names.index('router'), names.index('headers'))
+            self.assertLess(names.index('intelligent_route'), names.index('headers'))
             self.assertLess(names.index('headers'), names.index('load_balancer'))
 
     def test_vllm_only_excludes_cloud_routes_and_credentials_without_mutating_source(self):

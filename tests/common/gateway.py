@@ -205,7 +205,10 @@ class Gateway:
                      "--network", "container:" + self.name + "-mock", "--read-only", "--cap-drop", "all",
                      "--security-opt", "no-new-privileges", "--user", "1001:1001",
                      "-e", "OPENAI_API_KEY=synthetic-openai", "-e", "ANTHROPIC_API_KEY=synthetic-anthropic"]
-        if Path(ENGINE).name == "podman":
+        # keep-id is for rootless hosts. In a root-owned CI store it creates
+        # a child user namespace that cannot mount sysfs for the fixture's
+        # shared network namespace. --user still runs the process as non-root.
+        if Path(ENGINE).name == "podman" and os.geteuid() != 0:
             self.arguments += ["--userns", "keep-id:uid=1001,gid=1001"]
         staging_root = self.work / "staged" / uuid.uuid4().hex
         for destination, source in files.items():
@@ -233,7 +236,7 @@ class Gateway:
                        "--security-opt", "no-new-privileges", "-v", self.name + ":/data",
                        *bind(acl, "/run/secrets/users.acl"),
                        *bind(vkconf, "/etc/valkey.conf")]
-            if Path(ENGINE).name == "podman":
+            if Path(ENGINE).name == "podman" and os.geteuid() != 0:
                 vk_args += ["--userns", "keep-id:uid=999,gid=999"]
             run(*vk_args, VALKEY_IMAGE, "valkey-server", "/etc/valkey.conf")
             self.arguments += ["-e", "TOKEN_RATE_LIMIT_VALKEY_URL=redis://praxis:local-valkey-test@praxis-valkey:6379/0"]

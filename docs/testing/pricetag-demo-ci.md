@@ -18,6 +18,7 @@ with the full migration chain, plus all PriceTag UI JavaScript unit tests.
 
 | Area | Assertions |
 | --- | --- |
+| Native routing | Chat, Responses, Messages and count-tokens; streaming/tool calls; two providers sharing an upstream model ID with distinct credentials; forged/unknown aliases; unchanged catalog limits and authenticated accounting identity. |
 | Public boundary | Private management endpoints remain unavailable; forwarded identity headers do not grant privileges. |
 | Users and teams | UI onboarding and reassignment; rendered personal Usage for members, managers and impersonation; direct API checks for own-user scope, mixed/cross-user filters, forged headers, and cross-team chart denial; 20-user fixture. |
 | Keys | Duplicate submission prevention, hidden copy/download, multiple working keys, cross-key usage, expiry countdowns, active/history pagination, owner-only revocation, admin revoke-all and demotion regression. |

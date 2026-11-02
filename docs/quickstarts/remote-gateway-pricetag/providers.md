@@ -16,7 +16,8 @@ the helper cannot add arbitrary profile names. Older `pricetag/` deployments use
 the legacy `pricetag` command.
 
 Provider and model routing is configured through the host CLI below. User,
-budget, key and pricing management is available in the browser.
+budget, key and pricing management is available in the browser. See
+[gateway routing](../../development/pricetag-routing.md) for the generated filter chain.
 
 ## Update the external provider’s models
 
