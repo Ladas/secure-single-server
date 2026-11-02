@@ -127,7 +127,7 @@ See [pricing operations](pricing.md) for refresh, catalog and repricing examples
 2. **Copy key** or **Download .key**, then **Dismiss key**. The secret is not
    displayed and cannot be retrieved later. Update OpenCode's key-file path,
    restart it and verify inference. Both keys work until one expires or is revoked.
-3. In **Your keys**, search by name or key ID and **Revoke** the old key.
+3. In **My keys**, search by name or key ID and **Revoke** the old key.
    Use **Status** to show Active, Revoked, Expired or All keys. The table shows
    expiry and remaining lifetime, with five rows per page by default.
    Revocation preserves the record for audit; it does not permanently delete it.

@@ -68,8 +68,8 @@ then **Dismiss key**. The secret is never displayed or saved in browser storage.
 
 Users open **My keys** from the top navigation. The **My keys** tab lists keys;
 **Create key** issues a new key with private copy/download controls. Active keys appear first, with expiry
-and remaining lifetime. **Revoke** stops a key; revoked/expired records remain in
-expandable history. Permanent deletion is not supported. The deployed MaaS cleanup
+and remaining lifetime. **Revoke** stops a key; use the **Status** filter to view
+Active, Revoked, Expired or All records. Permanent deletion is not supported. The deployed MaaS cleanup
 API targets expired ephemeral keys, not ordinary revoked key records.
 
 Administrators can **Check active keys** and **Revoke all keys** for the selected
