@@ -22,6 +22,14 @@ import metering_admin
 from contracts import check
 
 
+def invalid_bodies(body, upstream_id, public_aliases):
+    """Build negative requests without rejecting a configured public alias."""
+    invalid = [{**body, 'model': 'unknown/model'}, {}, b'{"model":']
+    if upstream_id not in public_aliases:
+        invalid.append({**body, 'model': upstream_id})
+    return invalid
+
+
 def main():
     if os.geteuid() != 0:
         raise ValueError('run as root on the mock test host')
@@ -68,6 +76,7 @@ def main():
             key = keyfile.read_text().strip()
             for model in models:
                 for api in model['apis']:
+                    public_aliases = {m['id'] for m in models if api in m['apis']}
                     headers = ({'Authorization': 'Bearer ' + key} if api == 'openai' else
                                {'x-api-key': key, 'anthropic-version': '2023-06-01'})
                     paths = ['/v1/responses', '/v1/chat/completions'] if api == 'openai' else ['/v1/messages']
@@ -89,8 +98,7 @@ def main():
                         code, _ = request(path, body, spoof)
                         assert code == 200, ('body must override forged routing headers', code)
                         successful += 1
-                        for invalid in ({**body, 'model': 'unknown/model'}, {**body, 'model': model['model']},
-                                        {}, b'{"model":'):
+                        for invalid in invalid_bodies(body, model['model'], public_aliases):
                             code, _ = request(path, invalid, {**headers, 'X-Gateway-Model': model['id']})
                             assert code in (400, 403, 404), ('invalid alias/body', path, code)
                         assert request(path, body)[0] == 401

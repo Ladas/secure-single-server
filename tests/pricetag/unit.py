@@ -38,6 +38,28 @@ maas_loader.exec_module(maas_key)
 
 
 class PreparationTest(unittest.TestCase):
+    def test_routing_negative_cases_do_not_reject_legacy_or_shared_aliases(self):
+        spec = importlib.util.spec_from_file_location('routing_contract', ROOT / 'tests/pricetag/rhel-routing.py')
+        routing = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(routing)
+        for managed in (False, True):
+            _, models = prepare.mock_inputs(managed=managed)
+            for model in models:
+                for api in model['apis']:
+                    aliases = {m['id'] for m in models if api in m['apis']}
+                    body = {'model': model['id'], 'stream': True}
+                    invalid = routing.invalid_bodies(body, model['model'], aliases)
+                    self.assertNotIn(body, invalid)
+                    self.assertIn({**body, 'model': 'unknown/model'}, invalid)
+                    self.assertIn({}, invalid)
+                    self.assertIn(b'{"model":', invalid)
+                    self.assertEqual({**body, 'model': model['model']} in invalid,
+                                     model['model'] not in aliases)
+        # An upstream ID may also be another model's public alias.
+        body = {'model': 'provider/model'}
+        self.assertNotIn({'model': 'model'}, routing.invalid_bodies(body, 'model', {'provider/model', 'model'}))
+        self.assertIn({'model': 'model'}, routing.invalid_bodies(body, 'model', {'provider/model'}))
+
     def test_alias_candidates_select_native_clusters_without_changing_models(self):
         original, models = prepare.mock_inputs(managed=True)
         result = prepare.render(original, models)
