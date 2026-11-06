@@ -46,6 +46,9 @@ mock quota probe measured this overage; treat the USD limit as an enforced
 admission threshold with a bounded stale-decision window, not an exact spend
 ceiling. See the [quota probe results](pricetag-perf.md#usd-quota-probe).
 
+For component responsibilities, request flows and Kubernetes/OpenShift differences,
+see the [quickstart architecture](../quickstarts/remote-gateway-pricetag/architecture.md).
+
 ## Network and service boundary
 
 Only TCP 8443 is published publicly. The MaaS API binds to a host loopback
@@ -53,7 +56,8 @@ port for SSH administration and accepts trusted identity headers from host
 loopback plus fixed `/32` addresses for MaaS's own published-port path, Praxis,
 and PriceTag's MaaS key validator. Startup selects these addresses on the
 private network; other containers on that network are outside MaaS's trusted
-CIDRs. PostgreSQL and PriceTag machine APIs remain unpublished. PriceTag's M2M
+CIDRs. PostgreSQL has no host port. PriceTag also publishes port 18087 on host loopback
+for SSH management; its admission/reporting endpoints have no public gateway route. PriceTag's M2M
 bearer check is enabled; Praxis reads its matching token from a Podman secret
 mounted only into its container. The performance mock uses a separate network.
 

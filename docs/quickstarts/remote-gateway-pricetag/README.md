@@ -3,6 +3,9 @@
 Run Praxis, MaaS, PriceTag and PostgreSQL on one RHEL host. Connect local
 OpenCode with a user key and a monthly USD budget.
 
+[Architecture and OpenShift comparison](architecture.md) explains the services,
+authentication, routing and current boundaries.
+
 **Needs:** a fresh RHEL 9.6 x86_64 host with sudo, outbound HTTPS, and inbound
 SSH/8443 from your IP; Git, Python 3 and OpenCode on your workstation.
 The tested VM has 8 vCPUs, 32 GiB RAM and 150 GiB disk. No GPU is needed.
